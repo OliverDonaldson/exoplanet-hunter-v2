@@ -104,6 +104,27 @@ def test_tf_aux_transform_matches_sklearn(shard_set):
     np.testing.assert_allclose(tf_out, sk_out, rtol=1e-4, atol=1e-5)
 
 
+def test_aux_pipeline_survives_all_nan_column():
+    """Regression: an all-NaN aux column (snr on a small fresh build) must not
+    change the aux dimension — the imputer used to drop it, leaving the tf
+    replay with 7 constants against 8 features."""
+    rng = np.random.default_rng(4)
+    aux = rng.normal(size=(40, 8)).astype(np.float32)
+    aux[:, 7] = np.nan  # dead column, as produced by the 2026-07-09 fresh build
+    aux[rng.random(size=aux.shape) < 0.1] = np.nan
+
+    pipeline = fit_aux_pipeline(aux[:30])
+    constants = aux_constants_from_pipeline(pipeline)
+    assert constants.aux_dim == 8  # dimension preserved
+
+    sk_out = pipeline.transform(aux).astype(np.float32)
+    assert sk_out.shape == (40, 8)
+    np.testing.assert_allclose(sk_out[:, 7], 0.0)  # dead column -> constant 0
+
+    tf_out = np.stack([tf_aux_transform(tf.constant(row), constants).numpy() for row in aux])
+    np.testing.assert_allclose(tf_out, sk_out, rtol=1e-4, atol=1e-5)
+
+
 def test_augment_preserves_shape_and_is_stochastic():
     tf.random.set_seed(7)
     g = tf.random.normal((GLOBAL_BINS, 1))

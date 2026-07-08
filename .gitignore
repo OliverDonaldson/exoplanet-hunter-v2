@@ -34,3 +34,6 @@ multirun/
 .DS_Store
 .idea/
 .vscode/
+
+# MLflow local tracking store
+mlflow.db

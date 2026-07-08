@@ -20,6 +20,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
+from exoplanet_hunter.utils.logging import get_logger
+
+log = get_logger(__name__)
+
 #: Index of centroid_snr in the 9-dim aux vector (absent in legacy 8-dim).
 CENTROID_COL = 8
 
@@ -40,10 +44,25 @@ def _log1p_centroid(X: np.ndarray) -> np.ndarray:
 
 
 def fit_aux_pipeline(train_aux: np.ndarray) -> Pipeline:
-    """Fit impute → log1p(centroid) → standardise on training-fold aux rows."""
+    """Fit impute → log1p(centroid) → standardise on training-fold aux rows.
+
+    `keep_empty_features=True` is load-bearing: without it, a column that is
+    all-NaN in some refresh (e.g. snr on a small fresh build) gets silently
+    *dropped* by the imputer, the scaler fits one dimension short, and both
+    the tf replay and the model input shape break. With it, dead columns
+    impute to 0, standardise to 0 (unit scale on zero variance), and the aux
+    dimension is stable across catalogue refreshes.
+    """
+    dead = np.isnan(train_aux).all(axis=0)
+    if dead.any():
+        log.warning(
+            "[aux] columns %s are all-NaN in this training fold — imputing to a "
+            "constant 0 (dead input). Check the catalogue build if unexpected.",
+            np.where(dead)[0].tolist(),
+        )
     pipeline = Pipeline(
         steps=[
-            ("impute", SimpleImputer(strategy="median")),
+            ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
             ("log_centroid", FunctionTransformer(_log1p_centroid, validate=False)),
             ("scale", StandardScaler()),
         ]
