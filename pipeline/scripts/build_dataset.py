@@ -26,6 +26,7 @@ from tqdm.auto import tqdm
 
 from exoplanet_hunter.data.catalog import CatalogRequest, build_label_catalog
 from exoplanet_hunter.data.download import LightCurveDownloader
+from exoplanet_hunter.data.exofop import enrich_catalog_snr
 from exoplanet_hunter.data.stellar import fetch_stellar_params
 from exoplanet_hunter.preprocess import build_views, clean_lightcurve, flatten_lightcurve
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
@@ -71,6 +72,12 @@ def main(cfg: DictConfig) -> None:
     # Ensure every row has a mission column (backward compat with old catalogs).
     if "mission" not in catalog.columns:
         catalog["mission"] = "TESS"
+
+    # TESS rows get their transit SNR from the ExoFOP TOI export — the TAP
+    # catalogue only carries SNR for Kepler (koi_model_snr), and an all-NaN
+    # snr aux column fails the views validation gate.
+    catalog = enrich_catalog_snr(catalog, paths.root / "data" / "catalogue" / "candidates.parquet")
+    catalog.to_parquet(paths.data_labels / "labels.parquet", index=False)
 
     # --- Stage 2 — download light curves -------------------------------
     kepler_dir = paths.data_raw_kepler if paths.data_raw_kepler != paths.data_raw else None

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from exoplanet_hunter.features import followup
@@ -188,6 +189,47 @@ def load_ctoi_table(path: Path) -> pd.DataFrame:
         int(promoted.sum()),
     )
     return out[~promoted]
+
+
+def toi_snr_by_tic(candidates_path: Path) -> pd.Series:
+    """tic_id -> ExoFOP TOI transit SNR (strongest signal per TIC).
+
+    Multi-planet systems have several TOIs per TIC; the max SNR corresponds
+    to the dominant transit signal (conventionally the .01 entry), which is
+    the signal the label catalogue's ephemeris row describes.
+    """
+    cand = pd.read_parquet(candidates_path)
+    toi = cand[(cand["source"] == "TOI") & cand["planet_snr"].notna()]
+    return toi.groupby("tic_id")["planet_snr"].max()
+
+
+def enrich_catalog_snr(catalog: pd.DataFrame, candidates_path: Path) -> pd.DataFrame:
+    """Fill missing `snr` on TESS rows from the ExoFOP TOI export.
+
+    The TAP label catalogue only carries SNR for Kepler rows
+    (`koi_model_snr`); the NEA TOI table exposes none for TESS, so a
+    TESS-only build otherwise ships an all-NaN snr column — which the
+    views validation gate rejects. Best-effort: a missing candidate
+    catalogue logs a warning and leaves the input unchanged.
+    """
+    if not candidates_path.exists():
+        log.warning(
+            "[exofop] %s missing — TESS snr stays NaN (run ingest_exofop.py first)",
+            candidates_path,
+        )
+        return catalog
+    snr = toi_snr_by_tic(candidates_path)
+    out = catalog.copy()
+    if "snr" not in out.columns:
+        out["snr"] = np.nan
+    fill = (out["mission"] == "TESS") & out["snr"].isna()
+    out.loc[fill, "snr"] = out.loc[fill, "tic_id"].map(snr)
+    log.info(
+        "[exofop] snr enriched from TOI export: %d/%d TESS rows filled",
+        int(out.loc[fill, "snr"].notna().sum()),
+        int(fill.sum()),
+    )
+    return out
 
 
 def build_candidate_catalogue(toi_path: Path, ctoi_path: Path) -> pd.DataFrame:
