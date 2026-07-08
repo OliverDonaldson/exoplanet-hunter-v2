@@ -1,6 +1,6 @@
 # Exoplanet Hunter V2 — developer entry points.
 
-.PHONY: env install lint type test api frontend up
+.PHONY: env install lint type test validate mlflow api frontend up
 
 env:            ## Create the conda env (pipeline + api, editable, dev extras)
 	conda env create -f environment.yml
@@ -17,6 +17,12 @@ type:
 test:           ## Fast tests only (network/slow markers excluded)
 	pytest pipeline/tests -m "not network and not slow"
 	pytest api/tests
+
+validate:       ## Run the data validation gates on whatever artefacts exist
+	python pipeline/scripts/validate_data.py
+
+mlflow:         ## MLflow UI on :5001 (5000 collides with macOS AirPlay)
+	mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001
 
 api:            ## Run the FastAPI dev server on :8000
 	cd api && uvicorn app.main:app --reload --port 8000

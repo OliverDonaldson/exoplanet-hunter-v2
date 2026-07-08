@@ -30,6 +30,8 @@ dependencies = [
     # --- Deep learning ---
     "tensorflow>=2.16,<2.18",
     'tensorflow-metal>=1.1; platform_system == "Darwin" and platform_machine == "arm64"',
+    # --- Validation gates ---
+    "pandera>=0.24",
     # --- Experiment + config ---
     "mlflow>=2.14",
     "hydra-core>=1.3",
@@ -39,9 +41,8 @@ dependencies = [
     "rich>=13.7",
 ]
 
-# Branch-gated dependencies: each V2 feature branch adds its own tools here
-# when it lands, so the dependency list never runs ahead of working code.
-#   feat/validation-gates -> pandera
+# Branch-gated dependencies: each V2 feature branch adds its own tools when
+# it lands, so the dependency list never runs ahead of working code.
 #   feat/dvc-versioning   -> dvc[s3]
 #   feat/dashboard        -> streamlit, duckdb
 #   feat/orchestrator     -> prefect (or dagster)
