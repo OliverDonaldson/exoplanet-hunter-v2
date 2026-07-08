@@ -9,3 +9,16 @@ produced themselves.
 
 Once `feat/dvc-versioning` lands, the contents are tracked by DVC with R2 as
 the remote: git holds the pointers, R2 holds the bytes.
+
+## Current layout
+
+```
+raw/exofop/tois.csv    ExoFOP TOI bulk export   (exofop.ipac.caltech.edu/tess/download_toi.php?output=csv)
+raw/exofop/ctois.csv   ExoFOP CTOI bulk export  (exofop.ipac.caltech.edu/tess/download_ctoi.php?output=csv)
+catalogue/candidates.parquet   normalised TOI+CTOI candidate catalogue (API reads this)
+catalogue/candidates.csv       same table as a portable CSV export
+```
+
+Rebuild the catalogue after refreshing the raw exports:
+
+    python pipeline/scripts/ingest_exofop.py

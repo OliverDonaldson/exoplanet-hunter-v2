@@ -83,3 +83,40 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     model_loaded: bool
     model_version: str | None
+
+
+class CandidateRow(BaseModel):
+    """One row of the candidate catalogue (normalised ExoFOP TOI/CTOI export).
+
+    Mirrors `exoplanet_hunter.data.exofop.CATALOGUE_COLUMNS`; most physical
+    parameters are nullable because ExoFOP rows are incomplete for many
+    community candidates.
+    """
+
+    source: Literal["TOI", "CTOI"]
+    name: str
+    tic_id: int
+    disposition: str | None = None
+    tess_mag: float | None = None
+    ra_deg: float | None = None
+    dec_deg: float | None = None
+    epoch_bjd: float | None = None
+    period_days: float | None = None
+    duration_hours: float | None = None
+    depth_ppm: float | None = None
+    planet_radius_re: float | None = None
+    planet_snr: float | None = None
+    stellar_teff_k: float | None = None
+    stellar_logg: float | None = None
+    stellar_radius_rsun: float | None = None
+    stellar_distance_pc: float | None = None
+    sectors: str | None = None
+    promoted_to_toi: str | None = None
+    comments: str | None = None
+    date_modified: str | None = None
+
+
+class CandidatesPage(BaseModel):
+    total: int
+    offset: int
+    rows: list[CandidateRow]

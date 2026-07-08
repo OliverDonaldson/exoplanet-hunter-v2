@@ -1,4 +1,4 @@
-import type { HealthResponse, ScoreResponse } from "./types";
+import type { CandidateQuery, CandidatesPage, HealthResponse, ScoreResponse } from "./types";
 
 const BASE = "/api";
 
@@ -13,6 +13,31 @@ async function get<T>(path: string): Promise<T> {
 
 export function fetchHealth(): Promise<HealthResponse> {
   return get<HealthResponse>("/healthz");
+}
+
+function candidateParams(query: CandidateQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  return params;
+}
+
+export function fetchCandidates(query: CandidateQuery = {}): Promise<CandidatesPage> {
+  const params = candidateParams(query);
+  const qs = params.size ? `?${params}` : "";
+  return get<CandidatesPage>(`/candidates${qs}`);
+}
+
+/** URL for the CSV export matching the current filters (used as a download link). */
+export function candidatesCsvUrl(query: CandidateQuery = {}): string {
+  const params = candidateParams({
+    search: query.search,
+    disposition: query.disposition,
+    source: query.source,
+  });
+  const qs = params.size ? `?${params}` : "";
+  return `${BASE}/candidates.csv${qs}`;
 }
 
 export function fetchScore(

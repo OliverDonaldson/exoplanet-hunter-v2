@@ -54,3 +54,43 @@ export interface HealthResponse {
   model_loaded: boolean;
   model_version: string | null;
 }
+
+export interface CandidateRow {
+  source: "TOI" | "CTOI";
+  name: string;
+  tic_id: number;
+  disposition: string | null;
+  tess_mag: number | null;
+  ra_deg: number | null;
+  dec_deg: number | null;
+  epoch_bjd: number | null;
+  period_days: number | null;
+  duration_hours: number | null;
+  depth_ppm: number | null;
+  planet_radius_re: number | null;
+  planet_snr: number | null;
+  stellar_teff_k: number | null;
+  stellar_logg: number | null;
+  stellar_radius_rsun: number | null;
+  stellar_distance_pc: number | null;
+  sectors: string | null;
+  promoted_to_toi: string | null;
+  comments: string | null;
+  date_modified: string | null;
+}
+
+export interface CandidatesPage {
+  total: number;
+  offset: number;
+  rows: CandidateRow[];
+}
+
+export interface CandidateQuery {
+  search?: string;
+  disposition?: string;
+  source?: string;
+  sort_by?: string;
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}

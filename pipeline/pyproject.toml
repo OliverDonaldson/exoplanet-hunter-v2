@@ -7,7 +7,7 @@ name = "exoplanet-hunter"
 version = "2.0.0.dev0"
 description = "Self-refreshing, self-validating deep-learning pipeline for detecting exoplanet transits in NASA TESS/Kepler light curves."
 authors = [{ name = "Oliver Donaldson" }]
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 keywords = ["astronomy", "exoplanets", "tess", "kepler", "deep-learning", "mlops"]

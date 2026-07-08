@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchHealth } from "./api/client";
 import type { HealthResponse } from "./api/types";
+import CandidatesTable from "./components/CandidatesTable";
 
 /**
  * Vetting-console shell — the two-pane layout lands in `feat/dashboard`:
@@ -18,7 +19,7 @@ export default function App() {
   }, []);
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 720, margin: "4rem auto", padding: "0 1rem" }}>
+    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 1080, margin: "3rem auto", padding: "0 1rem" }}>
       <h1>Exoplanet Vetting Console</h1>
       <p>
         Interactive triage for transit candidates: calibrated probabilities with
@@ -34,6 +35,7 @@ export default function App() {
             : "no model bundle deployed yet (awaiting first V2 training run)"}
         </p>
       )}
+      <CandidatesTable />
     </main>
   );
 }

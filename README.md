@@ -62,6 +62,11 @@ end-to-end on data it produced itself.
 ```bash
 conda env create -f environment.yml && conda activate exoplanet-hunter-v2
 make test        # salvage smoke tests + API contract tests
+python pipeline/scripts/ingest_exofop.py   # build the candidate catalogue
 make api         # FastAPI on :8000 (docs at /docs)
 make frontend    # console on :5173 (needs: cd frontend && npm install)
 ```
+
+The console's catalogue page (and `GET /candidates` + `/candidates.csv`)
+serves the normalised ExoFOP TOI+CTOI table — see `data/README.md` for the
+source exports and rebuild command.
