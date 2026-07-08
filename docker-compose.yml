@@ -1,0 +1,21 @@
+# Local development stack: API + console. Training is not a service here —
+# it runs as an on-demand GPU burst (docker/train.Dockerfile) triggered by
+# the orchestrator, not an always-on container.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/srv/models:ro
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - api

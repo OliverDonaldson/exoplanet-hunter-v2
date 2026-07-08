@@ -1,0 +1,11 @@
+name: exoplanet-hunter-v2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip>=24
+  - pip:
+      # The pipeline package carries the full runtime dependency set in its
+      # pyproject.toml; the API layer is a thin FastAPI wrapper on top of it.
+      - -e ./pipeline[dev]
+      - -e ./api[dev]

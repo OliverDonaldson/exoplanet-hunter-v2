@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage*
+htmlcov/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Data + model artefacts — versioned via DVC / R2, never committed.
+data/*
+!data/README.md
+models/
+mlruns/
+outputs/
+multirun/
+
+# DVC internals (pointers *are* committed; cache is not)
+.dvc/cache/
+.dvc/tmp/
+
+# Environments & editors
+.env
+.envrc
+.DS_Store
+.idea/
+.vscode/
