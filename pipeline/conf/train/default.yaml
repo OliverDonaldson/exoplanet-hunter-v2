@@ -5,6 +5,10 @@ epochs: 200
 shuffle_buffer: 1024
 prefetch: AUTOTUNE
 
+# mixed_float16 on the GPU burst (2-3x on Tensor Cores). Off by default:
+# neutral-at-best on CPU/Metal, and the output layer is already fp32-pinned.
+mixed_precision: false
+
 optimizer:
   _target_: tensorflow.keras.optimizers.Adam
   learning_rate: 5.0e-4

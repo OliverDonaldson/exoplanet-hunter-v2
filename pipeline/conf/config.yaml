@@ -56,7 +56,7 @@ paths:
   results:        ${paths.root}/results
 
 mlflow:
-  tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,file:${paths.root}/mlruns}
+  tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,sqlite:///${paths.root}/mlflow.db}
   experiment:   ${project_name}
 
 logging:
