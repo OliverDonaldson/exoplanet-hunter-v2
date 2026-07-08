@@ -106,6 +106,14 @@ class CandidateRow(BaseModel):
     depth_ppm: float | None = None
     planet_radius_re: float | None = None
     planet_snr: float | None = None
+    # Follow-up prioritisation (Kempton 2018): NExScI values for TOIs,
+    # computed via features.followup for CTOIs (TSM/ESM need J/K mags and
+    # stay null there).
+    teq_k: float | None = None
+    tsm: float | None = None
+    esm: float | None = None
+    predicted_mass_me: float | None = None
+    predicted_k_ms: float | None = None
     stellar_teff_k: float | None = None
     stellar_logg: float | None = None
     stellar_radius_rsun: float | None = None

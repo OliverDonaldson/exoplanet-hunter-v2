@@ -69,6 +69,11 @@ export interface CandidateRow {
   depth_ppm: number | null;
   planet_radius_re: number | null;
   planet_snr: number | null;
+  teq_k: number | null;
+  tsm: number | null;
+  esm: number | null;
+  predicted_mass_me: number | null;
+  predicted_k_ms: number | null;
   stellar_teff_k: number | null;
   stellar_logg: number | null;
   stellar_radius_rsun: number | null;

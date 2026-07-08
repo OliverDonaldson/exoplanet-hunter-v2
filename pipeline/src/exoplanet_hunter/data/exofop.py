@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from exoplanet_hunter.features import followup
 from exoplanet_hunter.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -38,6 +39,11 @@ CATALOGUE_COLUMNS: list[str] = [
     "depth_ppm",
     "planet_radius_re",
     "planet_snr",
+    "teq_k",
+    "tsm",
+    "esm",
+    "predicted_mass_me",
+    "predicted_k_ms",
     "stellar_teff_k",
     "stellar_logg",
     "stellar_radius_rsun",
@@ -58,6 +64,11 @@ _NUMERIC_COLUMNS = [
     "depth_ppm",
     "planet_radius_re",
     "planet_snr",
+    "teq_k",
+    "tsm",
+    "esm",
+    "predicted_mass_me",
+    "predicted_k_ms",
     "stellar_teff_k",
     "stellar_logg",
     "stellar_radius_rsun",
@@ -76,6 +87,11 @@ _TOI_RENAMES = {
     "Depth (ppm)": "depth_ppm",
     "Planet Radius (R_Earth)": "planet_radius_re",
     "Planet SNR": "planet_snr",
+    "Planet Equil Temp (K)": "teq_k",
+    "TSM": "tsm",
+    "ESM": "esm",
+    "Predicted Mass (M_Earth)": "predicted_mass_me",
+    "Predicted Radial Velocity Semi-amplitude (m/s)": "predicted_k_ms",
     "Stellar Eff Temp (K)": "stellar_teff_k",
     "Stellar log(g) (cm/s^2)": "stellar_logg",
     "Stellar Radius (R_Sun)": "stellar_radius_rsun",
@@ -145,6 +161,25 @@ def load_ctoi_table(path: Path) -> pd.DataFrame:
     # where a submitter actually provided one.
     tic_name = "TIC " + raw["Candidate TIC ID"].map(lambda v: f"{float(v):.2f}")
     out["name"] = raw["Candidate Name"].astype("string").fillna(tic_name)
+
+    # NExScI computes Teq/TSM/ESM/predicted mass/K for TOIs only. For CTOIs
+    # we apply the same recipes (features.followup, pinned to the NExScI
+    # worked example) where the export carries the inputs. TSM/ESM stay null
+    # here: they need 2MASS J/K magnitudes, which the CTOI export lacks —
+    # the serving path can fill them per-target from a TIC query later.
+    m_star = followup.stellar_mass_from_logg(
+        out["stellar_logg"].to_numpy(), out["stellar_radius_rsun"].to_numpy()
+    )
+    out["teq_k"] = followup.equilibrium_temperature_k(
+        m_star,
+        out["period_days"].to_numpy(),
+        out["stellar_radius_rsun"].to_numpy(),
+        out["stellar_teff_k"].to_numpy(),
+    )
+    out["predicted_mass_me"] = followup.predict_planet_mass_me(out["planet_radius_re"].to_numpy())
+    out["predicted_k_ms"] = followup.rv_semi_amplitude_ms(
+        out["period_days"].to_numpy(), m_star, out["predicted_mass_me"].to_numpy()
+    )
     promoted = out["promoted_to_toi"].astype("string").str.strip().fillna("") != ""
     log.info(
         "[exofop] CTOI table: %d candidates from %s (dropping %d promoted to TOI)",

@@ -14,7 +14,9 @@ const COLUMNS: { key: string; label: string; sortable: boolean; render: (r: Cand
   { key: "duration_hours", label: "Dur (h)", sortable: true, render: (r) => fmt(r.duration_hours, 2) },
   { key: "depth_ppm", label: "Depth (ppm)", sortable: true, render: (r) => fmt(r.depth_ppm, 0) },
   { key: "planet_radius_re", label: "R (R⊕)", sortable: true, render: (r) => fmt(r.planet_radius_re, 2) },
-  { key: "stellar_teff_k", label: "Teff (K)", sortable: true, render: (r) => fmt(r.stellar_teff_k, 0) },
+  { key: "tsm", label: "TSM", sortable: true, render: (r) => fmt(r.tsm, 0) },
+  { key: "esm", label: "ESM", sortable: true, render: (r) => fmt(r.esm, 0) },
+  { key: "teq_k", label: "Teq (K)", sortable: true, render: (r) => fmt(r.teq_k, 0) },
 ];
 
 function fmt(value: number | null, digits: number): string {

@@ -35,6 +35,11 @@ _SORTABLE = {
     "depth_ppm",
     "planet_radius_re",
     "planet_snr",
+    "teq_k",
+    "tsm",
+    "esm",
+    "predicted_mass_me",
+    "predicted_k_ms",
     "stellar_teff_k",
     "stellar_distance_pc",
 }

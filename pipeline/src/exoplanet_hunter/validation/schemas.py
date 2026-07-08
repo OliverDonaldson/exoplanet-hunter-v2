@@ -69,6 +69,12 @@ candidate_catalogue_schema = pa.DataFrameSchema(
         "duration_hours": pa.Column(float, pa.Check.ge(0), nullable=True),
         "depth_ppm": pa.Column(float, pa.Check.ge(0), nullable=True),
         "tess_mag": pa.Column(float, pa.Check.in_range(-5.0, 30.0), nullable=True),
+        # Follow-up metrics: NExScI-published (TOI) or computed (CTOI).
+        "teq_k": pa.Column(float, pa.Check.ge(0), nullable=True, required=False),
+        "tsm": pa.Column(float, pa.Check.ge(0), nullable=True, required=False),
+        "esm": pa.Column(float, pa.Check.ge(0), nullable=True, required=False),
+        "predicted_mass_me": pa.Column(float, pa.Check.gt(0), nullable=True, required=False),
+        "predicted_k_ms": pa.Column(float, pa.Check.ge(0), nullable=True, required=False),
     },
     checks=[
         pa.Check(
