@@ -1,4 +1,10 @@
-import type { CandidateQuery, CandidatesPage, HealthResponse, ScoreResponse } from "./types";
+import type {
+  CandidateQuery,
+  CandidatesPage,
+  HealthResponse,
+  ReliabilityResponse,
+  ScoreResponse,
+} from "./types";
 
 const BASE = "/api";
 
@@ -13,6 +19,10 @@ async function get<T>(path: string): Promise<T> {
 
 export function fetchHealth(): Promise<HealthResponse> {
   return get<HealthResponse>("/healthz");
+}
+
+export function fetchReliability(): Promise<ReliabilityResponse> {
+  return get<ReliabilityResponse>("/reliability");
 }
 
 function candidateParams(query: CandidateQuery): URLSearchParams {

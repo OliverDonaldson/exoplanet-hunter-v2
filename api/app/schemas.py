@@ -85,6 +85,24 @@ class HealthResponse(BaseModel):
     model_version: str | None
 
 
+class ReliabilityBin(BaseModel):
+    """One bin of the reliability diagram: predicted vs observed frequency."""
+
+    prob_mean: float = Field(ge=0, le=1)  # mean calibrated prediction in bin
+    frac_positive: float = Field(ge=0, le=1)  # observed positive fraction
+    count: int = Field(ge=0)
+
+
+class ReliabilityResponse(BaseModel):
+    """Calibration quality of the promoted model, from its CV test predictions."""
+
+    run_id: str
+    n_examples: int
+    bins: list[ReliabilityBin]
+    ece: float = Field(ge=0, description="Expected calibration error (count-weighted)")
+    brier: float = Field(ge=0)
+
+
 class CandidateRow(BaseModel):
     """One row of the candidate catalogue (normalised ExoFOP TOI/CTOI export).
 

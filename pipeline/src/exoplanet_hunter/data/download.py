@@ -48,8 +48,29 @@ _TRANSIENT_ERROR_MARKERS: tuple[str, ...] = (
     "Connection aborted",
     "HTTPError",
     "RemoteDisconnected",
+    # Interrupted-download symptoms: the *next* attempt can succeed once the
+    # corrupt cache file is evicted, so never pin these in the manifest.
+    "may be corrupt",
+    "I/O operation on closed file",
     "500 Server",
 )
+
+
+_CORRUPT_PRODUCT_RE = re.compile(r"reading Data product (?P<path>/\S+?\.fits)")
+
+
+def _corrupt_product_path(exc: Exception) -> Path | None:
+    """Extract the cache-file path a lightkurve corruption error points at.
+
+    Interrupted downloads leave truncated FITS files in lightkurve's own
+    cache; its error message names the file and asks the user to delete it.
+    We do that for them (see the self-heal retry in `download_one`).
+    """
+    match = _CORRUPT_PRODUCT_RE.search(str(exc))
+    if match is None:
+        return None
+    path = Path(match.group("path"))
+    return path if path.exists() else None
 
 
 def _is_transient_error(reason: str | None) -> bool:
@@ -263,12 +284,22 @@ class LightCurveDownloader:
             if len(search) == 0:
                 return self._record_failure(target_id, mission, "no pipeline data")
 
-            try:
-                lc_collection = search.download_all(
-                    download_dir=str(dl_dir),
-                )
-            except Exception as exc:
-                return self._record_failure(target_id, mission, f"download error: {exc}")
+            lc_collection = None
+            for attempt in (0, 1):
+                try:
+                    lc_collection = search.download_all(
+                        download_dir=str(dl_dir),
+                    )
+                    break
+                except Exception as exc:
+                    # Self-heal: evict the truncated file an interrupted
+                    # download left behind and retry once.
+                    corrupt = _corrupt_product_path(exc) if attempt == 0 else None
+                    if corrupt is not None:
+                        corrupt.unlink()
+                        log.warning("[download] evicted corrupt cache file %s — retrying", corrupt)
+                        continue
+                    return self._record_failure(target_id, mission, f"download error: {exc}")
 
             if lc_collection is None or len(lc_collection) == 0:
                 return self._record_failure(target_id, mission, "empty download")

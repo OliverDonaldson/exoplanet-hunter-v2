@@ -84,6 +84,20 @@ export interface CandidateRow {
   date_modified: string | null;
 }
 
+export interface ReliabilityBin {
+  prob_mean: number;
+  frac_positive: number;
+  count: number;
+}
+
+export interface ReliabilityResponse {
+  run_id: string;
+  n_examples: number;
+  bins: ReliabilityBin[];
+  ece: number;
+  brier: number;
+}
+
 export interface CandidatesPage {
   total: number;
   offset: number;

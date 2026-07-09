@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchHealth } from "./api/client";
 import type { CandidateRow, HealthResponse } from "./api/types";
 import CandidatesTable from "./components/CandidatesTable";
+import ReliabilityChart from "./components/ReliabilityChart";
 import VettingPanel from "./components/VettingPanel";
 
 /**
@@ -45,6 +46,7 @@ export default function App() {
         </div>
         <div style={{ flex: "1 1 380px", position: "sticky", top: "1rem", maxWidth: 560 }}>
           <VettingPanel candidate={selected} />
+          <ReliabilityChart />
         </div>
       </div>
     </main>

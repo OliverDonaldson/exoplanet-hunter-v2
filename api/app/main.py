@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.candidates import router as candidates_router
+from app.routes.reliability import router as reliability_router
 from app.routes.score import router as score_router
 from app.schemas import HealthResponse
 
@@ -33,6 +34,7 @@ app.add_middleware(
 
 app.include_router(score_router)
 app.include_router(candidates_router)
+app.include_router(reliability_router)
 
 
 @app.get("/healthz", response_model=HealthResponse)

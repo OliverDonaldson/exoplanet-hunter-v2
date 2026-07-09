@@ -240,6 +240,15 @@ def _train_cnn_cv(cfg: DictConfig, paths: ProjectPaths) -> float:
             metrics["fold"] = fold_idx
             fold_rows.append(metrics)
 
+        import pandas as pd
+
+        predictions = pd.concat(
+            [pd.read_parquet(p) for p in sorted(cv_root.glob("fold_*/predictions.parquet"))],
+            ignore_index=True,
+        )
+        predictions.to_parquet(cv_root / "predictions.parquet", index=False)
+        mlflow.log_artifact(str(cv_root / "predictions.parquet"))
+
         _aggregate_cv(fold_rows, cv_root)
         return float(np.mean([m["test_roc_auc"] for m in fold_rows]))
 
@@ -409,6 +418,23 @@ def _run_cnn_fold(
         },
         cal_path,
     )
+
+    # Per-example test predictions: the raw material for reliability
+    # diagrams and error analysis. One parquet per fold; the CV loop
+    # concatenates them into <cv_root>/predictions.parquet.
+    import pandas as pd
+
+    test_rows = np.sort(test_idx)
+    pd.DataFrame(
+        {
+            "row": test_rows,
+            "tic_id": groups[test_rows],
+            "fold": fold_idx,
+            "y_true": test_y,
+            "prob_raw": np.atleast_1d(test_score),
+            "prob_calibrated": np.atleast_1d(test_score_cal),
+        }
+    ).to_parquet(ckpt_path.parent / "predictions.parquet", index=False)
 
     log_classification_artifacts(
         test_y, test_score_cal, threshold=best_threshold, out_dir=results_dir
