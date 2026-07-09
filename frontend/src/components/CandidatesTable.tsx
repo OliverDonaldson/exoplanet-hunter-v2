@@ -23,7 +23,13 @@ function fmt(value: number | null, digits: number): string {
   return value === null ? "—" : value.toFixed(digits);
 }
 
-export default function CandidatesTable() {
+export default function CandidatesTable({
+  onSelect,
+  selectedKey,
+}: {
+  onSelect?: (row: CandidateRow) => void;
+  selectedKey?: string | null;
+}) {
   const [search, setSearch] = useState("");
   const [disposition, setDisposition] = useState("");
   const [source, setSource] = useState("");
@@ -120,18 +126,28 @@ export default function CandidatesTable() {
             </tr>
           </thead>
           <tbody>
-            {page?.rows.map((row) => (
-              <tr key={`${row.source}-${row.name}`}>
-                {COLUMNS.map((col) => (
-                  <td
-                    key={col.key}
-                    style={{ padding: "0.35rem 0.6rem", borderBottom: "1px solid #ddd", whiteSpace: "nowrap" }}
-                  >
-                    {col.render(row)}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {page?.rows.map((row) => {
+              const key = `${row.source}-${row.name}`;
+              return (
+                <tr
+                  key={key}
+                  onClick={() => onSelect?.(row)}
+                  style={{
+                    cursor: onSelect ? "pointer" : "default",
+                    background: selectedKey === key ? "#6b83f733" : "transparent",
+                  }}
+                >
+                  {COLUMNS.map((col) => (
+                    <td
+                      key={col.key}
+                      style={{ padding: "0.35rem 0.6rem", borderBottom: "1px solid #ddd", whiteSpace: "nowrap" }}
+                    >
+                      {col.render(row)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

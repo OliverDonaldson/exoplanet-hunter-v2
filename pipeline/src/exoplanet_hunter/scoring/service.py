@@ -14,6 +14,7 @@ and in one place.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -107,16 +108,22 @@ class TargetScorer:
         self.preprocess = preprocess or PreprocessParams()
         self.ensemble = ScoringEnsemble.from_registry(models_dir)
         self.downloader = LightCurveDownloader(data_raw, author="SPOC", cadence=120)
+        self._snr_series: Any | None = None
+        # Stellar params are immutable per TIC — cache the TAP round-trip
+        # (several seconds) so re-scores of a target are dominated by MC only.
+        self._fetch_stellar = lru_cache(maxsize=4096)(fetch_stellar_params)
 
     # ------------------------------------------------------------- aux row --
 
     def _exofop_snr(self, tic_id: int) -> float:
         if self.candidates_path is None or not self.candidates_path.exists():
             return float("nan")
-        from exoplanet_hunter.data.exofop import toi_snr_by_tic
+        if self._snr_series is None:
+            # One parquet read per process, not per score request.
+            from exoplanet_hunter.data.exofop import toi_snr_by_tic
 
-        snr = toi_snr_by_tic(self.candidates_path)
-        return float(snr.get(tic_id, float("nan")))
+            self._snr_series = toi_snr_by_tic(self.candidates_path)
+        return float(self._snr_series.get(tic_id, float("nan")))
 
     def _aux_row(
         self, tic_id: int, raw_lc: Any, period: float, t0: float, duration: float
@@ -124,7 +131,7 @@ class TargetScorer:
         aux_dim = self.ensemble.aux_dim
         if not aux_dim:
             return None
-        sp = fetch_stellar_params(tic_id)
+        sp = self._fetch_stellar(tic_id)
         row = [
             sp.teff if sp.teff is not None else np.nan,
             sp.radius if sp.radius is not None else np.nan,
