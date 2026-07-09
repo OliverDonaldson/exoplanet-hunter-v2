@@ -1,0 +1,6 @@
+[core]
+    remote = r2
+    autostage = true
+['remote "r2"']
+    url = s3://exoplanet-hunter-v2
+    endpointurl = https://d7faa4f3d598d3f75df8f5ad5e098fd4.r2.cloudflarestorage.com

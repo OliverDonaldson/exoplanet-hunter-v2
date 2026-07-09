@@ -25,8 +25,8 @@ log = get_logger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--toi", type=Path, default=Path("data/raw/exofop/tois.csv"))
-    parser.add_argument("--ctoi", type=Path, default=Path("data/raw/exofop/ctois.csv"))
+    parser.add_argument("--toi", type=Path, default=Path("data/exofop/tois.csv"))
+    parser.add_argument("--ctoi", type=Path, default=Path("data/exofop/ctois.csv"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/catalogue"))
     args = parser.parse_args()
 

@@ -7,18 +7,25 @@ views/TFRecord set here is regenerated from NASA sources by the V2 pipeline
 input pipeline and the validation gates are exercised against data they
 produced themselves.
 
-Once `feat/dvc-versioning` lands, the contents are tracked by DVC with R2 as
-the remote: git holds the pointers, R2 holds the bytes.
+Everything except the raw FITS caches is tracked by **DVC** with R2 as the
+remote: git holds the `.dvc` pointers, R2 holds the bytes. `dvc pull`
+materialises them on a fresh clone; `dvc push` syncs after a rebuild
+(`make data-push` / `make data-pull`). The FITS caches (`raw/`,
+`raw_kepler/`) stay local-only — NASA hosts the source of truth, so they
+re-download on demand and can be evicted freely.
 
 ## Current layout
 
 ```
-raw/exofop/tois.csv    ExoFOP TOI bulk export   (exofop.ipac.caltech.edu/tess/download_toi.php?output=csv)
-raw/exofop/ctois.csv   ExoFOP CTOI bulk export  (exofop.ipac.caltech.edu/tess/download_ctoi.php?output=csv)
-catalogue/candidates.parquet   normalised TOI+CTOI candidate catalogue (API reads this)
-catalogue/candidates.csv       same table as a portable CSV export
+exofop/tois.csv        ExoFOP TOI bulk export   (exofop.ipac.caltech.edu/tess/download_toi.php?output=csv)
+exofop/ctois.csv       ExoFOP CTOI bulk export  (exofop.ipac.caltech.edu/tess/download_ctoi.php?output=csv)
+catalogue/             normalised TOI+CTOI candidate catalogue (parquet + CSV export)
+labels/                training label catalogue from the NASA TAP queries
+processed/views.npz    phase-folded global/local views + aux features
+processed/tfrecords/   sharded TFRecord set streamed by the trainer
+raw/                   TESS FITS cache — local-only, evictable
 ```
 
-Rebuild the catalogue after refreshing the raw exports:
+Rebuild the catalogue after refreshing the ExoFOP exports:
 
-    python pipeline/scripts/ingest_exofop.py
+    python pipeline/scripts/ingest_exofop.py && dvc add data/exofop data/catalogue

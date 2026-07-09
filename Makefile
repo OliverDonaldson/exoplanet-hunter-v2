@@ -21,6 +21,12 @@ test:           ## Fast tests only (network/slow markers excluded)
 validate:       ## Run the data validation gates on whatever artefacts exist
 	python pipeline/scripts/validate_data.py
 
+data-push:      ## Sync DVC-tracked artefacts to R2
+	dvc push
+
+data-pull:      ## Materialise DVC-tracked artefacts from R2
+	dvc pull
+
 mlflow:         ## MLflow UI on :5001 (5000 collides with macOS AirPlay)
 	mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001
 

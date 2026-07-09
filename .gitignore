@@ -16,10 +16,15 @@ htmlcov/
 node_modules/
 frontend/dist/
 
-# Data + model artefacts — versioned via DVC / R2, never committed.
-data/*
-!data/README.md
-models/
+# Bulk data. Raw FITS caches are re-fetchable from NASA (MAST / s3://stpubdata)
+# and stay local-only; everything else under data/ and the promoted model run
+# are DVC-tracked — git carries the .dvc pointers (and DVC's per-directory
+# .gitignore files), R2 carries the bytes.
+data/raw/
+data/raw_kepler/
+data/interim/
+models/cv/*
+!models/cv/*.dvc
 mlruns/
 outputs/
 multirun/

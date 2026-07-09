@@ -43,11 +43,11 @@ dependencies = [
 
 # Branch-gated dependencies: each V2 feature branch adds its own tools when
 # it lands, so the dependency list never runs ahead of working code.
-#   feat/dvc-versioning   -> dvc[s3]
 #   feat/dashboard        -> streamlit, duckdb
 #   feat/orchestrator     -> prefect (or dagster)
 [project.optional-dependencies]
 dev = [
+    "dvc[s3]>=3.30",
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.5",
