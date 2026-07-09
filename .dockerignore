@@ -1,0 +1,27 @@
+# Keep image builds lean: bulk data never enters the context, but DVC
+# pointer files (*.dvc) do — the serving entrypoint pulls the real bytes
+# from R2 at boot. Cloud checkouts are already clean (data/ is gitignored);
+# this guards local `docker build` against the 64 GB FITS cache.
+data/raw/
+data/raw_kepler/
+data/interim/
+data/labels/
+data/processed/
+data/catalogue/
+data/exofop/
+models/cv/*/
+mlruns/
+results/
+outputs/
+multirun/
+node_modules/
+frontend/dist/
+frontend/node_modules/
+.dvc/cache/
+.dvc/tmp/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+mlflow.db

@@ -1,0 +1,35 @@
+# Render Blueprint: the public deployment — API (Docker web service) +
+# vetting console (static site). Apply via Render dashboard: New → Blueprint
+# → select this repo. Two env vars must be set by hand in the dashboard
+# (marked sync: false): the R2 credentials the entrypoint uses to dvc-pull
+# the promoted model + catalogue at boot.
+#
+# Sizing note: the API serves a 5-fold TensorFlow ensemble — it needs the
+# 2 GB instance ("standard"); the 512 MB tiers OOM on model load. The
+# static site is free. Verify current plan names/pricing before applying.
+
+services:
+  - type: web
+    name: exoplanet-hunter-api
+    runtime: docker
+    dockerfilePath: ./docker/api.Dockerfile
+    dockerContext: .
+    plan: standard
+    region: singapore
+    healthCheckPath: /healthz
+    envVars:
+      - key: AWS_ACCESS_KEY_ID # R2 access key id (dvc s3 remote)
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY # R2 secret (dvc s3 remote)
+        sync: false
+      - key: FRONTEND_ORIGIN
+        value: https://exoplanet-hunter-console.onrender.com
+
+  - type: web
+    name: exoplanet-hunter-console
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE
+        value: https://exoplanet-hunter-api.onrender.com

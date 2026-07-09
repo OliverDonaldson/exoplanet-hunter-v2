@@ -9,6 +9,8 @@ contract tests live in tests/test_contract.py.
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,10 +26,15 @@ app = FastAPI(
 )
 
 # The React dev server (vite, port 5173) calls the API cross-origin during
-# development; production serves both behind one host so this list stays short.
+# development; a deployed static console announces its origin via
+# FRONTEND_ORIGIN (set in the host's environment, see render.yaml).
+_origins = ["http://localhost:5173"]
+if frontend_origin := os.environ.get("FRONTEND_ORIGIN"):
+    _origins.append(frontend_origin.rstrip("/"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_origins,
     allow_methods=["GET"],
     allow_headers=["*"],
 )

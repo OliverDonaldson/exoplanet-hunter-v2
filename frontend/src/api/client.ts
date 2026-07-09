@@ -6,7 +6,10 @@ import type {
   ScoreResponse,
 } from "./types";
 
-const BASE = "/api";
+// Dev: the vite proxy forwards /api to localhost:8000. Production static
+// hosting sets VITE_API_BASE to the deployed API's absolute URL at build
+// time (see render.yaml).
+const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 async function get<T>(path: string): Promise<T> {
   const resp = await fetch(`${BASE}${path}`);
