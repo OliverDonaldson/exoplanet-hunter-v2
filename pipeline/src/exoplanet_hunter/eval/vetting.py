@@ -178,7 +178,7 @@ def _panel_bls(
         alpha=0.7,
         label=f"candidate  P={candidate_period:.4f} d",
     )
-    for harm, name in [(0.5, "½×"), (2.0, "2×"), (3.0, "3×")]:  # noqa: RUF001  (figure labels)
+    for harm, name in [(0.5, "½×"), (2.0, "2×"), (3.0, "3×")]:
         ph = candidate_period * harm
         if pmin <= ph <= pmax:
             ax.axvline(ph, color="red", ls=":", alpha=0.3)
@@ -293,7 +293,7 @@ def _panel_probability(
             prob_p90,
             color="C0",
             alpha=0.10,
-            label=f"p10–p90 ({prob_p10:.2f}–{prob_p90:.2f})",  # noqa: RUF001
+            label=f"p10–p90 ({prob_p10:.2f}–{prob_p90:.2f})",
         )
 
     ax.axhline(threshold, color="red", ls="--", alpha=0.6, label=f"threshold = {threshold:.2f}")
@@ -304,11 +304,11 @@ def _panel_probability(
     ax.set_ylabel("P(planet)")
     bits = [f"prob = {score:.3f}"]
     if np.isfinite(sigma):
-        bits.append(f"σ = {sigma:.3f}")  # noqa: RUF001
+        bits.append(f"σ = {sigma:.3f}")
     if fold_disagree is not None and np.isfinite(fold_disagree):
-        bits.append(f"fold σ = {fold_disagree:.3f}")  # noqa: RUF001
+        bits.append(f"fold σ = {fold_disagree:.3f}")
     if mc_disagree is not None and np.isfinite(mc_disagree):
-        bits.append(f"mc σ = {mc_disagree:.3f}")  # noqa: RUF001
+        bits.append(f"mc σ = {mc_disagree:.3f}")
     ax.set_title("  ·  ".join(bits))
     ax.legend(loc="lower left", fontsize=8)
 

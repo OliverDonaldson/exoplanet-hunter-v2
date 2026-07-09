@@ -37,4 +37,19 @@ app.include_router(candidates_router)
 
 @app.get("/healthz", response_model=HealthResponse)
 def healthz() -> HealthResponse:
+    """Servable = a promoted run exists in the registry (loaded lazily on
+    first /score request), so this stays cheap — a JSON stat, no TF."""
+    import json
+    import os
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    registry = Path(os.environ.get("MODEL_DIR", root / "models")) / "registry.json"
+    if registry.exists():
+        run_id = str(json.loads(registry.read_text())["run_id"])
+        return HealthResponse(
+            status="ok",
+            model_loaded=True,
+            model_version=f"cnn_dualview-cv-{run_id[:8]}",
+        )
     return HealthResponse(status="degraded", model_loaded=False, model_version=None)

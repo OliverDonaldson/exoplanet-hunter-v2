@@ -1,9 +1,13 @@
 """Contract tests for the serving layer.
 
-These pin the `/score/{tic_id}` JSON shape before the implementation exists,
-so the FastAPI endpoint and the React console evolve against the same target
-instead of drifting apart.
+These pin the `/score/{tic_id}` JSON shape so the FastAPI endpoint and the
+React console evolve against the same target instead of drifting apart.
+Route behaviour is covered in test_score_route.py; here we only exercise
+the schema and the health/degraded states, with MODEL_DIR pointed at
+controlled directories so results don't depend on what's on this machine.
 """
+
+import json
 
 from app.main import app
 from app.schemas import ScoreResponse
@@ -12,17 +16,20 @@ from fastapi.testclient import TestClient
 client = TestClient(app)
 
 
-def test_healthz_reports_no_model() -> None:
-    resp = client.get("/healthz")
-    assert resp.status_code == 200
-    body = resp.json()
+def test_healthz_degraded_without_registry(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    body = client.get("/healthz").json()
     assert body["status"] == "degraded"
     assert body["model_loaded"] is False
 
 
-def test_score_returns_503_until_model_deployed() -> None:
-    resp = client.get("/score/307210830")
-    assert resp.status_code == 503
+def test_healthz_ok_with_registry(tmp_path, monkeypatch):
+    (tmp_path / "registry.json").write_text(json.dumps({"run_id": "abcdef1234567890"}))
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    body = client.get("/healthz").json()
+    assert body["status"] == "ok"
+    assert body["model_loaded"] is True
+    assert body["model_version"] == "cnn_dualview-cv-abcdef12"
 
 
 def test_score_response_schema_roundtrips() -> None:
@@ -45,7 +52,7 @@ def test_score_response_schema_roundtrips() -> None:
         "global_view": {"phase": [-0.5, 0.0, 0.5], "flux": [0.0, -0.001, None]},
         "local_view": {"phase": [-0.02, 0.0, 0.02], "flux": [0.0, -0.001, 0.0]},
         "verdict": "Consistent with an on-target planetary transit.",
-        "model_version": "cnn_dualview-2.0.0",
+        "model_version": "cnn_dualview-cv-e5388ed9",
         "n_mc_samples": 50,
     }
     parsed = ScoreResponse.model_validate(example)

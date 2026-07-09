@@ -37,3 +37,6 @@ multirun/
 
 # MLflow local tracking store
 mlflow.db
+
+# Training-run outputs (plots, tier tables) — MLflow/DVC territory
+results/
