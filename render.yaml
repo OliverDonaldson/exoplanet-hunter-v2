@@ -1,35 +1,37 @@
-# Render Blueprint: the public deployment — API (Docker web service) +
-# vetting console (static site). Apply via Render dashboard: New → Blueprint
-# → select this repo. Two env vars must be set by hand in the dashboard
-# (marked sync: false): the R2 credentials the entrypoint uses to dvc-pull
-# the promoted model + catalogue at boot.
+# Render Blueprint: currently deploys the vetting console only (free static
+# site). Apply via Render dashboard: New → Blueprint → select this repo.
 #
-# Sizing note: the API serves a 5-fold TensorFlow ensemble — it needs the
-# 2 GB instance ("standard"); the 512 MB tiers OOM on model load. The
-# static site is free. Verify current plan names/pricing before applying.
+# The API stays local for now — a 5-fold TensorFlow ensemble needs a 2 GB
+# instance (~$25/mo on Render; the 512 MB tiers OOM on model load), which
+# we're deferring; Fly.io's sleep-when-idle machines are the cheaper option
+# to revisit. Until an API is deployed the console renders the shell with an
+# "API unreachable" banner — set VITE_API_BASE to the API's origin (and
+# FRONTEND_ORIGIN on the API side for CORS) when that day comes. The full
+# API service block is preserved below, commented, ready to re-enable.
 
 services:
-  - type: web
-    name: exoplanet-hunter-api
-    runtime: docker
-    dockerfilePath: ./docker/api.Dockerfile
-    dockerContext: .
-    plan: standard
-    region: singapore
-    healthCheckPath: /healthz
-    envVars:
-      - key: AWS_ACCESS_KEY_ID # R2 access key id (dvc s3 remote)
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY # R2 secret (dvc s3 remote)
-        sync: false
-      - key: FRONTEND_ORIGIN
-        value: https://exoplanet-hunter-console.onrender.com
-
   - type: web
     name: exoplanet-hunter-console
     runtime: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
-    envVars:
-      - key: VITE_API_BASE
-        value: https://exoplanet-hunter-api.onrender.com
+    # envVars:
+    #   - key: VITE_API_BASE
+    #     value: https://exoplanet-hunter-api.onrender.com
+
+  # ---- API web service (deferred — re-enable when hosting the model) ----
+  # - type: web
+  #   name: exoplanet-hunter-api
+  #   runtime: docker
+  #   dockerfilePath: ./docker/api.Dockerfile
+  #   dockerContext: .
+  #   plan: standard          # 2 GB — the TF ensemble OOMs smaller tiers
+  #   region: singapore
+  #   healthCheckPath: /healthz
+  #   envVars:
+  #     - key: AWS_ACCESS_KEY_ID       # R2 access key id (dvc pull at boot)
+  #       sync: false
+  #     - key: AWS_SECRET_ACCESS_KEY   # R2 secret
+  #       sync: false
+  #     - key: FRONTEND_ORIGIN
+  #       value: https://exoplanet-hunter-console.onrender.com
