@@ -12,7 +12,10 @@
 ```
 make refresh                                            # full refresh, trains if warranted
 python orchestration/flows/refresh_pipeline.py --no-train      # refresh + gates only
-python orchestration/flows/refresh_pipeline.py --force-train   # explicit expansion run
+
+# The expansion run (feat/data-scaling): full TESS pool + Kepler, 9-dim aux
+export KEPLER_RAW_DIR=/Users/ollie/Project/data/raw_kepler     # reuse V1's cache
+python orchestration/flows/refresh_pipeline.py --force-train --data-config full
 ```
 
 No Prefect server required — flows run standalone with an ephemeral local

@@ -28,6 +28,7 @@ from exoplanet_hunter.data.catalog import CatalogRequest, build_label_catalog
 from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.exofop import enrich_catalog_snr
 from exoplanet_hunter.data.stellar import fetch_stellar_params
+from exoplanet_hunter.features.centroid import extract_centroid_offset
 from exoplanet_hunter.preprocess import build_views, clean_lightcurve, flatten_lightcurve
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
 
@@ -142,6 +143,16 @@ def main(cfg: DictConfig) -> None:
             continue
         try:
             lc = lk.read(str(path))
+            # Centroid offset must come from the RAW light curve — clean/
+            # flatten drop the MOM_CENTR1/2 columns it needs. A failure flows
+            # to the imputer as NaN rather than killing the row.
+            try:
+                centroid_snr = float(
+                    extract_centroid_offset(lc, float(period), float(t0), float(duration))
+                )
+            except Exception as cexc:
+                log.debug("[build] %s %d centroid extract failed: %s", mission, tic, cexc)
+                centroid_snr = float("nan")
             lc = clean_lightcurve(lc, sigma_clip=float(cfg.preprocess.cleaning.sigma_clip))
             # Ephemeris is known from the catalog row; mask transits when
             # fitting the flattening spline so the dip itself survives.
@@ -167,17 +178,17 @@ def main(cfg: DictConfig) -> None:
             skips["preprocess_error"] += 1
             continue
 
-        # Aux feature vector (8 dims):
-        #   [teff, radius, logg, tmag,  depth, duration, log_period, snr]
+        # Aux feature vector (9 dims — matches aux_transform.CENTROID_COL):
+        #   [teff, radius, logg, tmag, depth, duration, log_period, snr, centroid_snr]
         # Stellar params come from the KOI catalog row for Kepler targets and
-        # from a TIC lookup for TESS targets. SNR is only populated for KOI
-        # rows (koi_model_snr); TESS rows leave it NaN until the TESS catalog
-        # query is extended.
+        # from a TIC lookup for TESS targets. SNR: koi_model_snr for Kepler,
+        # ExoFOP TOI transit SNR for TESS (joined by enrich_catalog_snr in
+        # stage 1 — TESS rows are no longer hardcoded NaN).
         log_period = np.log(float(period)) if float(period) > 0 else np.nan
         depth_val = float(row["depth"]) if pd.notna(row.get("depth")) else np.nan
         dur_val = float(row["duration"]) if pd.notna(row.get("duration")) else np.nan
+        snr_val = float(row["snr"]) if pd.notna(row.get("snr")) else np.nan
         if mission == "Kepler":
-            snr_val = float(row["snr"]) if pd.notna(row.get("snr")) else np.nan
             aux.append(
                 [
                     float(row["teff"]) if pd.notna(row.get("teff")) else np.nan,
@@ -188,6 +199,7 @@ def main(cfg: DictConfig) -> None:
                     dur_val,
                     log_period,
                     snr_val,
+                    centroid_snr,
                 ]
             )
         else:
@@ -201,7 +213,8 @@ def main(cfg: DictConfig) -> None:
                     depth_val,
                     dur_val,
                     log_period,
-                    np.nan,
+                    snr_val,
+                    centroid_snr,
                 ]
             )
         g_views.append(views.global_view)

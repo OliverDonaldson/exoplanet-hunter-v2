@@ -1,0 +1,29 @@
+# Full-scale dataset: every labelled TESS target plus the balanced Kepler
+# block. This is the feat/data-scaling expansion config — the caps that made
+# quick builds cheap (and made the refresh trigger imprecise via sampling
+# churn) are gone.
+#
+# Usage:
+#   export KEPLER_RAW_DIR=/Users/ollie/Project/data/raw_kepler   # reuse V1's cache
+#   python pipeline/scripts/build_dataset.py data=full
+name: full
+
+# Effectively uncapped — build_label_catalog takes min(requested, available),
+# so these consume the whole labelled TOI pool (~1,300 CP/KP + ~1,350 FP/FA).
+n_confirmed: 1000000
+n_false_pos: 1000000
+
+# Kepler / KOI targets — same balanced block as V1's final report build.
+n_confirmed_kepler: 1250
+n_false_pos_kepler: 1250
+
+sectors: null
+author: SPOC
+cadence: 120
+
+seed: ${seed}
+
+split:
+  train: 0.7
+  val:   0.15
+  test:  0.15

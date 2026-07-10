@@ -122,8 +122,8 @@ def decide_training(previous_labels: Path, min_new_labelled: int, force: bool) -
 
 
 @task
-def preprocess_and_shard() -> None:
-    _run([PYTHON, "pipeline/scripts/build_dataset.py"])
+def preprocess_and_shard(data_config: str) -> None:
+    _run([PYTHON, "pipeline/scripts/build_dataset.py", f"data={data_config}"])
     _run([PYTHON, "pipeline/scripts/shard_views.py"])
 
 
@@ -185,6 +185,7 @@ def refresh_pipeline(
     min_new_labelled: int = 25,
     force_train: bool = False,
     train_enabled: bool = True,
+    data_config: str = "default",
 ) -> None:
     download_exofop_exports()
     ingest_candidate_catalogue()
@@ -197,7 +198,7 @@ def refresh_pipeline(
         return
 
     if decide_training(previous, min_new_labelled, force_train):
-        preprocess_and_shard()
+        preprocess_and_shard(data_config)
         train()
         promotion_gate()
     publish()
@@ -210,9 +211,15 @@ if __name__ == "__main__":
     parser.add_argument("--min-new-labelled", type=int, default=25)
     parser.add_argument("--force-train", action="store_true")
     parser.add_argument("--no-train", action="store_true")
+    parser.add_argument(
+        "--data-config",
+        default="default",
+        help="Hydra data group for the build (e.g. 'full' for the expansion run)",
+    )
     args = parser.parse_args()
     refresh_pipeline(
         min_new_labelled=args.min_new_labelled,
         force_train=args.force_train,
         train_enabled=not args.no_train,
+        data_config=args.data_config,
     )
