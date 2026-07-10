@@ -76,6 +76,10 @@ _NUMERIC_COLUMNS = [
     "stellar_distance_pc",
 ]
 
+# Rename maps carry both ExoFOP dialects: the dashboard bulk-export names
+# and the download_{toi,ctoi}.php endpoint names (which differ in casing,
+# abbreviations, and units punctuation). Each file contains one dialect, so
+# the unused keys are simply absent.
 _TOI_RENAMES = {
     "TIC ID": "tic_id",
     "TFOPWG Disposition": "disposition",
@@ -93,6 +97,7 @@ _TOI_RENAMES = {
     "ESM": "esm",
     "Predicted Mass (M_Earth)": "predicted_mass_me",
     "Predicted Radial Velocity Semi-amplitude (m/s)": "predicted_k_ms",
+    "Predicted RV Semi-amplitude (m/s)": "predicted_k_ms",  # endpoint dialect
     "Stellar Eff Temp (K)": "stellar_teff_k",
     "Stellar log(g) (cm/s^2)": "stellar_logg",
     "Stellar Radius (R_Sun)": "stellar_radius_rsun",
@@ -107,19 +112,28 @@ _CTOI_RENAMES = {
     "Promoted to TOI": "promoted_to_toi",
     "TFOPWG Disposition": "disposition",
     "TESS mag": "tess_mag",
+    "TESS Mag": "tess_mag",  # endpoint dialect
     "RA (deg)": "ra_deg",
+    "RA": "ra_deg",  # endpoint dialect
     "Dec (deg)": "dec_deg",
+    "Dec": "dec_deg",  # endpoint dialect
     "Transit Epoch (BJD)": "epoch_bjd",
     "Period (days)": "period_days",
     "Duration (hours)": "duration_hours",
+    "Duration (hrs)": "duration_hours",  # endpoint dialect
     "Depth (ppm)": "depth_ppm",
+    "Depth ppm": "depth_ppm",  # endpoint dialect
     "Planet Radius (R_Earth)": "planet_radius_re",
+    "Equilibrium Temp (K)": "teq_k",  # endpoint dialect (dashboard export lacks it)
     "Stellar Teff (K)": "stellar_teff_k",
+    "Stellar Eff Temp (K)": "stellar_teff_k",  # endpoint dialect
     "Stellar log(g) (cm/s2)": "stellar_logg",
+    "Stellar log(g) (cm/s^2)": "stellar_logg",  # endpoint dialect
     "Stellar Radius (R_Sun)": "stellar_radius_rsun",
     "Stellar Distance (pc)": "stellar_distance_pc",
     "Notes": "comments",
     "Date Modified": "date_modified",
+    "CTOI lastmod": "date_modified",  # endpoint dialect
 }
 
 
@@ -136,9 +150,33 @@ def _read_exofop_csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, encoding="utf-8-sig", skiprows=skiprows, low_memory=False)
 
 
+def _coerce_sexagesimal_coords(out: pd.DataFrame) -> None:
+    """Convert "21:14:56.88" / "-55:52:18.71" coordinates to degrees in place.
+
+    The download_toi.php endpoint serves sexagesimal RA/Dec (hourangle,
+    degrees); the dashboard export serves decimal degrees. Without this,
+    to_numeric would silently NaN every coordinate of an endpoint file.
+    """
+    ra = out["ra_deg"]
+    if ra.dtype != object or not ra.astype(str).str.contains(":").any():
+        return
+    from astropy import units as u
+    from astropy.coordinates import SkyCoord
+
+    mask = ra.notna() & out["dec_deg"].notna()
+    coords = SkyCoord(
+        out.loc[mask, "ra_deg"].astype(str).tolist(),
+        out.loc[mask, "dec_deg"].astype(str).tolist(),
+        unit=(u.hourangle, u.deg),
+    )
+    out.loc[mask, "ra_deg"] = coords.ra.deg
+    out.loc[mask, "dec_deg"] = coords.dec.deg
+
+
 def _normalise(raw: pd.DataFrame, renames: dict[str, str], source: str) -> pd.DataFrame:
     out = raw.rename(columns=renames).reindex(columns=CATALOGUE_COLUMNS)
     out["source"] = source
+    _coerce_sexagesimal_coords(out)
     for col in _NUMERIC_COLUMNS:
         out[col] = pd.to_numeric(out[col], errors="coerce")
     out["tic_id"] = pd.to_numeric(out["tic_id"], errors="coerce").astype("Int64")
@@ -157,10 +195,12 @@ def load_ctoi_table(path: Path) -> pd.DataFrame:
     raw = _read_exofop_csv(path)
     out = _normalise(raw, _CTOI_RENAMES, source="CTOI")
     # ExoFOP leaves "Candidate Name" blank for nearly every CTOI; the stable
-    # identifier is "Candidate TIC ID" (e.g. 160363.01), so build the
-    # conventional "TIC 160363.01" name from it and keep a custom name only
-    # where a submitter actually provided one.
-    tic_name = "TIC " + raw["Candidate TIC ID"].map(lambda v: f"{float(v):.2f}")
+    # identifier is the candidate id column — "Candidate TIC ID" in dashboard
+    # exports, "CTOI" from the download endpoint (both e.g. 160363.01). Build
+    # the conventional "TIC 160363.01" name from it and keep a custom name
+    # only where a submitter actually provided one.
+    id_col = "Candidate TIC ID" if "Candidate TIC ID" in raw.columns else "CTOI"
+    tic_name = "TIC " + raw[id_col].map(lambda v: f"{float(v):.2f}")
     out["name"] = raw["Candidate Name"].astype("string").fillna(tic_name)
 
     # NExScI computes Teq/TSM/ESM/predicted mass/K for TOIs only. For CTOIs
@@ -171,12 +211,15 @@ def load_ctoi_table(path: Path) -> pd.DataFrame:
     m_star = followup.stellar_mass_from_logg(
         out["stellar_logg"].to_numpy(), out["stellar_radius_rsun"].to_numpy()
     )
-    out["teq_k"] = followup.equilibrium_temperature_k(
+    # The endpoint dialect publishes a fitted Teq for some CTOIs — keep those
+    # and compute only the gaps.
+    computed_teq = followup.equilibrium_temperature_k(
         m_star,
         out["period_days"].to_numpy(),
         out["stellar_radius_rsun"].to_numpy(),
         out["stellar_teff_k"].to_numpy(),
     )
+    out["teq_k"] = out["teq_k"].fillna(pd.Series(computed_teq, index=out.index))
     out["predicted_mass_me"] = followup.predict_planet_mass_me(out["planet_radius_re"].to_numpy())
     out["predicted_k_ms"] = followup.rv_semi_amplitude_ms(
         out["period_days"].to_numpy(), m_star, out["predicted_mass_me"].to_numpy()

@@ -1,6 +1,6 @@
 outs:
-- md5: 781c8bb532fa0d716f76b440c199ce7e.dir
-  size: 403453
-  nfiles: 2
+- md5: 94b4ac8691b55ad06df1379c140cab41.dir
+  size: 498388
+  nfiles: 3
   hash: md5
   path: labels

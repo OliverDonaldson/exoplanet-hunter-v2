@@ -21,6 +21,9 @@ test:           ## Fast tests only (network/slow markers excluded)
 validate:       ## Run the data validation gates on whatever artefacts exist
 	python pipeline/scripts/validate_data.py
 
+refresh:        ## Run the full refresh DAG (trains only if warranted)
+	python orchestration/flows/refresh_pipeline.py
+
 data-push:      ## Sync DVC-tracked artefacts to R2
 	dvc push
 
