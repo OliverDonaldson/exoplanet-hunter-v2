@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -24,6 +25,9 @@ import requests
 from exoplanet_hunter.utils.logging import get_logger
 
 log = get_logger(__name__)
+
+#: Concurrent quarter-file fetches per Kepler target (polite to the archive).
+_KEPLER_FETCH_WORKERS = 6
 
 
 # ----------------------------------------------------------------------------
@@ -395,19 +399,30 @@ class LightCurveDownloader:
             raise FileNotFoundError(f"no LLC FITS in archive listing for KIC {kic}")
 
         dl_dir.mkdir(parents=True, exist_ok=True)
-        paths: list[Path] = []
-        for fn in filenames:
+
+        def _fetch_one(fn: str) -> Path:
             local = dl_dir / fn
-            if not local.exists() or local.stat().st_size == 0:
-                url = listing_url + fn
-                with requests.get(url, stream=True, timeout=timeout * 2) as rr:
-                    rr.raise_for_status()
-                    with open(local, "wb") as fh:
-                        for chunk in rr.iter_content(chunk_size=64 * 1024):
-                            if chunk:
-                                fh.write(chunk)
-            paths.append(local)
-        return paths
+            if local.exists() and local.stat().st_size > 0:
+                return local
+            url = listing_url + fn
+            # Download to a temp name and rename on completion, so an
+            # interrupt never leaves a truncated .fits that the size check
+            # would wrongly accept on the next run.
+            tmp = local.with_suffix(".part")
+            with requests.get(url, stream=True, timeout=timeout * 2) as rr:
+                rr.raise_for_status()
+                with open(tmp, "wb") as fh:
+                    for chunk in rr.iter_content(chunk_size=64 * 1024):
+                        if chunk:
+                            fh.write(chunk)
+            tmp.replace(local)
+            return local
+
+        # The ~17 quarter files per KIC are independent; fetching them
+        # concurrently is what keeps a full-pool Kepler build tractable
+        # (~85 s/target sequential vs ~20-30 s with 6 workers).
+        with ThreadPoolExecutor(max_workers=_KEPLER_FETCH_WORKERS) as pool:
+            return list(pool.map(_fetch_one, filenames))
 
     def _fetch_kepler_via_direct_archive(
         self,
@@ -423,7 +438,15 @@ class LightCurveDownloader:
         import lightkurve as lk
 
         fits_paths = self._direct_archive_kepler_fits(kic, dl_dir)
-        lcs = [lk.read(str(p)) for p in fits_paths]
+        lcs = []
+        for p in fits_paths:
+            try:
+                lcs.append(lk.read(str(p)))
+            except Exception:
+                # A cached quarter that won't read is truncated debris from an
+                # earlier interrupt — evict it so the next attempt refetches.
+                p.unlink(missing_ok=True)
+                raise
         return lk.LightCurveCollection(lcs)
 
     # ----------------------------------------------------------------- batch
