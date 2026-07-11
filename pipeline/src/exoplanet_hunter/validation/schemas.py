@@ -21,8 +21,12 @@ import pandera.pandas as pa
 
 from exoplanet_hunter.datasets.views_io import ViewArrays
 
-#: TFOPWG working-group codes, as mapped by data.catalog / data.exofop.
+#: TFOPWG working-group codes (TESS), as mapped by data.catalog / data.exofop.
 DISPOSITIONS = ["CP", "KP", "PC", "FP", "FA", "APC"]
+
+#: Kepler KOI vocabulary (koi_disposition) — the label catalogue is
+#: multi-mission, so its disposition domain is the union of both.
+KOI_DISPOSITIONS = ["CONFIRMED", "FALSE POSITIVE", "CANDIDATE"]
 
 label_catalogue_schema = pa.DataFrameSchema(
     name="label_catalogue",
@@ -32,7 +36,7 @@ label_catalogue_schema = pa.DataFrameSchema(
         "t0": pa.Column(float, nullable=True),
         "duration": pa.Column(float, pa.Check.gt(0), nullable=True),
         "depth": pa.Column(float, pa.Check.ge(0), nullable=True),
-        "disposition": pa.Column(str, pa.Check.isin(DISPOSITIONS)),
+        "disposition": pa.Column(str, pa.Check.isin(DISPOSITIONS + KOI_DISPOSITIONS)),
         # 1 = confirmed, 0 = false positive, -1 = held-out candidate (PC).
         "label": pa.Column(int, pa.Check.isin([-1, 0, 1])),
         "mission": pa.Column(str, pa.Check.isin(["TESS", "Kepler"])),

@@ -60,6 +60,15 @@ def test_label_schema_rejects_single_class_catalogue():
         label_catalogue_schema.validate(one_class, lazy=True)
 
 
+def test_label_schema_accepts_koi_vocabulary():
+    """Regression (2026-07-12): the first multi-mission build failed the gate
+    because Kepler rows carry koi_disposition strings, not TFOPWG codes."""
+    df = good_labels()
+    df.loc[5, ["disposition", "label", "mission"]] = ["CONFIRMED", 1, "Kepler"]
+    df.loc[4, ["disposition", "label", "mission"]] = ["FALSE POSITIVE", 0, "Kepler"]
+    label_catalogue_schema.validate(df, lazy=True)
+
+
 def test_label_schema_allows_same_tic_across_missions():
     df = good_labels()
     df.loc[1, "tic_id"] = df.loc[0, "tic_id"]
