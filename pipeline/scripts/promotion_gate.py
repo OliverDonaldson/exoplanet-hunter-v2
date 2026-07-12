@@ -31,13 +31,19 @@ def main() -> None:
     parser.add_argument("cv_summary", type=Path, help="cv_summary.json of the candidate run")
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
     parser.add_argument("--brier-tolerance", type=float, default=0.005)
+    parser.add_argument("--ece-tolerance", type=float, default=0.01)
     parser.add_argument("--promote", action="store_true", help="Update the registry on success")
     args = parser.parse_args()
 
     candidate = json.loads(args.cv_summary.read_text())
     incumbent = load_incumbent_summary(args.models_dir)
 
-    decision = evaluate_promotion(candidate, incumbent, brier_tolerance=args.brier_tolerance)
+    decision = evaluate_promotion(
+        candidate,
+        incumbent,
+        brier_tolerance=args.brier_tolerance,
+        ece_tolerance=args.ece_tolerance,
+    )
     log.info("[promotion] %s", decision)
 
     if decision.promoted and args.promote:

@@ -3,6 +3,7 @@
   "cv_summary": "models/cv/cebb0fe655684aafae69bc1a11cfde85/cv_summary.json",
   "cv_dir": "models/cv/cebb0fe655684aafae69bc1a11cfde85",
   "test_roc_auc_mean": 0.9508294428872853,
-  "test_brier_mean": 0.1195099939219122,
-  "promoted_at": "2026-07-12T10:26:42.498385+00:00"
+  "test_brier_mean": 0.08748992944477732,
+  "promoted_at": "2026-07-12T22:55:10.986555+00:00",
+  "test_ece_mean": 0.037501364677820906
 }

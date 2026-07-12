@@ -180,14 +180,17 @@ def test_assert_refresh_safe_rejects_disjoint_catalogues():
 # ---------------------------------------------------------------- promotion --
 
 
-def summary(auc: float, brier: float) -> dict:
-    return {
+def summary(auc: float, brier: float, ece: float | None = None) -> dict:
+    result = {
         "folds": [],
         "summary": {
             "test_roc_auc": {"mean": auc, "std": 0.01},
             "test_brier": {"mean": brier, "std": 0.005},
         },
     }
+    if ece is not None:
+        result["summary"]["test_ece"] = {"mean": ece, "std": 0.005}
+    return result
 
 
 def test_first_model_promotes():
@@ -209,6 +212,27 @@ def test_better_auc_but_degraded_calibration_rejected():
     decision = evaluate_promotion(summary(0.93, 0.12), summary(0.92, 0.10))
     assert not decision.promoted
     assert any("calibration" in r for r in decision.reasons)
+
+
+def test_better_brier_but_degraded_ece_rejected():
+    # Brier alone is blind to this: a discrimination gain can pay for
+    # arbitrary miscalibration — exactly how the full-scale run promoted
+    # with ECE 0.136 vs the incumbent's 0.031.
+    decision = evaluate_promotion(summary(0.95, 0.09, ece=0.13), summary(0.87, 0.10, ece=0.03))
+    assert not decision.promoted
+    assert any("reliability" in r for r in decision.reasons)
+
+
+def test_ece_within_tolerance_promotes():
+    decision = evaluate_promotion(summary(0.93, 0.10, ece=0.035), summary(0.92, 0.10, ece=0.030))
+    assert decision.promoted
+
+
+def test_missing_ece_skips_the_guard():
+    # Summaries written before the test_ece field must still be comparable.
+    decision = evaluate_promotion(summary(0.93, 0.10, ece=0.13), summary(0.92, 0.10))
+    assert decision.promoted
+    assert any("skipped" in r for r in decision.reasons)
 
 
 def test_registry_roundtrip(tmp_path):

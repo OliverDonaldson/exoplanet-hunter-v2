@@ -18,8 +18,10 @@ Differences from the V1 trainer this replaces:
     constants as tensor ops (`datasets.aux_transform`, parity-tested).
   * Optional mixed_float16 policy for the GPU burst.
 
-Split semantics, callbacks, threshold sweep, temperature scaling, and the
-bundle format are unchanged from V1 — same keys, same behaviour.
+Split semantics and callbacks are unchanged from V1. Calibration is Platt
+scaling (V1 used temperature-only, which cannot correct the score-shift the
+full-scale run exhibited), and the F1 threshold is swept on *calibrated*
+validation scores so it lives in the same space serving compares it against.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ from exoplanet_hunter.models import (
     build_cnn_dualview,
     build_random_forest,
 )
-from exoplanet_hunter.training.calibration import TemperatureScaler
+from exoplanet_hunter.training.calibration import PlattScaler, expected_calibration_error
 from exoplanet_hunter.training.mlflow_utils import (
     keras_callbacks,
     log_classification_artifacts,
@@ -396,22 +398,34 @@ def _run_cnn_fold(
     val_score = model.predict(val_ds, verbose=0).squeeze()
     test_score = model.predict(test_ds, verbose=0).squeeze()
 
+    calibrator = PlattScaler.from_validation(val_score, val_y)
+    val_score_cal = calibrator.predict(val_score)
+    test_score_cal = calibrator.predict(test_score)
+    mlflow.log_metric("platt_a", calibrator.a)
+    mlflow.log_metric("platt_b", calibrator.b)
+
+    # Sweep the F1 threshold in *calibrated* space — serving compares the
+    # calibrated probability against the bundle threshold, and Platt's bias
+    # term shifts the scale, so a raw-space threshold would not carry over.
     thresholds = np.arange(0.05, 0.96, 0.01)
-    f1s = [f1_score(val_y, (val_score >= t).astype(int), zero_division=0) for t in thresholds]
+    f1s = [f1_score(val_y, (val_score_cal >= t).astype(int), zero_division=0) for t in thresholds]
     best_threshold = float(thresholds[int(np.argmax(f1s))])
     mlflow.log_metric("best_threshold", best_threshold)
+    log.info(
+        "[fold %d] threshold=%.2f  platt a=%.4f b=%.4f",
+        fold_idx,
+        best_threshold,
+        calibrator.a,
+        calibrator.b,
+    )
 
-    calibrator = TemperatureScaler.from_validation(val_score, val_y)
-    test_score_cal = calibrator.predict(test_score)
-    T_star = float(calibrator.T)
-    mlflow.log_metric("temperature_T_star", T_star)
-    log.info("[fold %d] threshold=%.2f  T*=%.4f", fold_idx, best_threshold, T_star)
-
-    # Same bundle keys as V1 — the scoring path's contract.
+    # The keys serving reads (calibrator/threshold/aux_pipeline/aux_dim) are
+    # the scoring path's contract; calibrator is duck-typed on `.predict`.
     joblib.dump(
         {
             "calibrator": calibrator,
-            "temperature": T_star,
+            "platt_a": calibrator.a,
+            "platt_b": calibrator.b,
             "threshold": best_threshold,
             "aux_pipeline": aux_pipeline,
             "aux_dim": aux_dim,
@@ -449,14 +463,25 @@ def _run_cnn_fold(
             f1_score(test_y, (test_score_cal >= best_threshold).astype(int), zero_division=0)
         ),
         "test_brier": float(brier_score_loss(test_y, test_score_cal)),
+        "test_ece": float(expected_calibration_error(test_y, test_score_cal)),
         "best_threshold": best_threshold,
-        "temperature": T_star,
+        "platt_a": float(calibrator.a),
+        "platt_b": float(calibrator.b),
     }
 
 
 def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
     """Log mean/std across folds and write the summary table artifact."""
-    keys = ("test_roc_auc", "test_pr_auc", "test_f1", "test_brier", "best_threshold", "temperature")
+    keys = (
+        "test_roc_auc",
+        "test_pr_auc",
+        "test_f1",
+        "test_brier",
+        "test_ece",
+        "best_threshold",
+        "platt_a",
+        "platt_b",
+    )
     summary: dict[str, dict[str, float]] = {}
     for k in keys:
         vals = np.array([m[k] for m in fold_rows], dtype=float)
@@ -469,11 +494,13 @@ def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
     summary_path.write_text(json.dumps({"folds": fold_rows, "summary": summary}, indent=2))
     mlflow.log_artifact(str(summary_path))
     log.info(
-        "[train-cnn-cv] ROC-AUC %.4f ± %.4f  Brier %.4f ± %.4f",
+        "[train-cnn-cv] ROC-AUC %.4f ± %.4f  Brier %.4f ± %.4f  ECE %.4f ± %.4f",
         summary["test_roc_auc"]["mean"],
         summary["test_roc_auc"]["std"],
         summary["test_brier"]["mean"],
         summary["test_brier"]["std"],
+        summary["test_ece"]["mean"],
+        summary["test_ece"]["std"],
     )
 
 
