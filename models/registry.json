@@ -1,8 +1,8 @@
 {
-  "run_id": "e5388ed98a0945f6bb861740636ca3fa",
-  "cv_summary": "models/cv/e5388ed98a0945f6bb861740636ca3fa/cv_summary.json",
-  "cv_dir": "models/cv/e5388ed98a0945f6bb861740636ca3fa",
-  "test_roc_auc_mean": 0.8740856062960424,
-  "test_brier_mean": 0.14304042585820467,
-  "promoted_at": "2026-07-09T04:29:58.012410+00:00"
+  "run_id": "cebb0fe655684aafae69bc1a11cfde85",
+  "cv_summary": "models/cv/cebb0fe655684aafae69bc1a11cfde85/cv_summary.json",
+  "cv_dir": "models/cv/cebb0fe655684aafae69bc1a11cfde85",
+  "test_roc_auc_mean": 0.9508294428872853,
+  "test_brier_mean": 0.1195099939219122,
+  "promoted_at": "2026-07-12T10:26:42.498385+00:00"
 }
