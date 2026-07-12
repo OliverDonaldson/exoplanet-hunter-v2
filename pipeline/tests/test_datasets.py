@@ -196,6 +196,19 @@ def test_end_to_end_mini_training(tmp_path):
     assert {"calibrator", "temperature", "threshold", "aux_pipeline", "aux_dim"} <= set(bundle)
 
 
+def test_rewrite_clears_stale_shards(tmp_path):
+    """Regression (2026-07-12): rebuilding into the same directory must not
+    leave the previous set's shards behind — a different example count names
+    shards differently, and the survivors poison readers with a mixed schema."""
+    write_tfrecord_shards(synthetic_views(n=30), tmp_path, examples_per_shard=8)  # 4 shards
+    metadata = write_tfrecord_shards(synthetic_views(n=12), tmp_path, examples_per_shard=8)
+    shards = list_shards(tmp_path)
+    assert len(shards) == metadata.n_shards == 2  # no of-00004 stragglers
+    ds = make_dataset(shards, metadata, batch_size=64, cache=False)
+    _, labels = next(iter(ds))
+    assert len(labels) == 12  # parses cleanly end to end
+
+
 def test_metadata_roundtrip(shard_set):
     _, out, metadata = shard_set
     assert ShardMetadata.load(out) == metadata

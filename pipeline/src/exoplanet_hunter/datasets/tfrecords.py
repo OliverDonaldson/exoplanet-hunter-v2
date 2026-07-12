@@ -63,6 +63,12 @@ def write_tfrecord_shards(
 ) -> ShardMetadata:
     """Serialise a `ViewArrays` into TFRecord shards + metadata + index."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    # A rebuild with a different example count names its shards differently
+    # (…-of-0000N), so files from the previous set would survive and poison
+    # readers with a mixed schema — the 2026-07-12 expansion-run crash.
+    # A shard set is all-or-nothing: clear before writing.
+    for stale in out_dir.glob("views-*.tfrecord"):
+        stale.unlink()
     n = len(views.labels)
     aux_dim = 0 if views.aux_features is None else int(views.aux_features.shape[1])
     n_shards = max(1, int(np.ceil(n / examples_per_shard)))
