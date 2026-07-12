@@ -10,6 +10,11 @@ This module decides whether that run replaces the incumbent in
     `brier_tolerance` — a model that ranks better but calibrates worse is
     not an upgrade for a system whose whole point is trustworthy
     probabilities;
+  * reliability guard: mean CV ECE must not degrade by more than
+    `ece_tolerance`. Brier alone is blind here — a large discrimination
+    gain can pay for arbitrary miscalibration (the full-scale expansion
+    run promoted with ECE 0.136 vs the incumbent's 0.031 this way). The
+    guard is skipped when either summary predates the `test_ece` field;
   * the first-ever run promotes automatically (there is no bar yet — the RF
     baseline becomes the incumbent as soon as it's registered).
 
@@ -42,11 +47,17 @@ def _mean(summary: dict[str, Any], metric: str) -> float:
     return float(summary["summary"][metric]["mean"])
 
 
+def _mean_or_none(summary: dict[str, Any], metric: str) -> float | None:
+    entry = summary.get("summary", {}).get(metric)
+    return float(entry["mean"]) if entry else None
+
+
 def evaluate_promotion(
     candidate: dict[str, Any],
     incumbent: dict[str, Any] | None,
     *,
     brier_tolerance: float = 0.005,
+    ece_tolerance: float = 0.01,
 ) -> PromotionDecision:
     """Compare a candidate cv_summary against the incumbent's."""
     if incumbent is None:
@@ -67,6 +78,17 @@ def evaluate_promotion(
     if cand_brier > inc_brier + brier_tolerance:
         reasons.append(f"calibration degraded beyond tolerance (+{brier_tolerance})")
         return PromotionDecision(False, reasons)
+
+    cand_ece = _mean_or_none(candidate, "test_ece")
+    inc_ece = _mean_or_none(incumbent, "test_ece")
+    if cand_ece is not None and inc_ece is not None:
+        reasons.append(f"ECE {cand_ece:.4f} vs incumbent {inc_ece:.4f}")
+        if cand_ece > inc_ece + ece_tolerance:
+            reasons.append(f"reliability degraded beyond tolerance (+{ece_tolerance})")
+            return PromotionDecision(False, reasons)
+    else:
+        reasons.append("ECE guard skipped — summary predates the test_ece field")
+
     reasons.append("beats incumbent with calibration intact")
     return PromotionDecision(True, reasons)
 
@@ -97,6 +119,9 @@ def promote(models_dir: Path, run_id: str, cv_summary_path: Path) -> dict[str, A
         "test_brier_mean": _mean(summary, "test_brier"),
         "promoted_at": datetime.now(UTC).isoformat(),
     }
+    ece_mean = _mean_or_none(summary, "test_ece")
+    if ece_mean is not None:
+        registry["test_ece_mean"] = ece_mean
     models_dir.mkdir(parents=True, exist_ok=True)
-    (models_dir / REGISTRY_NAME).write_text(json.dumps(registry, indent=2))
+    (models_dir / REGISTRY_NAME).write_text(json.dumps(registry, indent=2) + "\n")
     return registry

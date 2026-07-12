@@ -187,13 +187,15 @@ def test_end_to_end_mini_training(tmp_path):
         )
     auc = run(cfg)
     assert 0.0 <= auc <= 1.0
-    # Both folds saved a model + a bundle with the V1-contract keys.
+    # Both folds saved a model + a bundle with the serving-contract keys.
     import joblib
 
     bundles = sorted((tmp_path / "models" / "cv").rglob("cnn_calibrator.joblib"))
     assert len(bundles) == 2
     bundle = joblib.load(bundles[0])
-    assert {"calibrator", "temperature", "threshold", "aux_pipeline", "aux_dim"} <= set(bundle)
+    assert {"calibrator", "platt_a", "platt_b", "threshold", "aux_pipeline", "aux_dim"} <= set(
+        bundle
+    )
 
 
 def test_rewrite_clears_stale_shards(tmp_path):
