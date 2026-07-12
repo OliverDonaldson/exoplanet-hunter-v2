@@ -28,7 +28,7 @@ lets the scores prioritise scarce follow-up telescope time.
 | Candidate catalogue | Every TOI/CTOI the community tracks (~11k), with TSM/ESM follow-up metrics | `data/catalogue/` |
 | Label catalogue | Targets with known answers (confirmed planet / false positive) — training ground truth | `data/labels/` |
 | Views | Each target's light curve cleaned, flattened, phase-folded into a 2001-bin global + 201-bin local "picture", plus 9 auxiliary numbers | `data/processed/` |
-| Model | Five 1D-CNNs (one per CV fold) + a temperature calibrator each | `models/cv/<run_id>/` |
+| Model | Five 1D-CNNs (one per CV fold) + a Platt calibrator each | `models/cv/<run_id>/` |
 | Registry | A tiny JSON pointing at the *promoted* run — the one being served | `models/registry.json` (in git) |
 | API | FastAPI: `/candidates`, `/score/{tic_id}`, `/reliability`, `/healthz` | `api/` |
 | Console | React site: sortable catalogue, live vetting pane, reliability diagram | `frontend/` |
@@ -75,8 +75,8 @@ make refresh       # THE loop: refresh → gates → train-if-warranted → publ
 6. **Build + shard + train**: preprocess everything, write TFRecord
    shards, run 5-fold CV training (`--data-config full` = whole pool).
 7. **Promotion gate**: the new model must beat the registered champion's
-   CV ROC-AUC *without* degrading calibration (Brier), or it is rejected
-   and the registry stays put.
+   CV ROC-AUC *without* degrading calibration — neither Brier nor ECE may
+   worsen beyond tolerance — or it is rejected and the registry stays put.
 8. **Publish**: version everything with DVC and push to R2.
 
 A promoted model is served automatically the next time the API starts.

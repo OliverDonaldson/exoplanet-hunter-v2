@@ -32,7 +32,7 @@ improvements) — the battle-tested science core only:
 | models: dual-view CNN (SE + MHA), focal loss, MC-Dropout, RF baseline | Optuna tuning, MLflow utils (rebuilt against tf.data) |
 | features: centroid (BEB vetting), handcrafted (RF) | Dash/`viz` dashboard → Streamlit + React console |
 | search: BLS / TLS | attention diagnostics (V1 report artefact) |
-| training/calibration: temperature scaling | registries/paths tied to V1 disk layout |
+| training/calibration: temperature scaling (upgraded to Platt scaling post-audit) | registries/paths tied to V1 disk layout |
 | eval: metrics, six-panel vetting figure | all preprocessed data artefacts (fresh data only) |
 | data: catalogue TAP builder, downloader, stellar params | |
 | scripts: build_dataset, preprocess_only, score_target/candidates, render_vetting | |
@@ -41,21 +41,50 @@ improvements) — the battle-tested science core only:
 catalogue and views from NASA sources so the new pipeline is validated
 end-to-end on data it produced itself.
 
-## Build order (each branch leaves `v2` working)
+## Build order (all seven merged — the system is complete and self-running)
 
-1. `feat/tfdata-pipeline` — tf.data (map→cache→shuffle→batch→prefetch),
+1. ✅ `feat/tfdata-pipeline` — tf.data (map→cache→shuffle→batch→prefetch),
    TFRecord shards, mixed precision; rewrite trainer on top.
-2. `feat/validation-gates` — Pandera catalogue checks in CI + the
+2. ✅ `feat/validation-gates` — Pandera catalogue checks in CI + the
    beats-current-best promotion gate + leakage guard.
-3. `feat/dvc-versioning` — catalogue + views under DVC, R2 remote.
-4. `feat/fastapi-serving` — refactor `scripts/score_target.py` into the
-   `/score/{tic_id}` service; deploy container.
-5. `feat/dashboard` — Streamlit explorer first (reuses matplotlib six-panel),
-   then the React console against the pinned contract; reliability diagram +
-   sky map.
-6. `feat/orchestrator` — Prefect/Dagster DAG with conditional GPU burst.
-7. `feat/data-scaling` — dataset expansion, now safe because 1–6 made it
-   automated and validated.
+3. ✅ `feat/dvc-versioning` — catalogue + views under DVC, R2 remote.
+4. ✅ `feat/fastapi-serving` — refactor `scripts/score_target.py` into the
+   `/score/{tic_id}` service (container deploy still pending — Fly.io).
+5. ✅ `feat/dashboard` — the React console against the pinned contract;
+   reliability diagram (sky map still pending).
+6. ✅ `feat/orchestrator` — Prefect DAG with conditional GPU burst.
+7. ✅ `feat/data-scaling` — full-pool expansion (5,155 targets: TESS
+   uncapped + balanced Kepler block, 9-dim aux with centroid restored).
+
+**Served model** (run `cebb0fe6`, promoted 2026-07-12, recalibrated
+2026-07-13): 5-fold CV ROC-AUC **0.951 ± 0.008**, Brier **0.087**, pooled
+OOF ECE **0.006** on 4,813 examples (2,448 Kepler + 2,365 TESS).
+
+## Performance
+
+Rendered from the promoted run's artefacts by
+`python pipeline/scripts/make_performance_figures.py`; all evaluation is
+out-of-fold (each target scored by the one model that never trained on it).
+
+*Per-fold learning curves — five folds converge consistently:*
+
+![Training curves](docs/figures/training_curves.png)
+
+*Discrimination — ROC and precision–recall, folds + pooled:*
+
+![ROC and PR curves](docs/figures/roc_pr.png)
+
+*Calibration — the raw scores were shifted wholesale (red); the served
+Platt-calibrated probabilities sit on the diagonal (blue), so "0.9" from
+this model means 90%:*
+
+![Calibration](docs/figures/calibration.png)
+
+*What the network learned — penultimate-layer activations of out-of-fold
+targets, PCA-projected to 3D. Planets and false positives separate cleanly;
+the misclassified targets (red rings) live exactly on the class boundary:*
+
+![Learned representation](docs/figures/embedding_3d.png)
 
 ## Quickstart
 

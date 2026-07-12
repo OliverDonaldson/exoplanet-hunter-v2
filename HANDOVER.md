@@ -116,3 +116,63 @@ make api & make frontend     # then click something in the console
 - `docs/OPERATING.md` — plain-language runbook.
 - `docs/exofop_calculations.pdf` — NExScI TSM/ESM recipes (implemented in
   `features/followup.py`, pinned to its worked example).
+
+---
+
+## Audit outcome (2026-07-13) — appended by the audit session
+
+The document above is the historical handover; this section records how the
+audit resolved each target. Fuller detail lives in the git log.
+
+**The expansion run**: finished CV 2026-07-12 13:27 (the flow process died
+right after — machine slept — so gate + publish were run manually). Run
+`cebb0fe6` PROMOTED: CV ROC-AUC 0.9508 ± 0.0085 vs incumbent 0.8741, on
+4,813 examples (2,448 Kepler + 2,365 TESS). It shipped with a calibration
+regression (ECE 0.136 vs 0.031 — systematic under-confidence that
+temperature scaling cannot correct), fixed the next day: Platt scaling in
+the trainer, an ECE guard in the promotion gate, and an in-place
+recalibration of the run (`pipeline/scripts/recalibrate_run.py`) — pooled
+OOF ECE now **0.006**, Brier **0.087**, thresholds ~0.4.
+
+Audit targets, item by item:
+
+1. **Docker image** — still unbuilt/untested. Deliberately deferred with
+   Fly.io (deploy phase); nothing else blocks on it.
+2. **GitHub Actions CI** — observed green 2026-07-13 (10/10 runs, ~2 min
+   each, including the calibration merge).
+3. **Console panel parity** — still open (odd/even overlay, periodogram,
+   centroid track). Deferred to the app phase by decision.
+4. **Kepler subsample churn** — fixed: catalogue subsampling is now
+   content-keyed (`_stable_sample`, md5 of seed:tic_id) instead of
+   positional, so refresh-trigger counts reflect real pool changes only.
+   NOTE: the switch causes a one-time membership change of the Kepler
+   block on the next refresh; expect one legitimate retrain trigger.
+5. **Machine-specific paths** — fixed: `scripts-dev/run-api.sh` discovers
+   the conda env (override `$EXO_PYTHON`); v2 has its own
+   `.claude/launch.json` (api + frontend).
+6. **Debris** — `mlruns/0` + the file-store experiment (V1-env accident,
+   35 MB) deleted; `mlruns/1` is the *live* sqlite artifact store — keep.
+   `labels.previous.parquet` handling verified correct (leakage-guard
+   input, versioned with the labels dir). The Kepler raw cache (30 GB)
+   was MOVED from V1 into `data/raw_kepler` — v2 no longer needs
+   `KEPLER_RAW_DIR` pointing across repos. V1's `data/raw` (64 GB TESS)
+   was NOT deleted: v2's own TESS cache is a different, smaller set
+   (17,832 vs 29,163 files), so reclaiming it is only safe if V1 never
+   needs to re-run — owner's call.
+7. **Dropped V1 features** — Optuna tuning and attention diagnostics
+   remain unported (candidates for the next research phase; hyperparams
+   date from the 881-example era).
+8. **Deferred by decision** — unchanged (Fly.io, scheduled refresh,
+   webhook, sky map, sequence models).
+9. **Docs drift** — fixed: README build order marked complete + served
+   model numbers added; OPERATING.md calibrator/gate text corrected;
+   architecture.md needed no change (method-agnostic).
+
+New findings logged during the audit, still open:
+
+- `/score/{tic_id}` latency: per-request MAST download + BLS; a 185k-cadence
+  multi-sector target took >9.5 min. Fix with catalogue-ephemeris preference
+  + a sector/cadence cap (app phase).
+- Calibrators are fitted on deterministic validation predictions but applied
+  to MC-Dropout means at serving (`scoring/ensemble.py`) — quantify the
+  mismatch; root cause of the raw-score shift itself is still unexplained.
