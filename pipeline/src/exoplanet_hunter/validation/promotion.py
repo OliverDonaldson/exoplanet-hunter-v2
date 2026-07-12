@@ -11,10 +11,9 @@ This module decides whether that run replaces the incumbent in
     not an upgrade for a system whose whole point is trustworthy
     probabilities;
   * reliability guard: mean CV ECE must not degrade by more than
-    `ece_tolerance`. Brier alone is blind here — a large discrimination
-    gain can pay for arbitrary miscalibration (the full-scale expansion
-    run promoted with ECE 0.136 vs the incumbent's 0.031 this way). The
-    guard is skipped when either summary predates the `test_ece` field;
+    `ece_tolerance` — Brier alone is blind to this, since a discrimination
+    gain can pay for arbitrary miscalibration. Skipped when either summary
+    predates the `test_ece` field;
   * the first-ever run promotes automatically (there is no bar yet — the RF
     baseline becomes the incumbent as soon as it's registered).
 

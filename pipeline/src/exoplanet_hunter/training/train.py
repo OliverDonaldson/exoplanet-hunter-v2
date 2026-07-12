@@ -19,9 +19,8 @@ Differences from the V1 trainer this replaces:
   * Optional mixed_float16 policy for the GPU burst.
 
 Split semantics and callbacks are unchanged from V1. Calibration is Platt
-scaling (V1 used temperature-only, which cannot correct the score-shift the
-full-scale run exhibited), and the F1 threshold is swept on *calibrated*
-validation scores so it lives in the same space serving compares it against.
+scaling, and the F1 threshold is swept on *calibrated* validation scores —
+the space serving compares it against.
 """
 
 from __future__ import annotations
@@ -404,9 +403,7 @@ def _run_cnn_fold(
     mlflow.log_metric("platt_a", calibrator.a)
     mlflow.log_metric("platt_b", calibrator.b)
 
-    # Sweep the F1 threshold in *calibrated* space — serving compares the
-    # calibrated probability against the bundle threshold, and Platt's bias
-    # term shifts the scale, so a raw-space threshold would not carry over.
+    # Calibrated space: serving compares the calibrated prob to this threshold.
     thresholds = np.arange(0.05, 0.96, 0.01)
     f1s = [f1_score(val_y, (val_score_cal >= t).astype(int), zero_division=0) for t in thresholds]
     best_threshold = float(thresholds[int(np.argmax(f1s))])
@@ -419,8 +416,7 @@ def _run_cnn_fold(
         calibrator.b,
     )
 
-    # The keys serving reads (calibrator/threshold/aux_pipeline/aux_dim) are
-    # the scoring path's contract; calibrator is duck-typed on `.predict`.
+    # Bundle keys are the scoring path's contract.
     joblib.dump(
         {
             "calibrator": calibrator,

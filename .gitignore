@@ -45,3 +45,4 @@ mlflow.db
 
 # Training-run outputs (plots, tier tables) — MLflow/DVC territory
 results/
+.claude/

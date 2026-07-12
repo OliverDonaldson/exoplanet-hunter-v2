@@ -215,9 +215,6 @@ def test_better_auc_but_degraded_calibration_rejected():
 
 
 def test_better_brier_but_degraded_ece_rejected():
-    # Brier alone is blind to this: a discrimination gain can pay for
-    # arbitrary miscalibration — exactly how the full-scale run promoted
-    # with ECE 0.136 vs the incumbent's 0.031.
     decision = evaluate_promotion(summary(0.95, 0.09, ece=0.13), summary(0.87, 0.10, ece=0.03))
     assert not decision.promoted
     assert any("reliability" in r for r in decision.reasons)

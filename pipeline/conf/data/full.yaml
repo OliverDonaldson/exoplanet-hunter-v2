@@ -1,10 +1,8 @@
 # Full-scale dataset: every labelled TESS target plus the balanced Kepler
-# block. This is the feat/data-scaling expansion config — the caps that made
-# quick builds cheap (and made the refresh trigger imprecise via sampling
-# churn) are gone.
+# block (content-keyed selection — stable across refreshes). Kepler raw
+# cache: data/raw_kepler (override: KEPLER_RAW_DIR).
 #
 # Usage:
-#   export KEPLER_RAW_DIR=/Users/ollie/Project/data/raw_kepler   # reuse V1's cache
 #   python pipeline/scripts/build_dataset.py data=full
 name: full
 

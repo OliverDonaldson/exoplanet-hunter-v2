@@ -15,6 +15,7 @@ Two sources, both queried via the public TAP service:
 
 from __future__ import annotations
 
+import hashlib
 import io
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,19 @@ KEPLER_DISPOSITION_LABELS: dict[str, int] = {
     "FALSE POSITIVE": 0,
     "CANDIDATE": -1,
 }
+
+
+def _stable_sample(df: pd.DataFrame, n: int, seed: int, key: str = "tic_id") -> pd.DataFrame:
+    """Rank rows by md5(seed:key) and take the first `n`.
+
+    Unlike positional `.sample(random_state=...)`, membership survives the
+    source catalogue being reordered between refreshes, so the refresh
+    trigger's new-target count stays honest.
+    """
+    if n >= len(df):
+        return df
+    ranks = df[key].map(lambda k: hashlib.md5(f"{seed}:{k}".encode()).hexdigest())
+    return df.loc[ranks.sort_values().index[:n]]
 
 
 @dataclass(frozen=True)
@@ -252,9 +266,9 @@ def build_label_catalog(req: CatalogRequest, out_dir: Path) -> pd.DataFrame:
         len(pc),
     )
 
-    # Subsample to requested counts, with deterministic seed.
-    pos = pos.sample(min(req.n_confirmed, len(pos)), random_state=req.seed)
-    neg = neg.sample(min(req.n_false_pos, len(neg)), random_state=req.seed)
+    # Subsample to requested counts — content-keyed, so refreshes are stable.
+    pos = _stable_sample(pos, req.n_confirmed, req.seed)
+    neg = _stable_sample(neg, req.n_false_pos, req.seed)
 
     parts = [pos, neg]
 
@@ -272,14 +286,8 @@ def build_label_catalog(req: CatalogRequest, out_dir: Path) -> pd.DataFrame:
             len(koi_pc),
         )
 
-        koi_pos = koi_pos.sample(
-            min(req.n_confirmed_kepler, len(koi_pos)),
-            random_state=req.seed,
-        )
-        koi_neg = koi_neg.sample(
-            min(req.n_false_pos_kepler, len(koi_neg)),
-            random_state=req.seed,
-        )
+        koi_pos = _stable_sample(koi_pos, req.n_confirmed_kepler, req.seed)
+        koi_neg = _stable_sample(koi_neg, req.n_false_pos_kepler, req.seed)
         parts.extend([koi_pos, koi_neg])
 
         # Persist Kepler held-out candidates alongside TESS candidates.

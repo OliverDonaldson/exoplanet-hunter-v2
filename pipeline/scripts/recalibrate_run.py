@@ -1,24 +1,8 @@
 """Refit an existing CV run's calibration bundles in place — no retraining.
 
-Why this exists: the full-scale expansion run (cebb0fe6) shipped with
-temperature-only calibration, which cannot correct the wholesale downward
-shift its raw scores exhibited (ECE 0.136 against the incumbent's 0.031).
-The trainer now fits a `PlattScaler` per fold; this script backfills a run
-that predates that change so it serves honest probabilities without paying
-for a retrain.
-
-Per-fold validation scores are not persisted, so each fold's calibrator is
-fitted on the pooled out-of-fold test predictions of the *other* folds
-(cross-fitted). That is ~8x more examples than a single validation split,
-drawn from the same held-out-score distribution, and fold f's own test rows
-never touch fold f's fit — the rewritten per-fold test metrics stay
-leakage-clean. The F1 threshold is re-swept on the same fit rows in
-calibrated space, matching the trainer.
-
-Rewrites, for each fold: `cnn_calibrator.joblib` (calibrator + threshold;
-aux pipeline untouched) and `predictions.parquet` (prob_calibrated), then
-the run-level `predictions.parquet` and `cv_summary.json` (now including
-`test_ece`). ROC/PR-AUC are unchanged by construction — Platt is monotone.
+Validation scores are not persisted, so each fold's Platt calibrator is
+fitted on the pooled out-of-fold predictions of the *other* folds; fold f's
+own test rows never touch its fit, keeping the rewritten metrics clean.
 
 Usage (from the repository root):
 
