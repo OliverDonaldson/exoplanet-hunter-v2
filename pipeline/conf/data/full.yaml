@@ -1,10 +1,6 @@
 # Full-scale dataset: every labelled TESS target plus the balanced Kepler
-# block. This is the feat/data-scaling expansion config. TESS is uncapped;
-# the Kepler block is capped but selection is content-keyed (stable across
-# refreshes), so the refresh trigger no longer sees sampling churn.
-#
-# The Kepler raw cache lives in-repo at data/raw_kepler (moved from V1 during
-# the 2026-07-13 audit); KEPLER_RAW_DIR still overrides it if ever needed.
+# block (content-keyed selection — stable across refreshes). Kepler raw
+# cache: data/raw_kepler (override: KEPLER_RAW_DIR).
 #
 # Usage:
 #   python pipeline/scripts/build_dataset.py data=full

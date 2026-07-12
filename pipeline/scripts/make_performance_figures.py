@@ -1,23 +1,8 @@
-"""Render the promoted run's performance figures for the docs.
-
-Four figures, written to docs/figures/ (committed — they are the README's
-evidence that the system does what it claims):
-
-  * training_curves.png — per-fold loss + ROC-AUC by epoch (train faint,
-    validation solid), pulled from the MLflow sqlite metric store.
-  * roc_pr.png          — per-fold ROC and precision-recall curves with the
-    pooled out-of-fold curve on top.
-  * calibration.png     — reliability before (raw sigmoid outputs) and after
-    (served Platt calibration), plus the calibrated score distributions by
-    true class. This is the shift the 2026-07-13 recalibration corrected.
-  * embedding_3d.png    — the fold-0 network's penultimate-layer activations
-    for its out-of-fold test targets, PCA-projected to 3D: what the CNN's
-    learned representation looks like, planets vs false positives.
+"""Render the promoted run's performance figures into docs/figures/.
 
 Usage (from the repository root):
 
-    python pipeline/scripts/make_performance_figures.py               # promoted run
-    python pipeline/scripts/make_performance_figures.py --run <run_id>
+    python pipeline/scripts/make_performance_figures.py [--run <run_id>]
 """
 
 from __future__ import annotations
@@ -163,7 +148,7 @@ def fig_calibration(preds: pd.DataFrame, out: Path) -> None:
 
 
 def fig_embedding_3d(run_dir: Path, shard_dir: Path, preds: pd.DataFrame, out: Path) -> None:
-    """Penultimate activations of the fold-0 CNN on its OOF test targets."""
+    """Fold-0 penultimate activations on its OOF test targets, PCA to 3D."""
     import tensorflow as tf
 
     from exoplanet_hunter.datasets import (
@@ -208,9 +193,7 @@ def fig_embedding_3d(run_dir: Path, shard_dir: Path, preds: pd.DataFrame, out: P
     extractor = tf.keras.Model(model.inputs, penultimate.output)
     emb = extractor.predict(ds, verbose=0)
 
-    # Standardise units before PCA so a few high-variance activations don't
-    # own the projection, and clip the view to the central 99% so outliers
-    # don't crush the structure into a corner.
+    # Standardise before PCA; clip the view to the central 99% (outliers).
     emb_std = (emb - emb.mean(axis=0)) / (emb.std(axis=0) + 1e-9)
     xyz = PCA(n_components=3, random_state=0).fit_transform(emb_std)
     y = fold.y_true.to_numpy()

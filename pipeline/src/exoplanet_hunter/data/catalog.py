@@ -47,15 +47,11 @@ KEPLER_DISPOSITION_LABELS: dict[str, int] = {
 
 
 def _stable_sample(df: pd.DataFrame, n: int, seed: int, key: str = "tic_id") -> pd.DataFrame:
-    """Deterministic content-keyed subsample: rank rows by md5(seed:key) and
-    take the first `n`.
+    """Rank rows by md5(seed:key) and take the first `n`.
 
-    Unlike positional `.sample(random_state=...)`, which reshuffles its picks
-    whenever the source catalogue is merely reordered, hash-ranked membership
-    changes only in proportion to real pool changes (a new row displaces an
-    existing pick only if its rank lands inside the top `n`). The KOI pool
-    moves by ~0-2 rows per refresh, so selection is stable in practice and
-    the refresh trigger no longer counts phantom "new" targets.
+    Unlike positional `.sample(random_state=...)`, membership survives the
+    source catalogue being reordered between refreshes, so the refresh
+    trigger's new-target count stays honest.
     """
     if n >= len(df):
         return df

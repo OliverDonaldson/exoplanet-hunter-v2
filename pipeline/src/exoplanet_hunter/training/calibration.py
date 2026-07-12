@@ -1,21 +1,15 @@
 """Post-hoc probability calibration for binary-sigmoid models.
 
-Two calibrators, both rank-preserving (monotone in logit space, so ROC-AUC /
-PR-AUC are identical pre- and post-calibration; only Brier and reliability
-change), both fitted on validation `(scores, labels)` by minimising NLL:
+Both calibrators are monotone in logit space (rank-preserving) and fitted
+on validation scores by minimising NLL:
 
-  * `PlattScaler` — affine in logit space, `sigmoid(a * logit + b)`
-    (Platt 1999). The trainer's default: the bias term `b` corrects a
-    wholesale shift of the score distribution, which the full-scale run
-    exhibited (mean prob ~0.39 against a 0.53 base rate — ECE 0.136 that
-    temperature scaling left untouched).
+  * `PlattScaler` — affine, `sigmoid(a * logit + b)` (Platt 1999); the bias
+    term corrects a shifted score distribution, which temperature cannot.
   * `TemperatureScaler` — the `a = 1/T, b = 0` special case (Guo et al.
-    2017). Kept for unpickling calibration bundles from older runs; it can
-    stretch or squash confidence but cannot shift it.
+    2017); kept for unpickling bundles from older runs.
 
-Both classes mirror the sklearn `IsotonicRegression` interface
-(`.predict(scores) -> scores`) so the inference path in
-`scripts/score_target.py` and `scoring.ensemble` works unchanged.
+Both mirror the sklearn `.predict(scores) -> scores` interface the scoring
+path expects.
 """
 
 from __future__ import annotations
@@ -60,10 +54,8 @@ def fit_temperature(
 def fit_platt(scores: np.ndarray, labels: np.ndarray) -> tuple[float, float]:
     """Minimise NLL over `sigmoid(a * logit(scores) + b)`; return (a*, b*).
 
-    Parametrised as `a = exp(u)` so the slope stays positive and the
-    transform monotone (rank-preserving), matching the module's contract.
-    The NLL is convex in (a, b); BFGS with the analytic gradient converges
-    in a handful of iterations where gradient-free search stalls.
+    `a = exp(u)` keeps the slope positive (rank-preserving). BFGS with the
+    analytic gradient — gradient-free search stalls on this surface.
     """
     scores = np.asarray(scores, dtype=np.float64).ravel()
     labels = np.asarray(labels, dtype=np.float64).ravel()

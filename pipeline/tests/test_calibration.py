@@ -1,11 +1,4 @@
-"""Calibration: Platt must correct the score shift that temperature cannot.
-
-The full-scale expansion run produced raw scores shifted wholesale below the
-positive base rate (ECE 0.136 with temperature-only calibration). These tests
-pin the property that motivated the switch: a logit-space *shift* is exactly
-recoverable by `PlattScaler`'s bias term and provably out of reach for
-`TemperatureScaler`.
-"""
+"""Platt calibration must correct a score shift that temperature cannot."""
 
 from __future__ import annotations
 
@@ -49,7 +42,7 @@ def test_platt_fixes_the_shift_temperature_cannot():
     ece_platt = expected_calibration_error(
         y, PlattScaler.from_validation(scores, y).predict(scores)
     )
-    assert ece_raw > 0.10  # the failure mode is real in this fixture
+    assert ece_raw > 0.10
     assert ece_platt < 0.02
     assert ece_platt < ece_temp
 

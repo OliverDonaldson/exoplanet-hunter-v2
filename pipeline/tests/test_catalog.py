@@ -1,10 +1,4 @@
-"""Catalogue subsampling: selection must be stable across refreshes.
-
-Positional `.sample(random_state=...)` reshuffled its picks whenever the
-upstream TAP catalogue reordered or grew, and the churn inflated the
-refresh-trigger's new-target count. `_stable_sample` ranks by a content
-hash instead, so membership only changes when the pool itself does.
-"""
+"""Catalogue subsampling must be stable across refreshes (no positional churn)."""
 
 from __future__ import annotations
 
@@ -25,9 +19,7 @@ def test_selection_survives_reordering():
 
 
 def test_selection_stable_under_realistic_pool_growth():
-    # Churn is proportional to the pool delta: a new row displaces a pick
-    # only if its hash rank lands in the top n. KOI moves ~0-2 rows per
-    # refresh, so at most that many picks may swap — never a reshuffle.
+    # Churn is proportional to the pool delta — never a reshuffle.
     ids = list(range(1000, 1100))
     before = set(_stable_sample(pool(ids), 30, seed=42).tic_id)
     after = set(_stable_sample(pool([*ids, 5000, 5001]), 30, seed=42).tic_id)
