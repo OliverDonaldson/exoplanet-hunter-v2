@@ -1,0 +1,40 @@
+# Fly.io config for the serving API. `fly launch` reads this; edit `app` to a
+# unique name first. Secrets (AWS_* for the R2 dvc pull) are NOT here — set
+# them with `fly secrets set`. See docs/DEPLOY.md.
+app = "exoplanet-hunter-api"
+primary_region = "syd"
+
+[build]
+  dockerfile = "docker/api.Dockerfile"
+
+[env]
+  FRONTEND_ORIGIN = "https://exoplanet-hunter-console.onrender.com"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Scale to zero when idle — a portfolio demo is idle most of the month.
+  # First request after a stop pays a ~20-30s cold start (TF import + 5 model
+  # loads); use "suspend" instead of "stop" to trade a little cost for a
+  # faster resume.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+# Cold start runs the entrypoint (dvc pull + TF import + model load) before
+# /healthz answers; the grace period must cover it.
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "90s"
+  method = "GET"
+  path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"
