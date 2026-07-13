@@ -26,23 +26,40 @@ class PeriodSearchResult:
     snr: float
 
 
+def period_grid(
+    baseline: float,
+    *,
+    period_min: float,
+    period_max: float,
+    min_duration: float,
+    max_periods: int,
+) -> np.ndarray:
+    """Uniform-in-frequency trial periods, astropy-spaced, capped in count.
+
+    astropy's `autoperiod` spacing is `df = min_duration / baseline**2`; on a
+    multi-sector baseline (700+ days) that grid runs to millions of periods
+    and the search to minutes, so the count is capped — trading long-baseline
+    sensitivity for bounded latency. Below the cap the grid is the standard
+    one.
+    """
+    f_min, f_max = 1.0 / period_max, 1.0 / period_min
+    if baseline > 0:
+        df = min_duration / baseline**2
+        n = int(np.clip(np.ceil((f_max - f_min) / df), 2, max_periods))
+    else:
+        n = 2
+    return 1.0 / np.linspace(f_min, f_max, n)
+
+
 def bls_period_search(
     lc: lk.LightCurve,
     *,
     period_min: float = 0.5,
     period_max: float = 15.0,
     duration_grid: tuple[float, ...] = (0.05, 0.10, 0.15, 0.20),
-    oversample: float = 5.0,
     max_periods: int = 5_000,
 ) -> PeriodSearchResult:
-    """Run BLS over a period range and return the strongest peak.
-
-    The trial-period grid is uniform in frequency at the baseline's natural
-    resolution, but capped at ``max_periods``. autopower's grid scales with
-    the observing baseline, so a multi-sector target (700+ day baseline)
-    yields tens of thousands of trial periods and a multi-minute search; the
-    cap bounds that at a small cost in period resolution for the search only.
-    """
+    """Run BLS over a period range and return the strongest peak."""
     from astropy.timeseries import BoxLeastSquares
 
     time = np.asarray(lc.time.value, dtype=float)
@@ -52,10 +69,13 @@ def bls_period_search(
     bls = BoxLeastSquares(time, flux)
 
     baseline = float(time.max() - time.min()) if time.size else 0.0
-    f_min, f_max = 1.0 / period_max, 1.0 / period_min
-    df = 1.0 / (oversample * baseline) if baseline > 0 else (f_max - f_min)
-    n_periods = int(np.clip((f_max - f_min) / df, 1, max_periods))
-    periods = 1.0 / np.linspace(f_min, f_max, n_periods)
+    periods = period_grid(
+        baseline,
+        period_min=period_min,
+        period_max=period_max,
+        min_duration=min(duration_grid),
+        max_periods=max_periods,
+    )
 
     result = bls.power(periods, list(duration_grid))
     best = int(np.argmax(result.power))

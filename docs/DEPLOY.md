@@ -6,8 +6,9 @@ the step that clears the console's "API unreachable" banner.
 
 ## 1. Build and test the image locally
 
-The daemon needs outbound network to Docker Hub + PyPI; run these in your own
-terminal (a sandboxed session may block the Docker VM's egress).
+The daemon needs outbound network to Docker Hub + PyPI. If pulls hang right
+after Docker Desktop starts, give its VM a minute to bring networking up and
+retry.
 
 ```bash
 cd /Users/ollie/Project/v2
