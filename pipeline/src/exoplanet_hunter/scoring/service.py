@@ -2,9 +2,9 @@
 
 This is `scripts/score_target.py` refactored into a library so the FastAPI
 endpoint and the CLI share one implementation — fetch from MAST (or the
-local FITS cache) → clean → BLS if no ephemeris given → transit-masked
-flatten → global/local views → 5-fold ensemble + MC-Dropout → temperature
-calibration → centroid & odd/even diagnostics → plain-language verdict.
+local FITS cache) → clean → ephemeris (user > catalogue > BLS search) →
+transit-masked flatten → global/local views → 5-fold ensemble + MC-Dropout
+→ calibration → centroid & odd/even diagnostics → plain-language verdict.
 
 Preprocessing parameters default to conf/preprocess/default.yaml's values so
 the service needs no Hydra at runtime; the dataclass keeps them overridable
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.stellar import fetch_stellar_params
@@ -39,6 +40,13 @@ from exoplanet_hunter.search import bls_period_search
 from exoplanet_hunter.utils.logging import get_logger
 
 log = get_logger(__name__)
+
+BTJD_OFFSET = 2_457_000.0
+# BLS cost is (n_periods x n_cadences x n_durations). bls_period_search caps
+# n_periods; this caps n_cadences for the search only (the final phase-fold
+# still uses every cadence). Together they bound an otherwise multi-minute
+# search on a 180k-cadence multi-sector target.
+MAX_SEARCH_CADENCES = 20_000
 
 
 class NoLightCurveError(LookupError):
@@ -109,6 +117,7 @@ class TargetScorer:
         self.ensemble = ScoringEnsemble.from_registry(models_dir)
         self.downloader = LightCurveDownloader(data_raw, author="SPOC", cadence=120)
         self._snr_series: Any | None = None
+        self._ephemeris: pd.DataFrame | None = None
         # Stellar params are immutable per TIC — cache the TAP round-trip
         # (several seconds) so re-scores of a target are dominated by MC only.
         self._fetch_stellar = lru_cache(maxsize=4096)(fetch_stellar_params)
@@ -124,6 +133,33 @@ class TargetScorer:
 
             self._snr_series = toi_snr_by_tic(self.candidates_path)
         return float(self._snr_series.get(tic_id, float("nan")))
+
+    def _catalogue_ephemeris(self, tic_id: int) -> tuple[float, float, float] | None:
+        """Published (period, t0_btjd, duration_days) for a known TOI/CTOI.
+
+        Lets the endpoint skip the BLS search for the ~11k catalogued
+        targets — the search is the dominant cost on multi-sector light
+        curves. Returns None when the target is absent or its row lacks a
+        usable period/epoch/duration.
+        """
+        if self.candidates_path is None or not self.candidates_path.exists():
+            return None
+        if self._ephemeris is None:
+            cols = ["tic_id", "period_days", "epoch_bjd", "duration_hours"]
+            df = pd.read_parquet(self.candidates_path, columns=cols)
+            self._ephemeris = df.dropna(subset=cols).set_index("tic_id")
+        if tic_id not in self._ephemeris.index:
+            return None
+        row = self._ephemeris.loc[tic_id]
+        if isinstance(row, pd.DataFrame):  # duplicate TIC — take the first
+            row = row.iloc[0]
+        period = float(row["period_days"])
+        t0 = float(row["epoch_bjd"]) - BTJD_OFFSET
+        duration = float(row["duration_hours"]) / 24.0
+        # A valid TESS-era epoch lands in BTJD ~1000-5000; reject dirty rows.
+        if period <= 0 or duration <= 0 or not 1_000.0 < t0 < 5_000.0:
+            return None
+        return period, t0, duration
 
     def _aux_row(
         self, tic_id: int, raw_lc: Any, period: float, t0: float, duration: float
@@ -161,6 +197,7 @@ class TargetScorer:
         duration_hours: float | None = None,
         n_mc: int = 50,
         force_download: bool = False,
+        force_bls: bool = False,
     ) -> ScoreOutcome:
         import lightkurve as lk
 
@@ -170,7 +207,16 @@ class TargetScorer:
         raw = lk.read(str(res.path))
         cleaned = clean_lightcurve(raw, sigma_clip=self.preprocess.sigma_clip)
 
-        if period_days is None or t0_btjd is None or duration_hours is None:
+        catalogue = None if force_bls else self._catalogue_ephemeris(tic_id)
+        if period_days is not None and t0_btjd is not None and duration_hours is not None:
+            period, t0 = float(period_days), float(t0_btjd)
+            duration = float(duration_hours) / 24.0
+            source = "user"
+        elif catalogue is not None:
+            period, t0, duration = catalogue
+            source = "catalogue"
+            log.info("[score] TIC %d catalogue ephemeris: P=%.4f d t0=%.4f", tic_id, period, t0)
+        else:
             # Unmasked flatten just for the search; re-flattened with a
             # transit mask below once the ephemeris is known.
             lc_search = flatten_lightcurve(
@@ -178,6 +224,16 @@ class TargetScorer:
                 window_length=self.preprocess.window_length,
                 polyorder=self.preprocess.polyorder,
             )
+            if len(lc_search) > MAX_SEARCH_CADENCES:
+                stride = len(lc_search) // MAX_SEARCH_CADENCES + 1
+                log.info(
+                    "[score] TIC %d: decimating BLS search %d->%d cadences (stride %d)",
+                    tic_id,
+                    len(lc_search),
+                    len(lc_search[::stride]),
+                    stride,
+                )
+                lc_search = lc_search[::stride]
             bls = bls_period_search(lc_search)
             period, t0, duration = float(bls.period), float(bls.t0), float(bls.duration)
             source = "bls"
@@ -189,10 +245,6 @@ class TargetScorer:
                 duration,
                 float(bls.snr),
             )
-        else:
-            period, t0 = float(period_days), float(t0_btjd)
-            duration = float(duration_hours) / 24.0
-            source = "user"
 
         flat = flatten_lightcurve(
             cleaned,

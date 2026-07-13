@@ -1,9 +1,9 @@
 """`GET /score/{tic_id}` — the live inference endpoint.
 
 Wraps `exoplanet_hunter.scoring.TargetScorer`: fetch light curve (MAST or
-local FITS cache) → clean → BLS if no ephemeris supplied → transit-masked
-flatten → global/local views → registered 5-fold ensemble + MC-Dropout →
-temperature-calibrated probability + vetting diagnostics.
+local FITS cache) → clean → ephemeris (user > catalogue > BLS search) →
+transit-masked flatten → global/local views → registered 5-fold ensemble +
+MC-Dropout → calibrated probability + vetting diagnostics.
 
 The scorer loads the promoted ensemble lazily on first request (Keras +
 5 fold models — a cold start of a few seconds) and is cached for the
@@ -62,6 +62,9 @@ def score_target(
     duration_hours: float | None = Query(None, gt=0),
     n_mc: int = Query(50, ge=10, le=500, description="MC-Dropout samples"),
     force_download: bool = Query(False),
+    force_bls: bool = Query(
+        False, description="Ignore the catalogue ephemeris; run the BLS search"
+    ),
 ) -> ScoreResponse:
     from exoplanet_hunter.scoring import BEB_THRESHOLD_SIGMA, NoLightCurveError
 
@@ -81,6 +84,7 @@ def score_target(
             duration_hours=duration_hours,
             n_mc=n_mc,
             force_download=force_download,
+            force_bls=force_bls,
         )
     except NoLightCurveError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

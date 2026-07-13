@@ -101,3 +101,51 @@ def test_verdict_language():
     assert "Strong planet candidate" in verdict(0.95, 0.3, centroid_snr=1.0, odd_even=None)
     assert "background-EB" in verdict(0.95, 0.3, centroid_snr=5.0, odd_even=None)
     assert "Unlikely" in verdict(0.05, 0.3, centroid_snr=1.0, odd_even=None)
+
+
+def _bare_scorer(candidates_path):
+    from exoplanet_hunter.scoring.service import TargetScorer
+
+    scorer = object.__new__(TargetScorer)  # skip the heavy ensemble load
+    scorer.candidates_path = candidates_path
+    scorer._ephemeris = None
+    return scorer
+
+
+def test_catalogue_ephemeris_converts_bjd_to_btjd(tmp_path):
+    import pandas as pd
+
+    path = tmp_path / "candidates.parquet"
+    pd.DataFrame(
+        {
+            "tic_id": [111],
+            "period_days": [2.47],
+            "epoch_bjd": [2459013.0],  # BTJD 2013
+            "duration_hours": [1.8],
+        }
+    ).to_parquet(path)
+
+    period, t0, duration = _bare_scorer(path)._catalogue_ephemeris(111)
+    assert period == pytest.approx(2.47)
+    assert t0 == pytest.approx(2013.0)
+    assert duration == pytest.approx(1.8 / 24.0)
+
+
+def test_catalogue_ephemeris_rejects_dirty_and_missing(tmp_path):
+    import pandas as pd
+
+    path = tmp_path / "candidates.parquet"
+    pd.DataFrame(
+        {
+            "tic_id": [1, 2, 3],
+            "period_days": [2.47, -1.0, 3.0],
+            "epoch_bjd": [2459013.0, 2459013.0, 24581371.0],  # row 3 epoch malformed
+            "duration_hours": [1.8, 1.8, None],  # row 3 duration missing
+        }
+    ).to_parquet(path)
+
+    scorer = _bare_scorer(path)
+    assert scorer._catalogue_ephemeris(1) is not None
+    assert scorer._catalogue_ephemeris(2) is None  # negative period
+    assert scorer._catalogue_ephemeris(3) is None  # dropped by dropna
+    assert scorer._catalogue_ephemeris(999) is None  # absent
