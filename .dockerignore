@@ -9,7 +9,10 @@ data/labels/
 data/processed/
 data/catalogue/
 data/exofop/
+# Docker strips the trailing slash, so this also swallows the *.dvc pointer
+# files the entrypoint pulls with — re-include them explicitly.
 models/cv/*/
+!models/cv/*.dvc
 mlruns/
 results/
 outputs/
