@@ -15,20 +15,19 @@ cd /Users/ollie/Project/v2
 docker build -f docker/api.Dockerfile -t exoplanet-hunter-api .
 ```
 
-Smoke-test without R2 credentials by mounting the local DVC cache, so the
-entrypoint's `dvc pull` resolves from cache instead of the remote:
+Smoke-test without R2 credentials by mounting the artefacts directly and
+skipping the pull (without credentials, botocore's credential-chain probing
+hangs rather than failing fast):
 
 ```bash
-docker run --rm -p 8010:8000 \
-  -v "$(pwd)/.dvc/cache:/srv/.dvc/cache:ro" \
+docker run --rm -p 8010:8000 -e SKIP_DVC_PULL=1 \
+  -v "$(pwd)/models:/srv/models:ro" \
+  -v "$(pwd)/data/catalogue:/srv/data/catalogue:ro" \
   exoplanet-hunter-api &
-# wait ~30s for TF import + model load, then:
+# wait ~60s for TF import + model load, then:
 curl -s localhost:8010/healthz      # {"status":"ok","model_loaded":true,...}
-curl -s localhost:8010/reliability  # proves the pulled model artefacts read back
+curl -s localhost:8010/reliability  # proves the model artefacts read back
 ```
-
-If `pip install` fails on a source build (no manylinux wheel for some dep),
-add `build-essential` to the `apt-get install` line in the Dockerfile.
 
 ## 2. Deploy to Fly.io
 

@@ -12,8 +12,14 @@ if [ ! -d .git ]; then
     git init -q
 fi
 
-echo "[entrypoint] pulling DVC artefacts from R2 ..."
-dvc pull -q data/catalogue.dvc models/cv/*.dvc
+# SKIP_DVC_PULL=1 serves pre-mounted artefacts (local smoke tests) — without
+# credentials, botocore's credential-chain probing hangs for minutes.
+if [ "${SKIP_DVC_PULL:-0}" = "1" ]; then
+    echo "[entrypoint] SKIP_DVC_PULL=1 — serving mounted artefacts"
+else
+    echo "[entrypoint] pulling DVC artefacts from R2 ..."
+    dvc pull -q data/catalogue.dvc models/cv/*.dvc
+fi
 echo "[entrypoint] artefacts ready:"
 ls models/cv/ data/catalogue/
 
