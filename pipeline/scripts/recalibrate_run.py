@@ -4,9 +4,13 @@ Validation scores are not persisted, so each fold's Platt calibrator is
 fitted on the pooled out-of-fold predictions of the *other* folds; fold f's
 own test rows never touch its fit, keeping the rewritten metrics clean.
 
+`--rescore` first regenerates each fold's prob_raw from its saved checkpoint
+(deterministic pass over the shards), for runs whose parquet was scored with
+in-memory weights that drifted from the shipped checkpoint.
+
 Usage (from the repository root):
 
-    python pipeline/scripts/recalibrate_run.py models/cv/<run_id>
+    python pipeline/scripts/recalibrate_run.py models/cv/<run_id> [--rescore]
 """
 
 from __future__ import annotations
@@ -84,14 +88,68 @@ def recalibrate_fold(fold_dir: Path, preds: pd.DataFrame, fold_idx: int) -> dict
     }
 
 
+def rescore_fold(fold_dir: Path, shard_dir: Path) -> None:
+    """Overwrite the fold parquet's prob_raw with the checkpoint's scores."""
+    import tensorflow as tf
+
+    from exoplanet_hunter.datasets import (
+        ShardMetadata,
+        Split,
+        aux_constants_from_pipeline,
+        list_shards,
+        load_index,
+        make_dataset,
+        make_split_table,
+    )
+
+    fold_preds = pd.read_parquet(fold_dir / "predictions.parquet").sort_values("row")
+    index = load_index(shard_dir)
+    codes = np.full(len(index), int(Split.TRAIN), dtype=np.int64)
+    codes[fold_preds["row"].to_numpy()] = int(Split.TEST)
+
+    bundle = joblib.load(fold_dir / "cnn_calibrator.joblib")
+    aux_pipeline = bundle.get("aux_pipeline")
+    ds = make_dataset(
+        list_shards(shard_dir),
+        split=Split.TEST,
+        metadata=ShardMetadata.load(shard_dir),
+        split_table=make_split_table(index["tic_id"].to_numpy(), codes),
+        aux_constants=aux_constants_from_pipeline(aux_pipeline) if aux_pipeline else None,
+        use_aux=aux_pipeline is not None,
+        batch_size=256,
+        seed=0,
+    )
+    model = tf.keras.models.load_model(str(fold_dir / "cnn_dualview.keras"), compile=False)
+    scores, labels = [], []
+    for feats, y in ds:
+        scores.append(np.asarray(model(feats, training=False)).squeeze())
+        labels.append(y.numpy())
+    if not np.array_equal(np.concatenate(labels), fold_preds["y_true"].to_numpy()):
+        raise SystemExit(f"{fold_dir.name}: stream order does not match the parquet — aborting")
+    drift = float(np.abs(np.concatenate(scores) - fold_preds["prob_raw"].to_numpy()).max())
+    fold_preds["prob_raw"] = np.concatenate(scores)
+    fold_preds.to_parquet(fold_dir / "predictions.parquet", index=False)
+    log.info(
+        "[%s] rescored from checkpoint (max drift from old prob_raw: %.4f)", fold_dir.name, drift
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", type=Path, help="models/cv/<run_id> directory to recalibrate")
+    parser.add_argument(
+        "--rescore", action="store_true", help="Regenerate prob_raw from checkpoints"
+    )
+    parser.add_argument("--shards", type=Path, default=Path("data/processed/tfrecords"))
     args = parser.parse_args()
 
     fold_dirs = sorted(args.run_dir.glob("fold_*"))
     if not fold_dirs:
         raise SystemExit(f"no fold_* directories under {args.run_dir}")
+
+    if args.rescore:
+        for d in fold_dirs:
+            rescore_fold(d, args.shards)
 
     preds = pd.concat(
         [pd.read_parquet(d / "predictions.parquet") for d in fold_dirs], ignore_index=True

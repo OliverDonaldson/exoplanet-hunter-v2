@@ -389,6 +389,11 @@ def _run_cnn_fold(
     )
     log_history(history.history, results_dir)
 
+    # Score what ships: the checkpoint on disk is the serving artefact, and
+    # in-memory weights after fit() are not guaranteed to match it (observed
+    # drift on cebb0fe6). All metrics/calibrators below describe this file.
+    model = tf.keras.models.load_model(str(ckpt_path), compile=False)
+
     # Unshuffled streams yield examples in ascending index-row order, so
     # sort the fold indices the same way for positional alignment with
     # predict() output.

@@ -2,8 +2,8 @@
   "run_id": "cebb0fe655684aafae69bc1a11cfde85",
   "cv_summary": "models/cv/cebb0fe655684aafae69bc1a11cfde85/cv_summary.json",
   "cv_dir": "models/cv/cebb0fe655684aafae69bc1a11cfde85",
-  "test_roc_auc_mean": 0.9508294428872853,
-  "test_brier_mean": 0.08748992944477732,
-  "promoted_at": "2026-07-12T22:55:10.986555+00:00",
-  "test_ece_mean": 0.037501364677820906
+  "test_roc_auc_mean": 0.9502429909182444,
+  "test_brier_mean": 0.08817808858610958,
+  "promoted_at": "2026-07-15T22:42:53.081469+00:00",
+  "test_ece_mean": 0.0366001629529145
 }

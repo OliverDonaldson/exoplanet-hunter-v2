@@ -8,13 +8,13 @@ with every member.
 
 Aggregation, chosen to match what the vetting console displays:
 
-  * per-fold prob   — the fold's MC-Dropout mean, temperature-calibrated
-                      (the "five dots").
+  * per-fold prob   — the fold's deterministic score, calibrated (the
+                      "five dots"); calibrators are fitted on deterministic
+                      scores, so MC means don't feed them.
   * prob_calibrated — mean of the per-fold calibrated probs (the headline).
-  * prob_mean       — mean of the raw (uncalibrated) fold means.
-  * prob_std        — total uncertainty: sqrt(mean within-fold MC variance
-                      + across-fold variance of the means). Both epistemic
-                      terms the report cares about, in one band.
+  * prob_mean       — mean of the raw (uncalibrated) deterministic scores.
+  * prob_std        — total uncertainty: sqrt(mean within-fold MC-Dropout
+                      variance + across-fold variance of the means).
   * threshold       — mean of the folds' F1-optimal thresholds.
 """
 
@@ -121,11 +121,14 @@ class ScoringEnsemble:
                 inputs["aux_features"] = member.aux_pipeline.transform(
                     aux_raw[None, :].astype(np.float32)
                 ).astype(np.float32)
+            # Calibrated headline from the deterministic pass: calibrators are
+            # fitted on deterministic scores, and feeding them MC means costs
+            # ~0.08 ECE. MC sampling contributes only the uncertainty band.
+            det = float(np.asarray(member.model(inputs, training=False)).squeeze())
             result = mc_dropout_predict(member.model, inputs, n_samples=n_mc)
-            mean = float(np.asarray(result.mean).squeeze())
-            raw_means.append(mean)
+            raw_means.append(det)
             mc_vars.append(float(np.asarray(result.std).squeeze()) ** 2)
-            calibrated.append(float(member.calibrator.predict(np.array([mean]))[0]))
+            calibrated.append(float(member.calibrator.predict(np.array([det]))[0]))
 
         return EnsemblePrediction(
             per_fold=calibrated,

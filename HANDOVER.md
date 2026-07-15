@@ -168,11 +168,22 @@ Audit targets, item by item:
    model numbers added; OPERATING.md calibrator/gate text corrected;
    architecture.md needed no change (method-agnostic).
 
-New findings logged during the audit, still open:
+New findings logged during the audit — both since resolved (2026-07-14):
 
-- `/score/{tic_id}` latency: per-request MAST download + BLS; a 185k-cadence
-  multi-sector target took >9.5 min. Fix with catalogue-ephemeris preference
-  + a sector/cadence cap (app phase).
-- Calibrators are fitted on deterministic validation predictions but applied
-  to MC-Dropout means at serving (`scoring/ensemble.py`) — quantify the
-  mismatch; root cause of the raw-score shift itself is still unexplained.
+- `/score/{tic_id}` latency: FIXED — ephemeris resolution is user >
+  catalogue > BLS (published ephemerides skip the search for known TOIs),
+  and BLS itself is bounded (astropy-spaced period grid capped at 5k trial
+  periods + cadence decimation). 169k-cadence target: never finished → ~25 s.
+- Serving calibration mismatch: FIXED — two compounding causes measured.
+  (1) Fold checkpoints on disk differed from the in-memory weights that
+  scored predictions.parquet (per-example drift up to 0.31); the trainer now
+  reloads the checkpoint before scoring ("score what you ship"), and
+  cebb0fe6 was rescored + recalibrated from its checkpoints
+  (`recalibrate_run.py --rescore`): AUC 0.9502, Brier 0.0882, ECE 0.0079.
+  (2) Serving fed MC-Dropout means to calibrators fitted on deterministic
+  scores — measured cost ~0.08 ECE; the calibrated headline now comes from
+  the deterministic pass, MC contributes only prob_std. Residual ~1e-3
+  per-request jitter (suspected single-example TF/Metal nondeterminism) is
+  immaterial. The raw-score shift itself is present in-sample (mean prob
+  0.41 vs 0.53 base rate on fold-0 train rows), so it is a property of the
+  training objective rather than a generalization gap — Platt absorbs it.
