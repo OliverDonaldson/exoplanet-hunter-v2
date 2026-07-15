@@ -17,8 +17,11 @@ fi
 if [ "${SKIP_DVC_PULL:-0}" = "1" ]; then
     echo "[entrypoint] SKIP_DVC_PULL=1 — serving mounted artefacts"
 else
-    echo "[entrypoint] pulling DVC artefacts from R2 ..."
-    dvc pull -q data/catalogue.dvc models/cv/*.dvc
+    echo "[entrypoint] pulling DVC artefacts from R2 (creds present: ${AWS_ACCESS_KEY_ID:+yes}${AWS_ACCESS_KEY_ID:-NO}) ..."
+    dvc pull -v data/catalogue.dvc models/cv/*.dvc || {
+        echo "[entrypoint] FATAL: dvc pull failed — check AWS_* secrets and R2 access"
+        exit 1
+    }
 fi
 echo "[entrypoint] artefacts ready:"
 ls models/cv/ data/catalogue/
