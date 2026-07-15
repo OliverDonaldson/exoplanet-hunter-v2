@@ -13,11 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 WORKDIR /srv
 
 # Heavy scientific deps cache as their own layer; dvc[s3] fetches artefacts.
+# Constraints pin training-time versions and stop pip's resolver backtracking.
+COPY docker/constraints.txt docker/constraints.txt
 COPY pipeline/ pipeline/
-RUN pip install --no-cache-dir ./pipeline "dvc[s3]>=3.30"
+RUN pip install --no-cache-dir -c docker/constraints.txt ./pipeline "dvc[s3]>=3.30"
 
 COPY api/ api/
-RUN pip install --no-cache-dir ./api
+RUN pip install --no-cache-dir -c docker/constraints.txt ./api
 
 # DVC pointers + config and the model registry (all tiny, all in git).
 COPY .dvc/config .dvc/config
