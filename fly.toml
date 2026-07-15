@@ -26,14 +26,18 @@ primary_region = "syd"
     hard_limit = 25
     soft_limit = 20
 
-# Cold start runs the entrypoint (dvc pull + TF import + model load) before
-# /healthz answers; the grace period must cover it.
+# Cold start runs the entrypoint (dvc pull from R2, ~150 MB on a shared CPU)
+# before /healthz answers; the grace period must cover it. The TF ensemble
+# itself loads lazily on the first /score request, not at boot.
 [[http_service.checks]]
   interval = "30s"
   timeout = "5s"
-  grace_period = "90s"
+  grace_period = "180s"
   method = "GET"
   path = "/healthz"
+
+# Headroom for the first-request TF import + 5-fold model load.
+swap_size_mb = 512
 
 [[vm]]
   size = "shared-cpu-1x"
