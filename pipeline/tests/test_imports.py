@@ -21,6 +21,7 @@ MODULES = [
     "exoplanet_hunter.features.centroid",
     "exoplanet_hunter.models",
     "exoplanet_hunter.training",
+    "exoplanet_hunter.training.tune",
     "exoplanet_hunter.eval",
     "exoplanet_hunter.datasets",
     "exoplanet_hunter.validation",

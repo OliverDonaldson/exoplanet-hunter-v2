@@ -43,6 +43,13 @@ def setup_mlflow(cfg: DictConfig) -> None:
     mlflow.set_experiment(cfg.mlflow.experiment)
 
 
+def start_root_run(run_name: str) -> mlflow.ActiveRun:
+    """Top-level run for a training invocation. Nests when the caller
+    (e.g. the Optuna tuner) already holds an open run — a plain
+    `start_run` raises in that situation."""
+    return mlflow.start_run(run_name=run_name, nested=mlflow.active_run() is not None)
+
+
 def _git_sha() -> str | None:
     try:
         return (

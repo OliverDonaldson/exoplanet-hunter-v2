@@ -1,6 +1,5 @@
 # Optuna hyperparameter search.
-# Run via Hydra multi-run mode:
-#   python scripts/train_model.py -m train=tune
+#   python -m exoplanet_hunter.training.tune train=tune
 defaults:
   - default
 
@@ -8,9 +7,10 @@ name: tune
 
 optuna:
   n_trials: 50
-  timeout: 7200             # 2 hours
+  timeout: 7200             # 2 hours; per invocation (the study resumes)
   direction: maximize
   metric: val_auc
+  storage: sqlite:///${paths.root}/optuna.db
   pruner:
     _target_: optuna.pruners.MedianPruner
     n_startup_trials: 5

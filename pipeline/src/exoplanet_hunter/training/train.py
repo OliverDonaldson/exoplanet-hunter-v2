@@ -71,6 +71,7 @@ from exoplanet_hunter.training.mlflow_utils import (
     log_config,
     log_history,
     setup_mlflow,
+    start_root_run,
 )
 from exoplanet_hunter.training.precision import apply_precision_policy
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
@@ -138,7 +139,7 @@ def _train_rf(cfg: DictConfig, paths: ProjectPaths) -> float:
 
     pipeline = build_random_forest(cfg.model)
 
-    with mlflow.start_run(run_name=f"rf-{cfg.data.name}"):
+    with start_root_run(f"rf-{cfg.data.name}"):
         log_config(cfg)
         skf = StratifiedKFold(
             n_splits=int(cfg.model.cross_validation.n_splits),
@@ -201,7 +202,7 @@ def _train_cnn_cv(cfg: DictConfig, paths: ProjectPaths) -> float:
         random_state=int(cv_cfg.random_state),
     )
 
-    with mlflow.start_run(run_name=f"cnn-cv-{cfg.data.name}") as parent:
+    with start_root_run(f"cnn-cv-{cfg.data.name}") as parent:
         log_config(cfg)
         run_id = parent.info.run_id
         cv_root = paths.models / "cv" / run_id

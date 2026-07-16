@@ -36,6 +36,7 @@ dependencies = [
     "mlflow>=2.14",
     "hydra-core>=1.3",
     "omegaconf>=2.3",
+    "optuna>=4",
     # --- Runtime niceties ---
     "tqdm>=4.66",
     "rich>=13.7",

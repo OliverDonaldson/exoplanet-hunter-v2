@@ -8,10 +8,14 @@ A full 5-fold trial is expensive — cheapen trials on the CLI:
 
     python -m exoplanet_hunter.training.tune train=tune \\
         model.cross_validation.n_splits=2 train.epochs=60
+
+The study persists to `train.optuna.storage` (sqlite); re-running the same
+command resumes it, adding up to `n_trials` more trials.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -41,8 +45,11 @@ def _suggest(trial: optuna.Trial, name: str, spec: dict[str, Any]) -> Any:
     raise ValueError(f"unknown search-space type: {kind}")
 
 
-@hydra.main(version_base="1.3", config_path="../../../conf", config_name="config")
-def main(cfg: DictConfig) -> float:
+def run_study(
+    cfg: DictConfig,
+    train_fn: Callable[[DictConfig], float] = train_run,
+) -> float:
+    """Optimize the search space; `train_fn` scores one config (injectable for tests)."""
     if cfg.train.name != "tune":
         raise SystemExit("tune entry point requires train=tune")
 
@@ -54,6 +61,8 @@ def main(cfg: DictConfig) -> float:
         direction=str(cfg.train.optuna.direction),
         pruner=pruner,
         study_name=f"{cfg.project_name}-{cfg.model.name}-{cfg.data.name}",
+        storage=str(cfg.train.optuna.storage),
+        load_if_exists=True,
     )
 
     parent_run = mlflow.start_run(run_name=f"tune-{cfg.model.name}-{cfg.data.name}")
@@ -68,7 +77,7 @@ def main(cfg: DictConfig) -> float:
         with mlflow.start_run(nested=True, run_name=f"trial-{trial.number}"):
             mlflow.log_params({f"trial.{k}": v for k, v in trial.params.items()})
             # The non-@hydra.main `run`, so trials don't re-parse sys.argv.
-            score = float(train_run(trial_cfg))
+            score = float(train_fn(trial_cfg))
             mlflow.log_metric(str(cfg.train.optuna.metric), score)
             return score
 
@@ -83,15 +92,20 @@ def main(cfg: DictConfig) -> float:
         for k, v in study.best_params.items():
             mlflow.log_param(f"best.{k}", v)
         mlflow.log_metric("best_value", float(study.best_value))
-
-        out_dir = Path("results/tune")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        study.trials_dataframe().to_parquet(out_dir / "trials.parquet", index=False)
         return float(study.best_value)
     finally:
+        if study.trials:
+            out_dir = Path(str(cfg.paths.results)) / "tune"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            study.trials_dataframe().to_parquet(out_dir / "trials.parquet", index=False)
         mlflow.end_run()
         if parent_run:
             mlflow.end_run()
+
+
+@hydra.main(version_base="1.3", config_path="../../../conf", config_name="config")
+def main(cfg: DictConfig) -> float:
+    return run_study(cfg)
 
 
 if __name__ == "__main__":
