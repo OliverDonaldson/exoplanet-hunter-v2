@@ -9,7 +9,9 @@ contract tests live in tests/test_contract.py.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import threading
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,10 +21,29 @@ from app.routes.reliability import router as reliability_router
 from app.routes.score import router as score_router
 from app.schemas import HealthResponse
 
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Warm the TF ensemble off the request path: the console wakes the
+    # machine on page load, so the ~90 s model load runs while the user is
+    # still browsing the catalogue instead of on their first score click.
+    from app.routes.score import get_scorer
+
+    def _warm() -> None:
+        try:
+            get_scorer()
+        except Exception as exc:  # no registry yet — lazy path still applies
+            print(f"[warmup] ensemble preload skipped: {exc}")
+
+    threading.Thread(target=_warm, daemon=True).start()
+    yield
+
+
 app = FastAPI(
     title="Exoplanet Hunter V2",
     description="TIC ID -> live calibrated transit probability + vetting diagnostics.",
     version="2.0.0.dev0",
+    lifespan=_lifespan,
 )
 
 # The React dev server (vite, port 5173) calls the API cross-origin during

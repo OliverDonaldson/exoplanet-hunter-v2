@@ -38,6 +38,11 @@ _lock = threading.Lock()
 _score_lock = threading.Lock()
 _scorer = None
 
+# Process-lifetime response cache — a score is deterministic given the
+# ephemeris and n_mc, and the console re-requests a target on every click.
+_cache: dict[tuple, ScoreResponse] = {}
+_CACHE_MAX = 128
+
 
 def get_scorer():
     global _scorer
@@ -71,6 +76,10 @@ def score_target(
 ) -> ScoreResponse:
     from exoplanet_hunter.scoring import BEB_THRESHOLD_SIGMA, NoLightCurveError
 
+    cache_key = (tic_id, period_days, t0_btjd, duration_hours, n_mc, force_bls)
+    if not force_download and cache_key in _cache:
+        return _cache[cache_key]
+
     try:
         scorer = get_scorer()
     except FileNotFoundError as exc:
@@ -93,7 +102,7 @@ def score_target(
     except NoLightCurveError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return ScoreResponse(
+    response = ScoreResponse(
         tic_id=outcome.tic_id,
         ephemeris=Ephemeris(
             period_days=outcome.period_days,
@@ -130,3 +139,7 @@ def score_target(
         model_version=outcome.model_version,
         n_mc_samples=outcome.n_mc_samples,
     )
+    if len(_cache) >= _CACHE_MAX:
+        _cache.pop(next(iter(_cache)))
+    _cache[cache_key] = response
+    return response

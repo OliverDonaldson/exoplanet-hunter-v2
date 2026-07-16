@@ -34,10 +34,14 @@ COPY models/ models/
 COPY docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 RUN chmod +x /usr/local/bin/api-entrypoint.sh
 
-# Artefacts land under the repo-shaped tree the code expects.
+# Artefacts land under the repo-shaped tree the code expects. TF thread env
+# is tuned for the 1-2 vCPU serving box (oversubscribed pools thrash), and
+# its startup log spam is silenced.
 ENV MODEL_DIR=/srv/models \
     DATA_RAW_DIR=/srv/data/raw \
-    CATALOGUE_PATH=/srv/data/catalogue/candidates.parquet
+    CATALOGUE_PATH=/srv/data/catalogue/candidates.parquet \
+    OMP_NUM_THREADS=2 \
+    TF_CPP_MIN_LOG_LEVEL=2
 
 EXPOSE 8000
 CMD ["api-entrypoint.sh"]
