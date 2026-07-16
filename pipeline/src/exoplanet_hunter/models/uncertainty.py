@@ -40,11 +40,33 @@ def mc_dropout_predict(
     inputs    : the same inputs you'd pass to `model.predict`.
     n_samples : T, number of stochastic forward passes. 50 is a good default;
                 100+ for tighter intervals.
+
+    For a single example the T samples are drawn in one batched forward pass
+    (dropout masks are independent per batch element, so this is equivalent) —
+    T sequential single-example calls pay T rounds of dispatch overhead, which
+    dominates on CPU serving.
     """
-    samples = np.stack(
-        [model(inputs, training=True).numpy().squeeze() for _ in range(n_samples)],
-        axis=0,
-    )
+
+    def _batch_size(x) -> int:
+        arr = (
+            next(iter(x.values())) if isinstance(x, dict) else (x[0] if isinstance(x, list) else x)
+        )
+        return int(np.asarray(arr).shape[0])
+
+    if _batch_size(inputs) == 1:
+        tiled: dict[str, np.ndarray] | list[np.ndarray] | np.ndarray
+        if isinstance(inputs, dict):
+            tiled = {k: np.repeat(np.asarray(v), n_samples, axis=0) for k, v in inputs.items()}
+        elif isinstance(inputs, list):
+            tiled = [np.repeat(np.asarray(v), n_samples, axis=0) for v in inputs]
+        else:
+            tiled = np.repeat(np.asarray(inputs), n_samples, axis=0)
+        samples = np.asarray(model(tiled, training=True)).reshape(n_samples)
+    else:
+        samples = np.stack(
+            [np.asarray(model(inputs, training=True)).squeeze() for _ in range(n_samples)],
+            axis=0,
+        )
     return UncertaintyResult(
         mean=samples.mean(axis=0),
         std=samples.std(axis=0),

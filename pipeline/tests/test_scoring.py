@@ -20,7 +20,9 @@ class ConstantModel:
         self.p = p
 
     def __call__(self, inputs, training=False):
-        return tf.constant([[self.p]], dtype=tf.float32)
+        first = next(iter(inputs.values())) if isinstance(inputs, dict) else inputs
+        n = int(tf.shape(first)[0])
+        return tf.fill((n, 1), tf.constant(self.p, dtype=tf.float32))
 
 
 def member(fold: int, p: float, threshold: float, temperature: float) -> FoldMember:
@@ -95,6 +97,23 @@ def test_odd_even_consistent_for_genuine_transit():
     result = odd_even_depths(time, flux, period=2.0, t0=0.0, duration=0.1)
     assert result is not None
     assert result.depth_diff_sigma < 3
+
+
+def test_batched_mc_samples_are_independent():
+    from exoplanet_hunter.models.uncertainty import mc_dropout_predict
+
+    class DropoutishModel:
+        def __call__(self, inputs, training=False):
+            first = next(iter(inputs.values()))
+            n = int(tf.shape(first)[0])
+            return tf.random.stateless_uniform((n, 1), seed=(n, 7))
+
+    result = mc_dropout_predict(
+        DropoutishModel(), {"global_view": np.zeros((1, 8, 1), np.float32)}, n_samples=32
+    )
+    assert result.samples.shape == (32,)
+    assert len(np.unique(result.samples)) > 1  # one batched pass, distinct draws
+    assert 0.0 <= result.mean <= 1.0
 
 
 def test_verdict_language():

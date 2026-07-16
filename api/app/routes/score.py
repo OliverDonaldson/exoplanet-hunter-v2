@@ -60,7 +60,7 @@ def score_target(
     period_days: float | None = Query(None, gt=0, description="Override BLS period search"),
     t0_btjd: float | None = Query(None, description="Transit epoch (BTJD); requires period_days"),
     duration_hours: float | None = Query(None, gt=0),
-    n_mc: int = Query(50, ge=10, le=500, description="MC-Dropout samples"),
+    n_mc: int = Query(20, ge=10, le=500, description="MC-Dropout samples"),
     force_download: bool = Query(False),
     force_bls: bool = Query(
         False, description="Ignore the catalogue ephemeris; run the BLS search"
