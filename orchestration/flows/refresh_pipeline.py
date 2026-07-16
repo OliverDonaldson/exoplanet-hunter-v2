@@ -24,6 +24,7 @@ Design decisions, per the architecture doc:
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -48,6 +49,17 @@ def _run(cmd: list[str]) -> None:
     """Stream a subprocess from the repo root; non-zero exit fails the task."""
     get_run_logger().info("$ %s", " ".join(cmd))
     subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+
+
+def _notify(message: str) -> None:
+    """Best-effort ping to $NOTIFY_WEBHOOK_URL (Discord/Slack-compatible)."""
+    url = os.environ.get("NOTIFY_WEBHOOK_URL")
+    if not url:
+        return
+    try:
+        requests.post(url, json={"content": message, "text": message}, timeout=10)
+    except Exception as exc:
+        get_run_logger().warning("notify failed: %s", exc)
 
 
 # ------------------------------------------------------------------ tasks --
@@ -200,7 +212,15 @@ def refresh_pipeline(
     if decide_training(previous, min_new_labelled, force_train):
         preprocess_and_shard(data_config)
         train()
-        promotion_gate()
+        promoted = promotion_gate()
+        registry = json.loads((REPO_ROOT / "models" / "registry.json").read_text())
+        _notify(
+            f"exoplanet-hunter refresh: trained; promotion "
+            f"{'PROMOTED' if promoted else 'rejected'} — serving run "
+            f"{registry['run_id'][:8]} (AUC {registry['test_roc_auc_mean']:.4f})"
+        )
+    else:
+        _notify("exoplanet-hunter refresh: catalogue updated, no retrain warranted")
     publish()
 
 

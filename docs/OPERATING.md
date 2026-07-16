@@ -92,6 +92,21 @@ Or click any row in the console. Under the hood: fetch light curve
 dropout-active forward passes → calibrated probability ± uncertainty →
 centroid & odd/even checks → plain-language verdict.
 
+## Running the refresh on a schedule
+
+The refresh + retrain loop needs this Mac (data, GPU), so scheduling is a
+launchd job, not a cloud cron:
+
+```bash
+cp scripts-dev/com.exoplanet-hunter.refresh.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.exoplanet-hunter.refresh.plist
+```
+
+Runs Saturdays 09:00 (edit StartCalendarInterval to taste; the Mac must be
+awake). Logs append to `outputs/refresh-cron.log`. Set `NOTIFY_WEBHOOK_URL`
+(uncomment in the plist) to get a Discord/Slack ping with the promotion
+verdict at the end of each run. Unload with `launchctl unload …`.
+
 ## Reading the numbers
 
 - **prob_calibrated ± prob_std** — the headline. The ± band is real model
