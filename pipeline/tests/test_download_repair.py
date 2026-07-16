@@ -30,3 +30,33 @@ def test_interrupted_download_symptoms_are_transient():
     assert _is_transient_error("download error: ... This file may be corrupt due to ...")
     assert _is_transient_error("download error: I/O operation on closed file.")
     assert not _is_transient_error("no pipeline data")  # genuinely permanent
+
+
+def test_existing_file_is_a_cache_hit_despite_stale_manifest(tmp_path):
+    # Manifests record absolute paths, which go stale across machines; a
+    # stale miss used to re-download and rewrite a FITS another request may
+    # have memory-mapped (SIGBUS on the serving box).
+    import json
+
+    from exoplanet_hunter.data.download import LightCurveDownloader
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "tic_295413003.fits").write_bytes(b"cached bytes")
+    (raw / "manifest.json").write_text(
+        json.dumps(
+            {
+                "TESS:295413003": {
+                    "success": True,
+                    "path": "/machine/that/no/longer/exists/tic_295413003.fits",
+                    "n_sectors": 3,
+                    "n_points": 18881,
+                }
+            }
+        )
+    )
+
+    result = LightCurveDownloader(raw, author="SPOC", cadence=120).download_one(295413003)
+    assert result.success
+    assert result.path == raw / "tic_295413003.fits"
+    assert result.n_sectors == 3  # metadata still comes from the manifest

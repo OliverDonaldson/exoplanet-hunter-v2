@@ -33,6 +33,9 @@ router = APIRouter()
 # Repo root both locally and in the container (/srv); override via env.
 _ROOT = Path(__file__).resolve().parents[3]
 _lock = threading.Lock()
+# One score at a time: concurrent requests thrash the single serving CPU, and
+# two scores of the same TIC can rewrite a FITS under the other's memory-map.
+_score_lock = threading.Lock()
 _scorer = None
 
 
@@ -77,15 +80,16 @@ def score_target(
         ) from exc
 
     try:
-        outcome = scorer.score(
-            tic_id,
-            period_days=period_days,
-            t0_btjd=t0_btjd,
-            duration_hours=duration_hours,
-            n_mc=n_mc,
-            force_download=force_download,
-            force_bls=force_bls,
-        )
+        with _score_lock:
+            outcome = scorer.score(
+                tic_id,
+                period_days=period_days,
+                t0_btjd=t0_btjd,
+                duration_hours=duration_hours,
+                n_mc=n_mc,
+                force_download=force_download,
+                force_bls=force_bls,
+            )
     except NoLightCurveError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

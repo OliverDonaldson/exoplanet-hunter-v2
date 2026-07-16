@@ -196,6 +196,20 @@ class LightCurveDownloader:
         key = f"{mission}:{target_id}"
         target_path = self._target_path(target_id, mission)
 
+        # The file itself is the cache: manifests record absolute paths, which
+        # go stale across machines, and a stale miss used to re-download and
+        # rewrite a FITS another request may have memory-mapped (SIGBUS).
+        if not force and target_path.exists():
+            entry = self._manifest.get(key, {})
+            return DownloadResult(
+                target_id=target_id,
+                mission=mission,
+                success=True,
+                n_sectors=int(entry.get("n_sectors", 0)),
+                n_points=int(entry.get("n_points", 0)),
+                path=target_path,
+            )
+
         if not force and key in self._manifest:
             entry = self._manifest[key]
             path = Path(entry.get("path") or "")
