@@ -21,9 +21,11 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import (
     CentroidDiagnostics,
+    CentroidTrack,
     Ephemeris,
     FoldPrediction,
     OddEvenDiagnostics,
+    Periodogram,
     PhaseView,
     ScoreResponse,
 )
@@ -73,10 +75,13 @@ def score_target(
     force_bls: bool = Query(
         False, description="Ignore the catalogue ephemeris; run the BLS search"
     ),
+    include_periodogram: bool = Query(
+        False, description="Also run a bounded BLS and return its power spectrum"
+    ),
 ) -> ScoreResponse:
     from exoplanet_hunter.scoring import BEB_THRESHOLD_SIGMA, NoLightCurveError
 
-    cache_key = (tic_id, period_days, t0_btjd, duration_hours, n_mc, force_bls)
+    cache_key = (tic_id, period_days, t0_btjd, duration_hours, n_mc, force_bls, include_periodogram)
     if not force_download and cache_key in _cache:
         return _cache[cache_key]
 
@@ -98,6 +103,7 @@ def score_target(
                 n_mc=n_mc,
                 force_download=force_download,
                 force_bls=force_bls,
+                include_periodogram=include_periodogram,
             )
     except NoLightCurveError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -135,6 +141,33 @@ def score_target(
         ),
         global_view=PhaseView(phase=outcome.global_view.phase, flux=outcome.global_view.flux),
         local_view=PhaseView(phase=outcome.local_view.phase, flux=outcome.local_view.flux),
+        odd_view=(
+            PhaseView(phase=outcome.odd_view.phase, flux=outcome.odd_view.flux)
+            if outcome.odd_view
+            else None
+        ),
+        even_view=(
+            PhaseView(phase=outcome.even_view.phase, flux=outcome.even_view.flux)
+            if outcome.even_view
+            else None
+        ),
+        centroid_track=(
+            CentroidTrack(
+                phase=outcome.centroid_track.phase,
+                offset_pixels=outcome.centroid_track.flux,
+            )
+            if outcome.centroid_track
+            else None
+        ),
+        periodogram=(
+            Periodogram(
+                period_days=outcome.periodogram.period_days,
+                power=outcome.periodogram.power,
+                best_period_days=outcome.periodogram.best_period_days,
+            )
+            if outcome.periodogram
+            else None
+        ),
         verdict=outcome.verdict,
         model_version=outcome.model_version,
         n_mc_samples=outcome.n_mc_samples,

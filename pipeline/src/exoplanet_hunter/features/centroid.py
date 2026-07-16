@@ -229,3 +229,48 @@ def extract_centroid_offset(
     pipeline's median imputer fills NaNs at training time.
     """
     return float(extract_centroid_features(lc, period, t0, duration)["centroid_snr"])
+
+
+def centroid_phase_track(
+    lc: lk.LightCurve,
+    period: float,
+    t0: float,
+    duration: float,
+    *,
+    n_bins: int = 61,
+    window_durations: float = 3.0,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Phase-binned detrended centroid offset magnitude around the transit.
+
+    Flat for on-target transits; a bump at phase 0 flags a background
+    eclipsing binary. Returns (phase_centers, offset_pixels) over
+    ±window_durations transit durations, or None when centroid columns are
+    missing or the window is empty.
+    """
+    cx_col = next((c for c in ("mom_centr1", "centroid_col") if c in lc.columns), None)
+    cy_col = next((c for c in ("mom_centr2", "centroid_row") if c in lc.columns), None)
+    if cx_col is None or cy_col is None:
+        return None
+
+    t = np.asarray(lc.time.value, dtype=float)
+    cx = _detrend_axis(t, np.asarray(lc[cx_col].value, dtype=float))
+    cy = _detrend_axis(t, np.asarray(lc[cy_col].value, dtype=float))
+
+    phase = ((t - t0) % period) / period
+    phase = np.where(phase > 0.5, phase - 1.0, phase)
+    half = float(min(max(window_durations * duration / period, 1e-3), 0.5))
+
+    finite = np.isfinite(cx) & np.isfinite(cy) & (np.abs(phase) <= half)
+    if int(finite.sum()) < n_bins:
+        return None
+
+    r = np.hypot(cx[finite], cy[finite])
+    edges = np.linspace(-half, half, n_bins + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    which = np.clip(np.digitize(phase[finite], edges) - 1, 0, n_bins - 1)
+    track = np.full(n_bins, np.nan)
+    for b in range(n_bins):
+        sel = which == b
+        if sel.any():
+            track[b] = float(np.median(r[sel]))
+    return centers, track

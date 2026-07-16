@@ -23,7 +23,7 @@ import pandas as pd
 
 from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.stellar import fetch_stellar_params
-from exoplanet_hunter.features.centroid import extract_centroid_offset
+from exoplanet_hunter.features.centroid import centroid_phase_track, extract_centroid_offset
 from exoplanet_hunter.preprocess import (
     clean_lightcurve,
     flatten_lightcurve,
@@ -37,6 +37,7 @@ from exoplanet_hunter.scoring.diagnostics import (
 )
 from exoplanet_hunter.scoring.ensemble import ScoringEnsemble
 from exoplanet_hunter.search import bls_period_search
+from exoplanet_hunter.search.bls import bls_periodogram
 from exoplanet_hunter.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -72,12 +73,19 @@ class PhaseSeries:
 
 
 @dataclass(frozen=True)
+class Periodogram:
+    period_days: list[float]
+    power: list[float]
+    best_period_days: float
+
+
+@dataclass(frozen=True)
 class ScoreOutcome:
     tic_id: int
     period_days: float
     t0_btjd: float
     duration_days: float
-    ephemeris_source: str  # "bls" | "user"
+    ephemeris_source: str  # "bls" | "user" | "catalogue"
     per_fold: list[float]
     prob_calibrated: float
     prob_mean: float
@@ -90,6 +98,10 @@ class ScoreOutcome:
     verdict: str
     model_version: str
     n_mc_samples: int
+    odd_view: PhaseSeries | None = None
+    even_view: PhaseSeries | None = None
+    centroid_track: PhaseSeries | None = None  # flux carries the offset in pixels
+    periodogram: Periodogram | None = None
 
 
 def _phase_series(view: np.ndarray, lo: float, hi: float) -> PhaseSeries:
@@ -186,6 +198,24 @@ class TargetScorer:
                 row.append(float("nan"))
         return np.array(row, dtype=np.float32)
 
+    def _search_lightcurve(self, cleaned, tic_id: int):
+        """Unmasked flatten + decimation for BLS (search only, not the fold)."""
+        lc = flatten_lightcurve(
+            cleaned,
+            window_length=self.preprocess.window_length,
+            polyorder=self.preprocess.polyorder,
+        )
+        if len(lc) > MAX_SEARCH_CADENCES:
+            stride = len(lc) // MAX_SEARCH_CADENCES + 1
+            log.info(
+                "[score] TIC %d: decimating BLS search %d->%d cadences",
+                tic_id,
+                len(lc),
+                len(lc[::stride]),
+            )
+            lc = lc[::stride]
+        return lc
+
     # --------------------------------------------------------------- score --
 
     def score(
@@ -198,6 +228,7 @@ class TargetScorer:
         n_mc: int = 50,
         force_download: bool = False,
         force_bls: bool = False,
+        include_periodogram: bool = False,
     ) -> ScoreOutcome:
         import lightkurve as lk
 
@@ -217,24 +248,7 @@ class TargetScorer:
             source = "catalogue"
             log.info("[score] TIC %d catalogue ephemeris: P=%.4f d t0=%.4f", tic_id, period, t0)
         else:
-            # Unmasked flatten just for the search; re-flattened with a
-            # transit mask below once the ephemeris is known.
-            lc_search = flatten_lightcurve(
-                cleaned,
-                window_length=self.preprocess.window_length,
-                polyorder=self.preprocess.polyorder,
-            )
-            if len(lc_search) > MAX_SEARCH_CADENCES:
-                stride = len(lc_search) // MAX_SEARCH_CADENCES + 1
-                log.info(
-                    "[score] TIC %d: decimating BLS search %d->%d cadences (stride %d)",
-                    tic_id,
-                    len(lc_search),
-                    len(lc_search[::stride]),
-                    stride,
-                )
-                lc_search = lc_search[::stride]
-            bls = bls_period_search(lc_search)
+            bls = bls_period_search(self._search_lightcurve(cleaned, tic_id))
             period, t0, duration = float(bls.period), float(bls.t0), float(bls.duration)
             source = "bls"
             log.info(
@@ -285,6 +299,52 @@ class TargetScorer:
         )
 
         half = float(min(max(self.preprocess.local_durations * duration / period, 1e-3), 0.5))
+
+        # Odd/even local views: same fold, split by transit parity — the
+        # overlay makes an eclipsing binary's alternating depths visible.
+        odd_view = even_view = None
+        parity = np.round((np.asarray(flat.time.value, dtype=float) - t0) / period).astype(int)
+        for is_odd in (True, False):
+            mask = (parity % 2 != 0) == is_odd
+            if int(mask.sum()) < 50:
+                continue
+            v = build_views(
+                flat[mask],
+                period=period,
+                t0=t0,
+                duration=duration,
+                global_bins=self.preprocess.global_bins,
+                local_bins=self.preprocess.local_bins,
+                local_durations=self.preprocess.local_durations,
+            )
+            series = _phase_series(v.local_view, -half, half)
+            if is_odd:
+                odd_view = series
+            else:
+                even_view = series
+
+        track = None
+        try:
+            ct = centroid_phase_track(raw, period, t0, duration)
+        except Exception as exc:
+            log.warning("[score] centroid track failed: %s", exc)
+            ct = None
+        if ct is not None:
+            centers, offsets = ct
+            track = PhaseSeries(
+                phase=[float(p) for p in centers],
+                flux=[None if not np.isfinite(v) else float(v) for v in offsets],
+            )
+
+        pgram = None
+        if include_periodogram:
+            periods, power, best = bls_periodogram(self._search_lightcurve(cleaned, tic_id))
+            pgram = Periodogram(
+                period_days=[float(x) for x in periods],
+                power=[float(x) for x in power],
+                best_period_days=best,
+            )
+
         return ScoreOutcome(
             tic_id=tic_id,
             period_days=period,
@@ -300,6 +360,10 @@ class TargetScorer:
             odd_even=oe,
             global_view=_phase_series(views.global_view, -0.5, 0.5),
             local_view=_phase_series(views.local_view, -half, half),
+            odd_view=odd_view,
+            even_view=even_view,
+            centroid_track=track,
+            periodogram=pgram,
             verdict=verdict(prediction.prob_calibrated, prediction.threshold, centroid_snr, oe),
             model_version=f"cnn_dualview-cv-{self.ensemble.run_id[:8]}",
             n_mc_samples=n_mc,

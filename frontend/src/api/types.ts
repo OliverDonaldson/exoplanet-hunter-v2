@@ -32,6 +32,17 @@ export interface PhaseView {
   flux: (number | null)[];
 }
 
+export interface CentroidTrack {
+  phase: number[];
+  offset_pixels: (number | null)[];
+}
+
+export interface Periodogram {
+  period_days: number[];
+  power: number[];
+  best_period_days: number;
+}
+
 export interface ScoreResponse {
   tic_id: number;
   ephemeris: Ephemeris;
@@ -44,6 +55,10 @@ export interface ScoreResponse {
   odd_even: OddEvenDiagnostics | null;
   global_view: PhaseView;
   local_view: PhaseView;
+  odd_view: PhaseView | null;
+  even_view: PhaseView | null;
+  centroid_track: CentroidTrack | null;
+  periodogram: Periodogram | null;
   verdict: string;
   model_version: string;
   n_mc_samples: number;

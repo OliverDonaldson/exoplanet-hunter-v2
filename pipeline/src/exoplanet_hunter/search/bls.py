@@ -87,3 +87,44 @@ def bls_period_search(
     # Crude SNR estimate: peak power / median power.
     snr = power / float(np.median(result.power) + 1e-12)
     return PeriodSearchResult(period=period, t0=t0, duration=dur, power=power, snr=snr)
+
+
+def bls_periodogram(
+    lc: lk.LightCurve,
+    *,
+    period_min: float = 0.5,
+    period_max: float = 15.0,
+    duration_grid: tuple[float, ...] = (0.05, 0.10, 0.15, 0.20),
+    max_periods: int = 5_000,
+    max_points: int = 400,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Bounded BLS power spectrum for display: (periods, power, best_period).
+
+    Downsampled by max-pooling so peaks survive; same capped grid as
+    `bls_period_search`.
+    """
+    from astropy.timeseries import BoxLeastSquares
+
+    time = np.asarray(lc.time.value, dtype=float)
+    flux = np.asarray(lc.flux.value, dtype=float)
+    mask = np.isfinite(time) & np.isfinite(flux)
+    time, flux = time[mask], flux[mask]
+
+    baseline = float(time.max() - time.min()) if time.size else 0.0
+    periods = period_grid(
+        baseline,
+        period_min=period_min,
+        period_max=period_max,
+        min_duration=min(duration_grid),
+        max_periods=max_periods,
+    )
+    result = BoxLeastSquares(time, flux).power(periods, list(duration_grid))
+    power = np.asarray(result.power, dtype=float)
+    best = float(result.period[int(np.argmax(power))])
+
+    if len(periods) > max_points:
+        stride = int(np.ceil(len(periods) / max_points))
+        n = (len(periods) // stride) * stride
+        periods = periods[:n].reshape(-1, stride).mean(axis=1)
+        power = power[:n].reshape(-1, stride).max(axis=1)
+    return periods, power, best

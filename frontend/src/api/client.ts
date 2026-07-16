@@ -55,13 +55,20 @@ export function candidatesCsvUrl(query: CandidateQuery = {}): string {
 
 export function fetchScore(
   ticId: number,
-  opts: { periodDays?: number; t0Btjd?: number; durationHours?: number; nMc?: number } = {},
+  opts: {
+    periodDays?: number;
+    t0Btjd?: number;
+    durationHours?: number;
+    nMc?: number;
+    includePeriodogram?: boolean;
+  } = {},
 ): Promise<ScoreResponse> {
   const params = new URLSearchParams();
   if (opts.periodDays !== undefined) params.set("period_days", String(opts.periodDays));
   if (opts.t0Btjd !== undefined) params.set("t0_btjd", String(opts.t0Btjd));
   if (opts.durationHours !== undefined) params.set("duration_hours", String(opts.durationHours));
   if (opts.nMc !== undefined) params.set("n_mc", String(opts.nMc));
+  if (opts.includePeriodogram) params.set("include_periodogram", "true");
   const qs = params.size ? `?${params}` : "";
   return get<ScoreResponse>(`/score/${ticId}${qs}`);
 }

@@ -59,6 +59,102 @@ function PhaseChart({
   );
 }
 
+/** Odd vs even transits on shared axes — alternating depths flag an EB. */
+function OverlayChart({
+  title,
+  odd,
+  even,
+  height = 150,
+}: {
+  title: string;
+  odd: { phase: number[]; flux: (number | null)[] };
+  even: { phase: number[]; flux: (number | null)[] };
+  height?: number;
+}) {
+  const width = 460;
+  const pad = { l: 8, r: 8, t: 6, b: 18 };
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  const series = [
+    { pts: [] as { x: number; y: number }[], data: odd, color: "#d97706", label: "odd" },
+    { pts: [] as { x: number; y: number }[], data: even, color: "#2563eb", label: "even" },
+  ];
+  for (const s of series) {
+    for (let i = 0; i < s.data.phase.length; i++) {
+      const f = s.data.flux[i];
+      if (f === null || !isFinite(f)) continue;
+      if (f < yMin) yMin = f;
+      if (f > yMax) yMax = f;
+      s.pts.push({ x: s.data.phase[i], y: f });
+    }
+  }
+  if (series.every((s) => s.pts.length === 0)) return null;
+  const xMin = Math.min(odd.phase[0], even.phase[0]);
+  const xMax = Math.max(odd.phase[odd.phase.length - 1], even.phase[even.phase.length - 1]);
+  const ySpan = yMax - yMin || 1;
+  const sx = (x: number) => pad.l + ((x - xMin) / (xMax - xMin)) * (width - pad.l - pad.r);
+  const sy = (y: number) => pad.t + (1 - (y - yMin) / ySpan) * (height - pad.t - pad.b);
+  return (
+    <figure style={{ margin: 0 }}>
+      <figcaption style={{ fontSize: "0.8rem", opacity: 0.75 }}>
+        {title}
+        {series.map((s) => (
+          <span key={s.label} style={{ color: s.color, marginLeft: "0.6rem" }}>
+            ● {s.label}
+          </span>
+        ))}
+      </figcaption>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "auto" }}>
+        <line x1={sx(0)} y1={pad.t} x2={sx(0)} y2={height - pad.b} stroke="#8884" />
+        {series.map((s) =>
+          s.pts.map((p, i) => (
+            <circle key={`${s.label}${i}`} cx={sx(p.x)} cy={sy(p.y)} r={1.2} fill={s.color} opacity={0.6} />
+          )),
+        )}
+        <text x={sx(0)} y={height - 4} fontSize="9" fill="currentColor" opacity={0.6} textAnchor="middle">
+          phase 0
+        </text>
+      </svg>
+    </figure>
+  );
+}
+
+/** BLS power spectrum with the best period marked. */
+function PeriodogramChart({
+  periodogram,
+  height = 130,
+}: {
+  periodogram: NonNullable<ScoreResponse["periodogram"]>;
+  height?: number;
+}) {
+  const width = 460;
+  const pad = { l: 8, r: 8, t: 6, b: 18 };
+  const { period_days: periods, power, best_period_days: best } = periodogram;
+  const xMin = Math.min(...periods);
+  const xMax = Math.max(...periods);
+  const yMax = Math.max(...power) || 1;
+  const sx = (x: number) => pad.l + ((x - xMin) / (xMax - xMin)) * (width - pad.l - pad.r);
+  const sy = (y: number) => pad.t + (1 - y / yMax) * (height - pad.t - pad.b);
+  const path = periods.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p).toFixed(1)},${sy(power[i]).toFixed(1)}`).join(" ");
+  return (
+    <figure style={{ margin: 0 }}>
+      <figcaption style={{ fontSize: "0.8rem", opacity: 0.75 }}>
+        BLS periodogram — best period {best.toFixed(3)} d
+      </figcaption>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "auto" }}>
+        <line x1={sx(best)} y1={pad.t} x2={sx(best)} y2={height - pad.b} stroke="#b91c1c" strokeDasharray="3 2" />
+        <path d={path} fill="none" stroke="currentColor" strokeWidth={0.8} opacity={0.8} />
+        <text x={sx(xMin)} y={height - 4} fontSize="9" fill="currentColor" opacity={0.6}>
+          {xMin.toFixed(1)} d
+        </text>
+        <text x={sx(xMax)} y={height - 4} fontSize="9" fill="currentColor" opacity={0.6} textAnchor="end">
+          {xMax.toFixed(1)} d
+        </text>
+      </svg>
+    </figure>
+  );
+}
+
 function ProbabilityBar({ score }: { score: ScoreResponse }) {
   const width = 460;
   const h = 64;
@@ -107,39 +203,43 @@ function Readout({ label, value, warn }: { label: string; value: string; warn?: 
   );
 }
 
+/** Score options from a catalogue row; {} when it lacks a usable ephemeris. */
+function ephemerisOpts(candidate: CandidateRow) {
+  const hasEphemeris =
+    candidate.period_days != null &&
+    candidate.period_days > 0 &&
+    candidate.epoch_bjd != null &&
+    candidate.duration_hours != null &&
+    candidate.duration_hours > 0;
+  if (!hasEphemeris) return {};
+  return {
+    periodDays: candidate.period_days!,
+    // Catalogue epochs are full BJD; the API speaks BTJD (BJD − 2457000).
+    t0Btjd:
+      candidate.epoch_bjd! > 2_440_000
+        ? candidate.epoch_bjd! - 2_457_000
+        : candidate.epoch_bjd!,
+    durationHours: candidate.duration_hours!,
+  };
+}
+
 export default function VettingPanel({ candidate }: { candidate: CandidateRow | null }) {
   const [score, setScore] = useState<ScoreResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [usedBls, setUsedBls] = useState(false);
+  const [pgramBusy, setPgramBusy] = useState(false);
 
   useEffect(() => {
     if (!candidate) return;
-    const hasEphemeris =
-      candidate.period_days != null &&
-      candidate.period_days > 0 &&
-      candidate.epoch_bjd != null &&
-      candidate.duration_hours != null &&
-      candidate.duration_hours > 0;
-    setUsedBls(!hasEphemeris);
+    const opts = ephemerisOpts(candidate);
+    setUsedBls(!("periodDays" in opts));
     setBusy(true);
     setScore(null);
     setError(null);
+    setPgramBusy(false);
     let cancelled = false;
-    fetchScore(
-      candidate.tic_id,
-      hasEphemeris
-        ? {
-            periodDays: candidate.period_days!,
-            // Catalogue epochs are full BJD; the API speaks BTJD (BJD − 2457000).
-            t0Btjd:
-              candidate.epoch_bjd! > 2_440_000
-                ? candidate.epoch_bjd! - 2_457_000
-                : candidate.epoch_bjd!,
-            durationHours: candidate.duration_hours!,
-          }
-        : {},
-    )
+    fetchScore(candidate.tic_id, opts)
       .then((s) => {
         if (!cancelled) setScore(s);
       })
@@ -153,6 +253,15 @@ export default function VettingPanel({ candidate }: { candidate: CandidateRow | 
       cancelled = true;
     };
   }, [candidate]);
+
+  const runPeriodogram = () => {
+    if (!candidate) return;
+    setPgramBusy(true);
+    fetchScore(candidate.tic_id, { ...ephemerisOpts(candidate), includePeriodogram: true })
+      .then(setScore)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setPgramBusy(false));
+  };
 
   if (!candidate) {
     return (
@@ -189,6 +298,28 @@ export default function VettingPanel({ candidate }: { candidate: CandidateRow | 
           </p>
           <PhaseChart title="Global view (full phase)" phase={score.global_view.phase} flux={score.global_view.flux} />
           <PhaseChart title="Local view (±3 transit durations)" phase={score.local_view.phase} flux={score.local_view.flux} />
+          {score.odd_view && score.even_view && (
+            <OverlayChart title="Odd vs even transits" odd={score.odd_view} even={score.even_view} />
+          )}
+          {score.centroid_track && (
+            <PhaseChart
+              title="Centroid offset track (detrended, px) — a bump at phase 0 flags a background EB"
+              phase={score.centroid_track.phase}
+              flux={score.centroid_track.offset_pixels}
+              height={110}
+            />
+          )}
+          {score.periodogram ? (
+            <PeriodogramChart periodogram={score.periodogram} />
+          ) : (
+            <button
+              onClick={runPeriodogram}
+              disabled={pgramBusy}
+              style={{ marginTop: "0.4rem", fontSize: "0.8rem", padding: "0.3rem 0.6rem" }}
+            >
+              {pgramBusy ? "Running BLS periodogram…" : "Run BLS periodogram (~30 s)"}
+            </button>
+          )}
           <div style={{ marginTop: "0.5rem" }}>
             <Readout
               label="Ephemeris"

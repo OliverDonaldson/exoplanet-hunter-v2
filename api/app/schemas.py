@@ -52,6 +52,22 @@ class PhaseView(BaseModel):
     flux: list[float | None]  # None where a phase bin is empty
 
 
+class CentroidTrack(BaseModel):
+    """Phase-binned detrended centroid offset: flat when the transit is on
+    target, a bump at phase 0 for a background eclipsing binary."""
+
+    phase: list[float]
+    offset_pixels: list[float | None]
+
+
+class Periodogram(BaseModel):
+    """Bounded BLS power spectrum (opt-in via ?include_periodogram=true)."""
+
+    period_days: list[float]
+    power: list[float]
+    best_period_days: float
+
+
 class ScoreResponse(BaseModel):
     tic_id: int
     ephemeris: Ephemeris
@@ -70,6 +86,12 @@ class ScoreResponse(BaseModel):
     # Data for the console's phase-fold panels.
     global_view: PhaseView
     local_view: PhaseView
+
+    # Optional vetting series (panel parity with V1's six-panel figure).
+    odd_view: PhaseView | None = None
+    even_view: PhaseView | None = None
+    centroid_track: CentroidTrack | None = None
+    periodogram: Periodogram | None = None
 
     # Plain-language verdict rendered in the console.
     verdict: str
