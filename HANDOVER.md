@@ -187,3 +187,28 @@ New findings logged during the audit — both since resolved (2026-07-14):
   immaterial. The raw-score shift itself is present in-sample (mean prob
   0.41 vs 0.53 base rate on fold-0 train rows), so it is a property of the
   training objective rather than a generalization gap — Platt absorbs it.
+
+---
+
+## Deployment outcome (2026-07-16) — appended after the launch sprint
+
+The system is publicly live: API at https://exoplanet-hunter-api.fly.dev
+(Fly.io, syd, shared-cpu-1x/2GB, suspend-on-idle), console at
+https://exoplanet-hunter-console.onrender.com (VITE_API_BASE wired).
+End-to-end verified in the browser: TOI-1469.02 scored 0.99 live with
+phase views and the odd/even 3.4σ caution firing.
+
+Deploy-sprint fixes worth knowing about (details in the git log):
+
+- `.dockerignore`'s `models/cv/*/` also swallowed the `*.dvc` pointer files
+  (Docker strips the trailing slash) — the original crash-loop cause.
+- pip needed `docker/constraints.txt` (training-env pins) to resolve, and
+  `build-essential` in-layer for batman-package's source build.
+- MC-Dropout is drawn in one batched forward pass; sequential passes ran
+  >12 min on the shared CPU. API default n_mc is 20.
+- Concurrent scores of one TIC could rewrite a FITS under the other's
+  astropy memory-map (SIGBUS, exit 135): an existing file is now a cache
+  hit regardless of the manifest, and the API serializes scoring.
+- Speed package: ensemble preloads at boot, /score responses are cached
+  for the process lifetime (repeat click ≈ 0.25 s), suspend-on-idle keeps
+  the model in RAM across wake-ups.

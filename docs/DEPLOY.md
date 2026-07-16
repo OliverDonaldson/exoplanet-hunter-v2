@@ -39,14 +39,26 @@ network doesn't block the deploy.
 brew install flyctl          # or: curl -L https://fly.io/install.sh | sh
 fly auth login
 
-# R2 credentials for the boot-time dvc pull (from .dvc/config.local).
-# Set them yourself — never commit or echo them.
-fly secrets set AWS_ACCESS_KEY_ID=<r2-access-key> AWS_SECRET_ACCESS_KEY=<r2-secret>
+# R2 credentials for the boot-time dvc pull. The env-var NAMES must be
+# exactly AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (boto3's names), NOT
+# the field names used inside .dvc/config.local. Values only — no quotes.
+fly secrets set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
 
-fly deploy
+fly deploy --remote-only     # remote builder: don't push a 3.8 GB image from home
 fly logs                     # watch: entrypoint dvc pull -> uvicorn
 curl -s https://<app>.fly.dev/healthz
 ```
+
+Notes from the first deployment:
+
+- A deploy replaces the machine and kills in-flight scores — don't push to
+  `main` mid-demo (the GitHub connection auto-deploys).
+- `auto_stop_machines = "suspend"` snapshots RAM on idle: the machine
+  resumes in seconds with the TF ensemble still loaded, and the downloaded
+  FITS cache survives until the next deploy.
+- The ensemble preloads in a background thread at boot; the console's
+  page-load requests wake the machine, so the model is typically ready by
+  the time a target is clicked.
 
 ## 3. Point the console at the API
 
@@ -62,10 +74,13 @@ real floor (1 GB risks OOM on model load).
 
 | Mode | Monthly | Notes |
 |---|---|---|
-| Scale-to-zero (`min_machines_running = 0`) | **~$1-4** | idle most of the month; ~20-30s cold start on first hit after idle |
-| Always-on | **~$12.76** | snappy every request |
+| Suspend-on-idle (current config) | **~$1-4** | resumes in seconds with the model in RAM |
+| Always-on (`min_machines_running = 1`) | **~$12.76** | no wake-ups at all |
 
-Egress is negligible (small JSON responses, $0.04/GB). No Postgres, no
-volume, no dedicated IP needed — the MAST download cache is regenerable, so
-skip a Fly volume unless cold-start re-downloads become annoying (then a
-1-2 GB volume at $0.15/GB/mo persists `/srv/data/raw`).
+Egress is negligible (small JSON responses, $0.04/GB). Optional upgrades,
+each a one-liner: a 3 GB volume (`fly volumes create raw_cache -s 3` + a
+`[mounts]` block to `/srv/data/raw`, $0.45/mo) makes the FITS cache survive
+deploys; `shared-cpu-2x` (~2x inference) costs ~$0.9/mo more under
+suspend-on-idle usage. Fly's "run 2+ machines" banner is production-HA
+advice — for a single-user demo it doubles cost for redundancy, and the
+per-machine FITS cache works best on one machine.

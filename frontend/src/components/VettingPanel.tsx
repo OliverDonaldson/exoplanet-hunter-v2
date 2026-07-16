@@ -175,8 +175,8 @@ export default function VettingPanel({ candidate }: { candidate: CandidateRow | 
         <p style={{ fontStyle: "italic", opacity: 0.8 }}>
           Scoring live — light curve → preprocessing → 5-fold ensemble with MC-Dropout…
           {usedBls
-            ? " (no catalogue ephemeris: running a BLS period search too, allow ~1 min)"
-            : " (~20 s)"}
+            ? " (no catalogue ephemeris: running a BLS period search too — allow a few minutes)"
+            : " (seconds when warm; up to a few minutes if the server just woke or the light curve isn't cached yet)"}
         </p>
       )}
       {error && <p style={{ color: "#b91c1c" }}>Scoring failed: {error}</p>}
