@@ -22,7 +22,7 @@ local_view:
 
 head:
   fc_units: [256, 128]                  # More capacity than [128,64]
-  dropout: 0.4
+  dropout: 0.36                         # Optuna re-tune 2026-07, trial 26 (was 0.4)
   leaky_alpha: 0.1                      # LeakyReLU slope (Xie 2025 §2.2)
 
 attention:                              # MHA on each tower (ExoNet §III.D)

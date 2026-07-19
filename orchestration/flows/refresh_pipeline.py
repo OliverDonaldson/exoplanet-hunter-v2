@@ -233,8 +233,9 @@ if __name__ == "__main__":
     parser.add_argument("--no-train", action="store_true")
     parser.add_argument(
         "--data-config",
-        default="default",
-        help="Hydra data group for the build (e.g. 'full' for the expansion run)",
+        default="full",
+        help="Hydra data group for the build; 'full' is the production dataset "
+        "(data=default is the old capped build and would replace the shards)",
     )
     args = parser.parse_args()
     refresh_pipeline(

@@ -11,7 +11,7 @@ mixed_precision: false
 
 optimizer:
   _target_: tensorflow.keras.optimizers.Adam
-  learning_rate: 5.0e-4
+  learning_rate: 3.2e-4    # Optuna re-tune 2026-07, trial 26 (was 5.0e-4)
   clipnorm: 1.0
 
 loss:
