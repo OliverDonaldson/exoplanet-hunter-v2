@@ -25,6 +25,10 @@ export interface OddEvenDiagnostics {
   odd_depth_ppm: number;
   even_depth_ppm: number;
   depth_diff_sigma: number;
+  odd_timing_min?: number | null;
+  even_timing_min?: number | null;
+  timing_diff_sigma?: number | null;
+  timing_suspicious?: boolean | null;
 }
 
 export interface DurationDiagnostics {

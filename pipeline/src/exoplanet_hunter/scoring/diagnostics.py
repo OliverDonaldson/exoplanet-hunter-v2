@@ -18,6 +18,9 @@ DURATION_Q_MAX = 0.5
 DURATION_Q_RATIO_MIN = 0.6
 DURATION_A_OVER_RSTAR_MIN = 1.5
 
+#: Odd/even transit-timing caution trigger (Kunimoto 2025, §4.4, Eq 13).
+ODD_EVEN_TIMING_SIGMA = 10.0
+
 _G_CGS = 6.674e-8  # cm^3 g^-1 s^-2
 _R_SUN_CM = 6.957e10
 _DAY_S = 86_400.0
@@ -28,6 +31,9 @@ class OddEvenResult:
     odd_depth_ppm: float
     even_depth_ppm: float
     depth_diff_sigma: float
+    odd_timing_min: float | None = None
+    even_timing_min: float | None = None
+    timing_diff_sigma: float | None = None
 
 
 @dataclass(frozen=True)
@@ -97,13 +103,23 @@ def odd_even_depths(
     *,
     min_points: int = 5,
 ) -> OddEvenResult | None:
-    """Depths of odd- vs even-numbered transits; a big difference means the
-    "period" is really twice an eclipsing binary's true period.
+    """Depths and timings of odd- vs even-numbered transits; a big difference
+    means the "period" is really twice an eclipsing binary's true period.
 
     Depth = median(out-of-transit) - median(in-transit), in ppm of the
     normalised flux. The difference is expressed in sigma via the standard
     errors of the two in-transit medians. Returns None when either parity
     has too few in-transit points to say anything.
+
+    Timing (Kunimoto 2025, AJ 170:280, §4.4, Eq 13 — OE_trap,T analogue):
+    catches eccentric EBs detected at half period whose primary and secondary
+    depths match but whose eclipses are not separated by exactly half an
+    orbit. Per-transit midtimes are flux-weighted centroids of the in-transit
+    points (the paper fits trapezoids; we don't fit models in serving), so an
+    offset larger than ~half a duration saturates at the window edge. Parity
+    mean offsets from the linear ephemeris are compared in sigma via their
+    standard errors; timing fields are None with fewer than two usable
+    transits per parity.
     """
     ok = np.isfinite(time) & np.isfinite(flux)
     t, f = time[ok], flux[ok]
@@ -127,10 +143,33 @@ def odd_even_depths(
 
     (odd_d, odd_se), (even_d, even_se) = depths["odd"], depths["even"]
     diff_sigma = abs(odd_d - even_d) / max(np.hypot(odd_se, even_se), 1e-12)
+
+    offsets: dict[int, list[float]] = {0: [], 1: []}
+    for n in np.unique(transit_index[in_transit]):
+        sel = in_transit & (transit_index == n)
+        w = np.clip(baseline - f[sel], 0.0, None)
+        if sel.sum() < 3 or w.sum() <= 0:
+            continue
+        midtime = float(np.sum(w * t[sel]) / w.sum())
+        offsets[int(n) % 2].append(midtime - (t0 + float(n) * period))
+
+    odd_t = even_t = timing_sigma = None
+    if len(offsets[1]) >= 2 and len(offsets[0]) >= 2:
+        means, ses = {}, {}
+        for parity, vals in offsets.items():
+            arr = np.asarray(vals)
+            means[parity] = float(arr.mean())
+            ses[parity] = float(arr.std(ddof=1) / np.sqrt(len(arr)))
+        timing_sigma = float(abs(means[1] - means[0]) / max(np.hypot(ses[1], ses[0]), 1e-12))
+        odd_t, even_t = means[1] * 1440.0, means[0] * 1440.0
+
     return OddEvenResult(
         odd_depth_ppm=odd_d * 1e6,
         even_depth_ppm=even_d * 1e6,
         depth_diff_sigma=float(diff_sigma),
+        odd_timing_min=odd_t,
+        even_timing_min=even_t,
+        timing_diff_sigma=timing_sigma,
     )
 
 
@@ -153,6 +192,15 @@ def verdict(
         concerns.append(
             f"odd/even depths differ by {odd_even.depth_diff_sigma:.1f}σ "
             "(eclipsing-binary signature)"
+        )
+    if (
+        odd_even is not None
+        and odd_even.timing_diff_sigma is not None
+        and odd_even.timing_diff_sigma > ODD_EVEN_TIMING_SIGMA
+    ):
+        concerns.append(
+            f"odd/even transit timings differ by {odd_even.timing_diff_sigma:.1f}σ "
+            "(eccentric eclipsing binary at half period)"
         )
     if duration_check is not None and duration_check.suspicious:
         bits = [f"q={duration_check.q:.3g}"]

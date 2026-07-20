@@ -81,6 +81,7 @@ def score_target(
     ),
 ) -> ScoreResponse:
     from exoplanet_hunter.scoring import BEB_THRESHOLD_SIGMA, NoLightCurveError
+    from exoplanet_hunter.scoring.diagnostics import ODD_EVEN_TIMING_SIGMA
 
     cache_key = (tic_id, period_days, t0_btjd, duration_hours, n_mc, force_bls, include_periodogram)
     if not force_download and cache_key in _cache:
@@ -136,6 +137,14 @@ def score_target(
                 odd_depth_ppm=outcome.odd_even.odd_depth_ppm,
                 even_depth_ppm=outcome.odd_even.even_depth_ppm,
                 depth_diff_sigma=outcome.odd_even.depth_diff_sigma,
+                odd_timing_min=outcome.odd_even.odd_timing_min,
+                even_timing_min=outcome.odd_even.even_timing_min,
+                timing_diff_sigma=outcome.odd_even.timing_diff_sigma,
+                timing_suspicious=(
+                    outcome.odd_even.timing_diff_sigma > ODD_EVEN_TIMING_SIGMA
+                    if outcome.odd_even.timing_diff_sigma is not None
+                    else None
+                ),
             )
             if outcome.odd_even is not None
             else None

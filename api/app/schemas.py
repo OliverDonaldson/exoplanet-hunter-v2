@@ -38,11 +38,18 @@ class CentroidDiagnostics(BaseModel):
 
 
 class OddEvenDiagnostics(BaseModel):
-    """Odd vs even transit depths; a large difference flags an eclipsing binary."""
+    """Odd vs even transit depths and timings; a large difference in either
+    flags an eclipsing binary (timing: LEO-Vetter §4.4, catches eccentric EBs
+    at half period whose depths match). Timing fields are optional: absent on
+    older serving builds or when too few transits are usable."""
 
     odd_depth_ppm: float
     even_depth_ppm: float
     depth_diff_sigma: float
+    odd_timing_min: float | None = None
+    even_timing_min: float | None = None
+    timing_diff_sigma: float | None = None
+    timing_suspicious: bool | None = None
 
 
 class DurationDiagnostics(BaseModel):

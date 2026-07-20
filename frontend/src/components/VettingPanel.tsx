@@ -339,6 +339,13 @@ export default function VettingPanel({ candidate }: { candidate: CandidateRow | 
                 warn={score.odd_even.depth_diff_sigma > 3}
               />
             )}
+            {score.odd_even?.timing_diff_sigma != null && (
+              <Readout
+                label="Odd/even timing"
+                value={`${score.odd_even.odd_timing_min!.toFixed(1)} / ${score.odd_even.even_timing_min!.toFixed(1)} min (Δ ${score.odd_even.timing_diff_sigma.toFixed(1)}σ)`}
+                warn={score.odd_even.timing_suspicious === true}
+              />
+            )}
             {score.duration_check && (
               <Readout
                 label="Duration check"

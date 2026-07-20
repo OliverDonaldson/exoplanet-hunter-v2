@@ -100,6 +100,36 @@ def test_odd_even_consistent_for_genuine_transit():
     assert result.depth_diff_sigma < 3
 
 
+def synthetic_timed_transits(odd_shift: float, even_shift: float, n_periods: int = 40):
+    """Equal-depth box transits at P=2 d whose midtimes are shifted per parity —
+    an eccentric EB folded at half its true period."""
+    rng = np.random.default_rng(1)
+    time = np.arange(0, 2.0 * n_periods, 2.0 / 400)
+    flux = np.ones_like(time) + rng.normal(0, 1e-4, len(time))
+    for n in range(n_periods):
+        center = 2.0 * n + (odd_shift if n % 2 else even_shift)
+        flux[np.abs(time - center) < 0.05] -= 0.005
+    return time, flux
+
+
+def test_odd_even_flags_offset_timings():
+    # ±0.02 d (~29 min) parity shifts; depths identical, so only timing fires.
+    time, flux = synthetic_timed_transits(0.02, -0.02)
+    result = odd_even_depths(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.depth_diff_sigma < 3
+    assert result.timing_diff_sigma is not None and result.timing_diff_sigma > 10
+    assert result.odd_timing_min is not None and result.odd_timing_min > 0
+    assert result.even_timing_min is not None and result.even_timing_min < 0
+
+
+def test_odd_even_timing_consistent_for_genuine_transit():
+    time, flux = synthetic_timed_transits(0.0, 0.0)
+    result = odd_even_depths(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.timing_diff_sigma is not None and result.timing_diff_sigma < 3
+
+
 def test_batched_mc_samples_are_independent():
     from exoplanet_hunter.models.uncertainty import mc_dropout_predict
 
