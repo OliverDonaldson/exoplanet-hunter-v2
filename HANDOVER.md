@@ -212,3 +212,37 @@ Deploy-sprint fixes worth knowing about (details in the git log):
 - Speed package: ensemble preloads at boot, /score responses are cached
   for the process lifetime (repeat click ≈ 0.25 s), suspend-on-idle keeps
   the model in RAM across wake-ups.
+
+---
+
+## Re-tune + vetting-review outcome (2026-07-21) — appended after the campaign
+
+**Served model is now run `ca906040`** (deployed 2026-07-19, verified live):
+per-fold CV ROC-AUC 0.9581 ± 0.0057, Brier 0.0791, ECE 0.0276 vs incumbent
+cebb0fe6 0.9502/0.0882/0.0366; pooled serving ECE 0.0129 (/reliability).
+Path there: the Optuna harness shipped broken (MLflow nesting crash +
+optuna never declared) — fixed b36bd38, hardened (sqlite-resumable study,
+tested via `run_study`); 33 cheap trials found a flat optimum near the old
+defaults (adopted: lr 3.2e-4, dropout 0.36 — 6245a75); the full 5-fold
+refresh run promoted through the gate and absorbed the one-time Kepler
+membership change. Verified live: CP TIC 261136679 → 0.965, FP TIC
+50365310 → 0.003 with the centroid caution firing.
+
+Ops since: weekly refresh plist is LOADED (Sat 09:00; "Load failed: 5" from
+launchctl means already-loaded). Flow publish is now an allowlist
+(`publishable_cv_dirs`, 261032d) after it swept 32 tuning-trial dirs to R2;
+debris reclaimed with `dvc gc -c --all-commits` (297 objects; recipe in
+OPERATING.md — do NOT use `-w`, it prunes committed history). Gate-rejected
+runs are no longer pushed to R2 by design. 112 tests green.
+
+**Vetting-tools review (2026-07-17, in-chat)**: compared LEO-Vetter
+(Kunimoto 2025, AJ 170:280 — Robovetter-style metric/threshold vetter,
+GPL-3.0, pip `leo-vetter`) and DAVE (dormant since 2021) against V2.
+Verdict: complementary, not competing — they are expert test batteries, we
+are a calibrated classifier. Adoption roadmap lives in the next-session
+handover prompt + project memory; headline gaps: no explicit
+secondary-eclipse test (only implicit in the global view), no
+junk/false-alarm tests for BLS-found ephemerides (model never trained on
+that regime), and a train/serve mismatch where the `snr` aux is
+NaN→imputed for every non-TOI target at serve time (`_exofop_snr`).
+Paper PDF: ~/Downloads/Kunimoto_2025_AJ_170_280.pdf.
