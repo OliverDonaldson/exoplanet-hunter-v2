@@ -139,10 +139,12 @@ machine — losing it means minting a new R2 token).
 
 **Reclaiming R2 space** — the 2026-07-19 refresh `dvc add`ed and pushed 32
 tuning-trial checkpoint dirs (~200 MB) before publish became an allowlist.
-A one-off `dvc gc -c -w` deletes every object in the bucket (and local
-cache) not referenced by the current workspace's `.dvc` pointers. It prunes
-*all* unreferenced history, so run it once from a clean, fully-pulled
-checkout and confirm the pointer files you care about are present first.
+A one-off `dvc gc -c --all-commits` deletes every object (bucket + local
+cache) whose pointer was never committed on any branch — trial debris by
+construction — while keeping every dataset/model version that git history
+can still check out. The stricter `-w` (workspace-only) variant would also
+prune superseded dataset versions and break `git checkout <old> && dvc
+pull`; only use it deliberately, from a clean, fully-pulled checkout.
 
 ## Docker?
 
