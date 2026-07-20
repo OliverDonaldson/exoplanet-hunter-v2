@@ -17,6 +17,7 @@ from exoplanet_hunter.validation.promotion import (
     load_incumbent_summary,
     load_registry,
     promote,
+    publishable_cv_dirs,
 )
 from exoplanet_hunter.validation.schemas import (
     candidate_catalogue_schema,
@@ -38,5 +39,6 @@ __all__ = [
     "load_incumbent_summary",
     "load_registry",
     "promote",
+    "publishable_cv_dirs",
     "quarantine_tics",
 ]

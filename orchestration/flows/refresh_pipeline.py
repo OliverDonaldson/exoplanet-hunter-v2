@@ -171,7 +171,11 @@ def promotion_gate() -> bool:
 
 @task
 def publish() -> None:
-    """Version the refreshed artefacts and sync them to R2."""
+    """Version the refreshed artefacts and sync them to R2. CV runs are
+    allowlisted (promoted run + already-tracked dirs), never globbed — a
+    tuning campaign leaves dozens of trial checkpoints in models/cv."""
+    from exoplanet_hunter.validation.promotion import publishable_cv_dirs
+
     _run(
         [
             "dvc",
@@ -183,9 +187,8 @@ def publish() -> None:
             "data/processed/tfrecords",
         ]
     )
-    for run_dir in (REPO_ROOT / "models" / "cv").glob("*/"):
-        if (run_dir / "cv_summary.json").exists() and not run_dir.with_suffix(".dvc").exists():
-            _run(["dvc", "add", str(run_dir.relative_to(REPO_ROOT)).rstrip("/")])
+    for run_dir in publishable_cv_dirs(REPO_ROOT / "models"):
+        _run(["dvc", "add", str(run_dir.relative_to(REPO_ROOT))])
     _run(["dvc", "push"])
 
 

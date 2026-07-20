@@ -107,6 +107,27 @@ def load_incumbent_summary(models_dir: Path) -> dict[str, Any] | None:
     return json.loads(Path(registry["cv_summary"]).read_text())
 
 
+def publishable_cv_dirs(models_dir: Path) -> list[Path]:
+    """CV run dirs the publish step may `dvc add`: the registry's promoted run
+    plus dirs that already carry a `.dvc` pointer. An allowlist, not a glob —
+    a tuning campaign litters `models/cv/` with cheap trial checkpoints that
+    also have a `cv_summary.json` and must never be pushed to the remote.
+    """
+    registry = load_registry(models_dir)
+    promoted = registry["run_id"] if registry else None
+    cv_root = models_dir / "cv"
+    if not cv_root.is_dir():
+        return []
+    dirs = []
+    for run_dir in sorted(cv_root.iterdir()):
+        if not (run_dir / "cv_summary.json").is_file():
+            continue
+        pointer = cv_root / f"{run_dir.name}.dvc"
+        if run_dir.name == promoted or pointer.exists():
+            dirs.append(run_dir)
+    return dirs
+
+
 def promote(models_dir: Path, run_id: str, cv_summary_path: Path) -> dict[str, Any]:
     """Point the registry at a new best run. Caller decides via evaluate_promotion."""
     summary = json.loads(cv_summary_path.read_text())

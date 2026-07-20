@@ -17,6 +17,7 @@ from exoplanet_hunter.validation import (
     label_catalogue_schema,
     load_incumbent_summary,
     promote,
+    publishable_cv_dirs,
     quarantine_tics,
 )
 
@@ -243,3 +244,43 @@ def test_registry_roundtrip(tmp_path):
     incumbent = load_incumbent_summary(tmp_path)
     assert incumbent is not None
     assert incumbent["summary"]["test_roc_auc"]["mean"] == 0.92
+
+
+# ------------------------------------------------------------------ publish --
+
+
+def cv_run(models_dir, run_id: str, tracked: bool = False, with_summary: bool = True):
+    run_dir = models_dir / "cv" / run_id
+    run_dir.mkdir(parents=True)
+    if with_summary:
+        (run_dir / "cv_summary.json").write_text(json.dumps(summary(0.90, 0.10)))
+    if tracked:
+        (models_dir / "cv" / f"{run_id}.dvc").write_text("outs: []\n")
+    return run_dir
+
+
+def test_publishable_cv_dirs_allowlists_promoted_and_tracked(tmp_path):
+    promoted = cv_run(tmp_path, "aaa_promoted")
+    tracked = cv_run(tmp_path, "bbb_tracked", tracked=True)
+    cv_run(tmp_path, "ccc_trial")  # tuning-trial checkpoint: has a summary, no pointer
+    promote(tmp_path, "aaa_promoted", promoted / "cv_summary.json")
+
+    assert publishable_cv_dirs(tmp_path) == [promoted, tracked]
+
+
+def test_publishable_cv_dirs_without_registry_keeps_tracked_only(tmp_path):
+    tracked = cv_run(tmp_path, "aaa_tracked", tracked=True)
+    cv_run(tmp_path, "bbb_trial")
+
+    assert publishable_cv_dirs(tmp_path) == [tracked]
+
+
+def test_publishable_cv_dirs_skips_partial_dirs(tmp_path):
+    # pointer present but contents half-restored: re-adding would clobber the pointer
+    cv_run(tmp_path, "aaa_partial", tracked=True, with_summary=False)
+
+    assert publishable_cv_dirs(tmp_path) == []
+
+
+def test_publishable_cv_dirs_empty_without_cv_root(tmp_path):
+    assert publishable_cv_dirs(tmp_path) == []
