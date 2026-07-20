@@ -339,6 +339,23 @@ export default function VettingPanel({ candidate }: { candidate: CandidateRow | 
                 warn={score.odd_even.depth_diff_sigma > 3}
               />
             )}
+            {score.duration_check && (
+              <Readout
+                label="Duration check"
+                value={[
+                  `q=${score.duration_check.q.toFixed(3)}`,
+                  score.duration_check.q_ratio != null
+                    ? `q/q_circ=${score.duration_check.q_ratio.toFixed(2)}`
+                    : null,
+                  score.duration_check.a_over_rstar != null
+                    ? `a/R*=${score.duration_check.a_over_rstar.toFixed(1)}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                warn={score.duration_check.suspicious}
+              />
+            )}
             <Readout label="Raw ensemble mean" value={score.prob_mean.toFixed(3)} />
             <Readout label="Model" value={`${score.model_version} · ${score.n_mc_samples} MC samples`} />
           </div>

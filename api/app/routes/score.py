@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.schemas import (
     CentroidDiagnostics,
     CentroidTrack,
+    DurationDiagnostics,
     Ephemeris,
     FoldPrediction,
     OddEvenDiagnostics,
@@ -166,6 +167,17 @@ def score_target(
                 best_period_days=outcome.periodogram.best_period_days,
             )
             if outcome.periodogram
+            else None
+        ),
+        duration_check=(
+            DurationDiagnostics(
+                q=outcome.duration_check.q,
+                q_circ=outcome.duration_check.q_circ,
+                q_ratio=outcome.duration_check.q_ratio,
+                a_over_rstar=outcome.duration_check.a_over_rstar,
+                suspicious=outcome.duration_check.suspicious,
+            )
+            if outcome.duration_check is not None
             else None
         ),
         verdict=outcome.verdict,

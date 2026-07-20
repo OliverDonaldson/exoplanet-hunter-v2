@@ -27,6 +27,14 @@ export interface OddEvenDiagnostics {
   depth_diff_sigma: number;
 }
 
+export interface DurationDiagnostics {
+  q: number;
+  q_circ: number | null;
+  q_ratio: number | null;
+  a_over_rstar: number | null;
+  suspicious: boolean;
+}
+
 export interface PhaseView {
   phase: number[];
   flux: (number | null)[];
@@ -59,6 +67,7 @@ export interface ScoreResponse {
   even_view: PhaseView | null;
   centroid_track: CentroidTrack | null;
   periodogram: Periodogram | null;
+  duration_check?: DurationDiagnostics | null;
   verdict: string;
   model_version: string;
   n_mc_samples: number;

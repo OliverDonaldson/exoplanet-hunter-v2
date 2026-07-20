@@ -2,8 +2,10 @@
 
 from exoplanet_hunter.scoring.diagnostics import (
     BEB_THRESHOLD_SIGMA,
+    DurationResult,
     OddEvenResult,
     odd_even_depths,
+    unphysical_duration,
     verdict,
 )
 from exoplanet_hunter.scoring.ensemble import (
@@ -21,6 +23,7 @@ from exoplanet_hunter.scoring.service import (
 
 __all__ = [
     "BEB_THRESHOLD_SIGMA",
+    "DurationResult",
     "EnsemblePrediction",
     "FoldMember",
     "NoLightCurveError",
@@ -31,5 +34,6 @@ __all__ = [
     "ScoringEnsemble",
     "TargetScorer",
     "odd_even_depths",
+    "unphysical_duration",
     "verdict",
 ]

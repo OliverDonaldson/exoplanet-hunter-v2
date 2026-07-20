@@ -8,6 +8,7 @@ from exoplanet_hunter.scoring import (
     FoldMember,
     ScoringEnsemble,
     odd_even_depths,
+    unphysical_duration,
     verdict,
 )
 from exoplanet_hunter.training.calibration import TemperatureScaler
@@ -120,6 +121,53 @@ def test_verdict_language():
     assert "Strong planet candidate" in verdict(0.95, 0.3, centroid_snr=1.0, odd_even=None)
     assert "background-EB" in verdict(0.95, 0.3, centroid_snr=5.0, odd_even=None)
     assert "Unlikely" in verdict(0.05, 0.3, centroid_snr=1.0, odd_even=None)
+
+
+# ------------------------------------------------- unphysical duration (§3.4) --
+
+# Sun-like star: logg 4.44, R* 1.0 -> a/R* ~215 at P=1yr, central duration ~13h.
+SUN = dict(stellar_radius=1.0, stellar_logg=4.44)
+
+
+def test_duration_earth_analog_is_clean():
+    result = unphysical_duration(365.25, 13.0 / 24.0, **SUN)
+    assert result is not None
+    assert result.a_over_rstar == pytest.approx(215, rel=0.02)
+    assert result.q_ratio == pytest.approx(1.0, rel=0.05)
+    assert not result.suspicious
+
+
+def test_duration_flags_q_above_half():
+    # Half the "period" spent in transit — sinusoidal variability, not a planet.
+    result = unphysical_duration(1.0, 0.55, **SUN)
+    assert result is not None
+    assert result.q > 0.5
+    assert result.suspicious
+
+
+def test_duration_flags_too_short_for_circular_orbit():
+    # 1.3h event at P=1yr on a Sun-like star: q/q_circ ~0.1.
+    result = unphysical_duration(365.25, 1.3 / 24.0, **SUN)
+    assert result is not None
+    assert result.q_ratio is not None and result.q_ratio < 0.6
+    assert result.suspicious
+
+
+def test_duration_without_stellar_params_uses_q_only():
+    result = unphysical_duration(365.25, 1.3 / 24.0, stellar_radius=None, stellar_logg=None)
+    assert result is not None
+    assert result.q_circ is None and result.q_ratio is None and result.a_over_rstar is None
+    assert not result.suspicious  # q is fine; density conditions can't fire
+
+    long_q = unphysical_duration(1.0, 0.55, stellar_radius=None, stellar_logg=None)
+    assert long_q is not None and long_q.suspicious
+
+
+def test_duration_verdict_language():
+    check = unphysical_duration(1.0, 0.55, **SUN)
+    text = verdict(0.95, 0.3, centroid_snr=1.0, odd_even=None, duration_check=check)
+    assert "duration" in text
+    assert "Caution" in text
 
 
 def _bare_scorer(candidates_path):

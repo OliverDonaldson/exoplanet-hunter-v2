@@ -45,6 +45,18 @@ class OddEvenDiagnostics(BaseModel):
     depth_diff_sigma: float
 
 
+class DurationDiagnostics(BaseModel):
+    """Unphysical-duration test (LEO-Vetter §3.4): q = duration/period vs the
+    circular-orbit expectation from stellar density. Nullable fields are absent
+    when the TIC lacks radius/logg."""
+
+    q: float
+    q_circ: float | None
+    q_ratio: float | None
+    a_over_rstar: float | None
+    suspicious: bool
+
+
 class PhaseView(BaseModel):
     """A binned, phase-folded view (global: 2001 bins, local: 201 bins)."""
 
@@ -92,6 +104,9 @@ class ScoreResponse(BaseModel):
     even_view: PhaseView | None = None
     centroid_track: CentroidTrack | None = None
     periodogram: Periodogram | None = None
+
+    # LEO-Vetter-style cautions (optional: absent on older serving builds).
+    duration_check: DurationDiagnostics | None = None
 
     # Plain-language verdict rendered in the console.
     verdict: str

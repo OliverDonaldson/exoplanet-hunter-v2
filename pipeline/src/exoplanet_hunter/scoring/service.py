@@ -31,8 +31,10 @@ from exoplanet_hunter.preprocess import (
 from exoplanet_hunter.preprocess.views import build_views
 from exoplanet_hunter.scoring.diagnostics import (
     BEB_THRESHOLD_SIGMA,
+    DurationResult,
     OddEvenResult,
     odd_even_depths,
+    unphysical_duration,
     verdict,
 )
 from exoplanet_hunter.scoring.ensemble import ScoringEnsemble
@@ -102,6 +104,7 @@ class ScoreOutcome:
     even_view: PhaseSeries | None = None
     centroid_track: PhaseSeries | None = None  # flux carries the offset in pixels
     periodogram: Periodogram | None = None
+    duration_check: DurationResult | None = None
 
 
 def _phase_series(view: np.ndarray, lo: float, hi: float) -> PhaseSeries:
@@ -298,6 +301,11 @@ class TargetScorer:
             duration,
         )
 
+        sp = self._fetch_stellar(tic_id)
+        duration_check = unphysical_duration(
+            period, duration, stellar_radius=sp.radius, stellar_logg=sp.logg
+        )
+
         half = float(min(max(self.preprocess.local_durations * duration / period, 1e-3), 0.5))
 
         # Odd/even local views: same fold, split by transit parity — the
@@ -364,7 +372,14 @@ class TargetScorer:
             even_view=even_view,
             centroid_track=track,
             periodogram=pgram,
-            verdict=verdict(prediction.prob_calibrated, prediction.threshold, centroid_snr, oe),
+            duration_check=duration_check,
+            verdict=verdict(
+                prediction.prob_calibrated,
+                prediction.threshold,
+                centroid_snr,
+                oe,
+                duration_check=duration_check,
+            ),
             model_version=f"cnn_dualview-cv-{self.ensemble.run_id[:8]}",
             n_mc_samples=n_mc,
         )

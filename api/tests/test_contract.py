@@ -49,6 +49,13 @@ def test_score_response_schema_roundtrips() -> None:
         "decision_threshold": 0.5,
         "centroid": {"centroid_snr": 1.2, "beb_threshold_sigma": 3.0, "suspicious": False},
         "odd_even": {"odd_depth_ppm": 950.0, "even_depth_ppm": 940.0, "depth_diff_sigma": 0.3},
+        "duration_check": {
+            "q": 0.0005,
+            "q_circ": 0.0015,
+            "q_ratio": 0.33,
+            "a_over_rstar": 215.0,
+            "suspicious": True,
+        },
         "global_view": {"phase": [-0.5, 0.0, 0.5], "flux": [0.0, -0.001, None]},
         "local_view": {"phase": [-0.02, 0.0, 0.02], "flux": [0.0, -0.001, 0.0]},
         "verdict": "Consistent with an on-target planetary transit.",
@@ -58,3 +65,8 @@ def test_score_response_schema_roundtrips() -> None:
     parsed = ScoreResponse.model_validate(example)
     assert parsed.tic_id == 307210830
     assert len(parsed.per_fold) == 5
+    assert parsed.duration_check is not None and parsed.duration_check.suspicious
+
+    # New cautions are optional: a payload without them still validates.
+    del example["duration_check"]
+    assert ScoreResponse.model_validate(example).duration_check is None
