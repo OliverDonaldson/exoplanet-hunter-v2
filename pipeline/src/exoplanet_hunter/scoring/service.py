@@ -32,8 +32,10 @@ from exoplanet_hunter.preprocess.views import build_views
 from exoplanet_hunter.scoring.diagnostics import (
     BEB_THRESHOLD_SIGMA,
     DurationResult,
+    FalseAlarmResult,
     OddEvenResult,
     SecondaryResult,
+    false_alarm_checks,
     odd_even_depths,
     significant_secondary,
     unphysical_duration,
@@ -108,6 +110,7 @@ class ScoreOutcome:
     periodogram: Periodogram | None = None
     duration_check: DurationResult | None = None
     secondary: SecondaryResult | None = None
+    false_alarms: FalseAlarmResult | None = None
 
 
 def _phase_series(view: np.ndarray, lo: float, hi: float) -> PhaseSeries:
@@ -317,6 +320,17 @@ class TargetScorer:
             stellar_radius=sp.radius,
             stellar_logg=sp.logg,
         )
+        # The model never trained on junk detections — a search-sourced
+        # ephemeris gets the noise/systematic false-alarm bundle too.
+        false_alarms = None
+        if source == "bls":
+            false_alarms = false_alarm_checks(
+                np.asarray(flat.time.value, dtype=float),
+                np.asarray(flat.flux.value, dtype=float),
+                period,
+                t0,
+                duration,
+            )
 
         half = float(min(max(self.preprocess.local_durations * duration / period, 1e-3), 0.5))
 
@@ -386,6 +400,7 @@ class TargetScorer:
             periodogram=pgram,
             duration_check=duration_check,
             secondary=secondary,
+            false_alarms=false_alarms,
             verdict=verdict(
                 prediction.prob_calibrated,
                 prediction.threshold,
@@ -393,6 +408,7 @@ class TargetScorer:
                 oe,
                 duration_check=duration_check,
                 secondary=secondary,
+                false_alarms=false_alarms,
             ),
             model_version=f"cnn_dualview-cv-{self.ensemble.run_id[:8]}",
             n_mc_samples=n_mc,

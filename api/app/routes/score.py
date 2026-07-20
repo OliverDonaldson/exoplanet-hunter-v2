@@ -24,6 +24,7 @@ from app.schemas import (
     CentroidTrack,
     DurationDiagnostics,
     Ephemeris,
+    FalseAlarmDiagnostics,
     FoldPrediction,
     OddEvenDiagnostics,
     Periodogram,
@@ -203,6 +204,21 @@ def score_target(
                 suspicious=outcome.secondary.suspicious,
             )
             if outcome.secondary is not None
+            else None
+        ),
+        false_alarms=(
+            FalseAlarmDiagnostics(
+                sweet_significance=outcome.false_alarms.sweet_significance,
+                sweet_suspicious=outcome.false_alarms.sweet_suspicious,
+                asymmetry_sigma=outcome.false_alarms.asymmetry_sigma,
+                asymmetry_suspicious=outcome.false_alarms.asymmetry_suspicious,
+                depth_mean_median_ratio=outcome.false_alarms.depth_mean_median_ratio,
+                dmm_suspicious=outcome.false_alarms.dmm_suspicious,
+                gap_fraction=outcome.false_alarms.gap_fraction,
+                gap_suspicious=outcome.false_alarms.gap_suspicious,
+                suspicious=outcome.false_alarms.suspicious,
+            )
+            if outcome.false_alarms is not None
             else None
         ),
         verdict=outcome.verdict,

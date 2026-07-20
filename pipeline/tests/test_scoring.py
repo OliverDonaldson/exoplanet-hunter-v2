@@ -7,6 +7,7 @@ import tensorflow as tf
 from exoplanet_hunter.scoring import (
     FoldMember,
     ScoringEnsemble,
+    false_alarm_checks,
     odd_even_depths,
     significant_secondary,
     unphysical_duration,
@@ -152,6 +153,85 @@ def test_verdict_language():
     assert "Strong planet candidate" in verdict(0.95, 0.3, centroid_snr=1.0, odd_even=None)
     assert "background-EB" in verdict(0.95, 0.3, centroid_snr=5.0, odd_even=None)
     assert "Unlikely" in verdict(0.05, 0.3, centroid_snr=1.0, odd_even=None)
+
+
+# ----------------------------------------------- false-alarm bundle (BLS only) --
+
+
+def test_false_alarms_sweet_flags_sinusoid():
+    time = np.arange(0, 30, 0.01)
+    rng = np.random.default_rng(3)
+    flux = 1 + 5e-3 * np.sin(2 * np.pi * time / 3.0) + rng.normal(0, 1e-4, len(time))
+    result = false_alarm_checks(time, flux, period=3.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.sweet_significance is not None and result.sweet_significance > 15
+    assert result.sweet_suspicious
+    assert result.suspicious
+
+
+def test_false_alarms_quiet_for_genuine_transit():
+    time, flux = synthetic_transits(0.005, 0.005)
+    result = false_alarm_checks(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert not result.sweet_suspicious
+    assert not result.asymmetry_suspicious
+    assert not result.dmm_suspicious
+    assert not result.gap_suspicious
+    assert not result.suspicious
+
+
+def test_false_alarms_flags_asymmetric_ramp():
+    rng = np.random.default_rng(4)
+    time = np.arange(0, 80, 2.0 / 400)
+    flux = np.ones_like(time) + rng.normal(0, 1e-4, len(time))
+    phase = ((time + 1.0) % 2.0) - 1.0
+    in_tr = np.abs(phase) < 0.05
+    flux[in_tr & (phase < 0)] -= 0.002
+    flux[in_tr & (phase >= 0)] -= 0.010  # ramp-like: right side far deeper
+    result = false_alarm_checks(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.asymmetry_sigma is not None and result.asymmetry_sigma > 10
+    assert result.asymmetry_suspicious
+
+
+def test_false_alarms_flags_outlier_depths():
+    rng = np.random.default_rng(5)
+    time = np.arange(0, 24, 2.0 / 400)
+    flux = np.ones_like(time) + rng.normal(0, 1e-4, len(time))
+    phase = ((time + 1.0) % 2.0) - 1.0
+    idx = np.round(time / 2.0).astype(int)
+    in_tr = np.abs(phase) < 0.05
+    flux[in_tr] -= 0.005
+    flux[in_tr & np.isin(idx, [3, 7])] -= 0.045  # two events dominate the mean
+    result = false_alarm_checks(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.depth_mean_median_ratio is not None
+    assert result.depth_mean_median_ratio > 1.5
+    assert result.dmm_suspicious
+
+
+def test_false_alarms_flags_transits_near_gaps():
+    rng = np.random.default_rng(6)
+    time = np.arange(0, 20, 0.005)
+    # Carve a 0.35 d hole starting 0.15 d after every transit midtime.
+    keep = (time % 1.0 < 0.15) | (time % 1.0 >= 0.5)
+    time = time[keep]
+    flux = np.ones_like(time) + rng.normal(0, 1e-4, len(time))
+    phase = ((time + 0.5) % 1.0) - 0.5
+    flux[np.abs(phase) < 0.05] -= 0.005
+    result = false_alarm_checks(time, flux, period=1.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.gap_fraction is not None and result.gap_fraction >= 0.5
+    assert result.gap_suspicious
+
+
+def test_false_alarms_verdict_language():
+    time = np.arange(0, 30, 0.01)
+    flux = 1 + 5e-3 * np.sin(2 * np.pi * time / 3.0)
+    result = false_alarm_checks(time, flux, period=3.0, t0=0.0, duration=0.1)
+    text = verdict(0.9, 0.3, centroid_snr=None, odd_even=None, false_alarms=result)
+    assert "low-trust BLS detection" in text
+    assert "sinusoidal variability" in text
 
 
 # ------------------------------------------------ significant secondary (§4.3) --

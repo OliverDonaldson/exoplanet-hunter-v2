@@ -43,6 +43,18 @@ export interface SecondaryDiagnostics {
   suspicious: boolean;
 }
 
+export interface FalseAlarmDiagnostics {
+  sweet_significance: number | null;
+  sweet_suspicious: boolean;
+  asymmetry_sigma: number | null;
+  asymmetry_suspicious: boolean;
+  depth_mean_median_ratio: number | null;
+  dmm_suspicious: boolean;
+  gap_fraction: number | null;
+  gap_suspicious: boolean;
+  suspicious: boolean;
+}
+
 export interface DurationDiagnostics {
   q: number;
   q_circ: number | null;
@@ -85,6 +97,7 @@ export interface ScoreResponse {
   periodogram: Periodogram | null;
   duration_check?: DurationDiagnostics | null;
   secondary?: SecondaryDiagnostics | null;
+  false_alarms?: FalseAlarmDiagnostics | null;
   verdict: string;
   model_version: string;
   n_mc_samples: number;

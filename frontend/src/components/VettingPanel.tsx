@@ -370,6 +370,28 @@ export default function VettingPanel({ candidate }: { candidate: CandidateRow | 
                 warn={score.duration_check.suspicious}
               />
             )}
+            {score.false_alarms && (
+              <Readout
+                label="BLS detection trust"
+                value={[
+                  score.false_alarms.sweet_significance != null
+                    ? `SWEET ${score.false_alarms.sweet_significance.toFixed(1)}σ`
+                    : null,
+                  score.false_alarms.asymmetry_sigma != null
+                    ? `asym ${score.false_alarms.asymmetry_sigma.toFixed(1)}σ`
+                    : null,
+                  score.false_alarms.depth_mean_median_ratio != null
+                    ? `mean/med ${score.false_alarms.depth_mean_median_ratio.toFixed(2)}`
+                    : null,
+                  score.false_alarms.gap_fraction != null
+                    ? `gaps ${(score.false_alarms.gap_fraction * 100).toFixed(0)}%`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "insufficient data"}
+                warn={score.false_alarms.suspicious}
+              />
+            )}
             <Readout label="Raw ensemble mean" value={score.prob_mean.toFixed(3)} />
             <Readout label="Model" value={`${score.model_version} · ${score.n_mc_samples} MC samples`} />
           </div>

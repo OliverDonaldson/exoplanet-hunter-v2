@@ -69,6 +69,22 @@ class SecondaryDiagnostics(BaseModel):
     suspicious: bool
 
 
+class FalseAlarmDiagnostics(BaseModel):
+    """Noise/systematic false-alarm bundle, computed only for BLS-found
+    ephemerides (LEO-Vetter §3.3/§3.5/§3.6/§3.12) — a grouped "low-trust
+    detection" caution. Individual metrics are None with too little data."""
+
+    sweet_significance: float | None
+    sweet_suspicious: bool
+    asymmetry_sigma: float | None
+    asymmetry_suspicious: bool
+    depth_mean_median_ratio: float | None
+    dmm_suspicious: bool
+    gap_fraction: float | None
+    gap_suspicious: bool
+    suspicious: bool
+
+
 class DurationDiagnostics(BaseModel):
     """Unphysical-duration test (LEO-Vetter §3.4): q = duration/period vs the
     circular-orbit expectation from stellar density. Nullable fields are absent
@@ -132,6 +148,7 @@ class ScoreResponse(BaseModel):
     # LEO-Vetter-style cautions (optional: absent on older serving builds).
     duration_check: DurationDiagnostics | None = None
     secondary: SecondaryDiagnostics | None = None
+    false_alarms: FalseAlarmDiagnostics | None = None  # BLS-found ephemerides only
 
     # Plain-language verdict rendered in the console.
     verdict: str

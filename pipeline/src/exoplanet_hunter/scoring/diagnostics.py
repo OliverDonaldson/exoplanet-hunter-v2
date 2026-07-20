@@ -26,6 +26,15 @@ ODD_EVEN_TIMING_SIGMA = 10.0
 SECONDARY_DEPTH_RATIO_MAX = 0.1
 SECONDARY_ALBEDO_MAX = 1.0
 
+#: False-alarm caution triggers for BLS-found ephemerides (Kunimoto 2025):
+#: SWEET §3.3, asymmetry §3.5, depth mean/median §3.6, gap fraction §3.12.
+SWEET_SIGNIFICANCE_MAX = 15.0
+SWEET_PERIOD_MAX_DAYS = 10.0
+ASYMMETRY_SIGMA_MAX = 10.0
+DMM_RATIO_MAX = 1.5
+GAP_MIN_DAYS = 0.3
+GAP_FRACTION_MAX = 0.5
+
 _G_CGS = 6.674e-8  # cm^3 g^-1 s^-2
 _R_SUN_CM = 6.957e10
 _DAY_S = 86_400.0
@@ -61,6 +70,149 @@ class SecondaryResult:
     albedo: float | None
     occultation_like: bool
     suspicious: bool
+
+
+@dataclass(frozen=True)
+class FalseAlarmResult:
+    sweet_significance: float | None
+    sweet_suspicious: bool
+    asymmetry_sigma: float | None
+    asymmetry_suspicious: bool
+    depth_mean_median_ratio: float | None
+    dmm_suspicious: bool
+    gap_fraction: float | None
+    gap_suspicious: bool
+    suspicious: bool
+
+
+def _sine_significance(t: np.ndarray, f: np.ndarray, period: float) -> float | None:
+    """Amplitude / amplitude-uncertainty of a least-squares sine fit at a
+    fixed period (amplitude, phase, offset free) — the SWEET statistic."""
+    if len(t) < 10 or period <= 0:
+        return None
+    omega = 2.0 * np.pi / period
+    design = np.column_stack([np.sin(omega * t), np.cos(omega * t), np.ones_like(t)])
+    coef, *_ = np.linalg.lstsq(design, f, rcond=None)
+    resid = f - design @ coef
+    dof = len(t) - 3
+    if dof <= 0:
+        return None
+    s2 = float(resid @ resid) / dof
+    try:
+        cov = s2 * np.linalg.inv(design.T @ design)
+    except np.linalg.LinAlgError:
+        return None
+    a, b = float(coef[0]), float(coef[1])
+    amp = float(np.hypot(a, b))
+    if amp <= 0:
+        return None
+    var_amp = (a**2 * cov[0, 0] + b**2 * cov[1, 1] + 2 * a * b * cov[0, 1]) / amp**2
+    if var_amp <= 0:
+        return None
+    return amp / float(np.sqrt(var_amp))
+
+
+def false_alarm_checks(
+    time: np.ndarray,
+    flux: np.ndarray,
+    period: float,
+    t0: float,
+    duration: float,
+    *,
+    min_points: int = 5,
+) -> FalseAlarmResult | None:
+    """Noise/systematic false-alarm bundle for BLS-found ephemerides
+    (Kunimoto 2025, AJ 170:280) — the model never trained on junk
+    detections, so a search-sourced ephemeris gets extra scrutiny.
+
+    - SWEET (§3.3): sine fits at 0.5/1/2× the period with data within one
+      duration of midtransit masked; caution when the best fit's
+      amplitude/uncertainty > 15 and P < 10 d (stellar variability).
+    - Asymmetry (§3.5): left- vs right-half in-transit depths compared in
+      sigma (the paper compares trapezoid-fit durations; we fit no models
+      in serving), caution > 10 (ramps/scattered light).
+    - Depth mean/median (§3.6): per-transit depths, caution when
+      mean/median > 1.5 (a few outlier events dominate).
+    - Data gaps (§3.12): caution when ≥50% of observed transits have a
+      midtime within 2 durations of a ≥0.3 d gap (edge-of-gap systematics).
+    Individual checks are None when there is too little data to say.
+    """
+    ok = np.isfinite(time) & np.isfinite(flux)
+    t, f = np.sort(time[ok]), flux[ok][np.argsort(time[ok])]
+    if len(t) < 10 or period <= 0 or duration <= 0:
+        return None
+
+    phase_days = ((t - t0 + period / 2) % period) - period / 2
+    in_transit = np.abs(phase_days) < duration / 2
+    out = ~in_transit
+    baseline = float(np.median(f[out])) if out.any() else 1.0
+
+    # SWEET: mask ±1 duration around midtransit so depth doesn't drive the fit.
+    sweet_mask = np.abs(phase_days) >= duration
+    sweet = None
+    if sweet_mask.sum() >= 10:
+        fits = [
+            sig
+            for p in (0.5 * period, period, 2.0 * period)
+            if (sig := _sine_significance(t[sweet_mask], f[sweet_mask], p)) is not None
+        ]
+        sweet = max(fits) if fits else None
+    sweet_bad = (
+        sweet is not None and sweet > SWEET_SIGNIFICANCE_MAX and period < SWEET_PERIOD_MAX_DAYS
+    )
+
+    # Asymmetry: left vs right in-transit halves.
+    asym = None
+    left, right = in_transit & (phase_days < 0), in_transit & (phase_days >= 0)
+    if left.sum() >= min_points and right.sum() >= min_points:
+        d_l, d_r = baseline - float(np.mean(f[left])), baseline - float(np.mean(f[right]))
+        se_l = float(np.std(f[left])) / np.sqrt(left.sum())
+        se_r = float(np.std(f[right])) / np.sqrt(right.sum())
+        asym = abs(d_l - d_r) / max(float(np.hypot(se_l, se_r)), 1e-12)
+    asym_bad = asym is not None and asym > ASYMMETRY_SIGMA_MAX
+
+    # Per-transit depths for the mean/median ratio.
+    transit_index = np.round((t - t0) / period).astype(int)
+    depths = []
+    for n in np.unique(transit_index[in_transit]):
+        sel = in_transit & (transit_index == n)
+        if sel.sum() >= 3:
+            depths.append(baseline - float(np.mean(f[sel])))
+    dmm = None
+    if len(depths) >= 3:
+        med = float(np.median(depths))
+        if med > 0:
+            dmm = float(np.mean(depths)) / med
+    dmm_bad = dmm is not None and dmm > DMM_RATIO_MAX
+
+    # Gap fraction: observed transits whose midtime sits near a data gap.
+    gap_frac = None
+    midtimes = t0 + period * np.unique(transit_index[in_transit]).astype(float)
+    dt = np.diff(t)
+    gap_edges = np.flatnonzero(dt >= GAP_MIN_DAYS)
+    if len(midtimes) > 0:
+        near = 0
+        for m in midtimes:
+            for i in gap_edges:
+                lo, hi = t[i], t[i + 1]
+                dist = 0.0 if lo <= m <= hi else min(abs(m - lo), abs(m - hi))
+                if dist <= 2.0 * duration:
+                    near += 1
+                    break
+        gap_frac = near / len(midtimes)
+    gap_bad = gap_frac is not None and gap_frac >= GAP_FRACTION_MAX
+
+    return FalseAlarmResult(
+        sweet_significance=sweet,
+        sweet_suspicious=bool(sweet_bad),
+        asymmetry_sigma=asym,
+        asymmetry_suspicious=bool(asym_bad),
+        depth_mean_median_ratio=dmm,
+        dmm_suspicious=bool(dmm_bad),
+        gap_fraction=gap_frac,
+        gap_suspicious=bool(gap_bad),
+        suspicious=bool(sweet_bad or asym_bad or dmm_bad or gap_bad),
+    )
 
 
 def _a_over_rstar(
@@ -326,6 +478,7 @@ def verdict(
     *,
     duration_check: DurationResult | None = None,
     secondary: SecondaryResult | None = None,
+    false_alarms: FalseAlarmResult | None = None,
 ) -> str:
     """Plain-language summary rendered in the vetting console."""
     concerns: list[str] = []
@@ -361,6 +514,17 @@ def verdict(
         if duration_check.a_over_rstar is not None:
             bits.append(f"a/R*={duration_check.a_over_rstar:.1f}")
         concerns.append(f"transit duration is unphysical for this orbit ({', '.join(bits)})")
+    if false_alarms is not None and false_alarms.suspicious:
+        fails: list[str] = []
+        if false_alarms.sweet_suspicious and false_alarms.sweet_significance is not None:
+            fails.append(f"sinusoidal variability {false_alarms.sweet_significance:.0f}σ")
+        if false_alarms.asymmetry_suspicious and false_alarms.asymmetry_sigma is not None:
+            fails.append(f"asymmetric transit {false_alarms.asymmetry_sigma:.0f}σ")
+        if false_alarms.dmm_suspicious and false_alarms.depth_mean_median_ratio is not None:
+            fails.append(f"depth mean/median {false_alarms.depth_mean_median_ratio:.1f}")
+        if false_alarms.gap_suspicious and false_alarms.gap_fraction is not None:
+            fails.append(f"{false_alarms.gap_fraction:.0%} of transits near data gaps")
+        concerns.append(f"low-trust BLS detection ({'; '.join(fails)})")
 
     if prob_calibrated >= 0.9 and not concerns:
         return (
