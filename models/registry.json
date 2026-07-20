@@ -1,9 +1,9 @@
 {
-  "run_id": "cebb0fe655684aafae69bc1a11cfde85",
-  "cv_summary": "models/cv/cebb0fe655684aafae69bc1a11cfde85/cv_summary.json",
-  "cv_dir": "models/cv/cebb0fe655684aafae69bc1a11cfde85",
-  "test_roc_auc_mean": 0.9502429909182444,
-  "test_brier_mean": 0.08817808858610958,
-  "promoted_at": "2026-07-15T22:42:53.081469+00:00",
-  "test_ece_mean": 0.0366001629529145
+  "run_id": "ca906040cdb74ba6b07353a500244777",
+  "cv_summary": "models/cv/ca906040cdb74ba6b07353a500244777/cv_summary.json",
+  "cv_dir": "models/cv/ca906040cdb74ba6b07353a500244777",
+  "test_roc_auc_mean": 0.9581346569690679,
+  "test_brier_mean": 0.07908480013925032,
+  "promoted_at": "2026-07-19T11:14:12.217963+00:00",
+  "test_ece_mean": 0.02760103512380948
 }
