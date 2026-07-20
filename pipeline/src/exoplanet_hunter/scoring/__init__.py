@@ -4,7 +4,9 @@ from exoplanet_hunter.scoring.diagnostics import (
     BEB_THRESHOLD_SIGMA,
     DurationResult,
     OddEvenResult,
+    SecondaryResult,
     odd_even_depths,
+    significant_secondary,
     unphysical_duration,
     verdict,
 )
@@ -32,8 +34,10 @@ __all__ = [
     "PreprocessParams",
     "ScoreOutcome",
     "ScoringEnsemble",
+    "SecondaryResult",
     "TargetScorer",
     "odd_even_depths",
+    "significant_secondary",
     "unphysical_duration",
     "verdict",
 ]

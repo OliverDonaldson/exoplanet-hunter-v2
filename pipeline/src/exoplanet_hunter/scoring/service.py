@@ -33,7 +33,9 @@ from exoplanet_hunter.scoring.diagnostics import (
     BEB_THRESHOLD_SIGMA,
     DurationResult,
     OddEvenResult,
+    SecondaryResult,
     odd_even_depths,
+    significant_secondary,
     unphysical_duration,
     verdict,
 )
@@ -105,6 +107,7 @@ class ScoreOutcome:
     centroid_track: PhaseSeries | None = None  # flux carries the offset in pixels
     periodogram: Periodogram | None = None
     duration_check: DurationResult | None = None
+    secondary: SecondaryResult | None = None
 
 
 def _phase_series(view: np.ndarray, lo: float, hi: float) -> PhaseSeries:
@@ -305,6 +308,15 @@ class TargetScorer:
         duration_check = unphysical_duration(
             period, duration, stellar_radius=sp.radius, stellar_logg=sp.logg
         )
+        secondary = significant_secondary(
+            np.asarray(flat.time.value, dtype=float),
+            np.asarray(flat.flux.value, dtype=float),
+            period,
+            t0,
+            duration,
+            stellar_radius=sp.radius,
+            stellar_logg=sp.logg,
+        )
 
         half = float(min(max(self.preprocess.local_durations * duration / period, 1e-3), 0.5))
 
@@ -373,12 +385,14 @@ class TargetScorer:
             centroid_track=track,
             periodogram=pgram,
             duration_check=duration_check,
+            secondary=secondary,
             verdict=verdict(
                 prediction.prob_calibrated,
                 prediction.threshold,
                 centroid_snr,
                 oe,
                 duration_check=duration_check,
+                secondary=secondary,
             ),
             model_version=f"cnn_dualview-cv-{self.ensemble.run_id[:8]}",
             n_mc_samples=n_mc,

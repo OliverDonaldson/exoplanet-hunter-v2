@@ -52,6 +52,23 @@ class OddEvenDiagnostics(BaseModel):
     timing_suspicious: bool | None = None
 
 
+class SecondaryDiagnostics(BaseModel):
+    """Significant-secondary test (LEO-Vetter §3.9 + §4.3, simplified
+    Model-Shift): strongest box-depth dip outside ±2 durations of the
+    primary. occultation_like means the depth ratio + implied albedo are
+    consistent with a planetary occultation, so no caution is raised."""
+
+    secondary_depth_ppm: float
+    secondary_phase: float
+    secondary_significance: float
+    fa_threshold: float
+    primary_depth_ppm: float
+    depth_ratio: float
+    albedo: float | None
+    occultation_like: bool
+    suspicious: bool
+
+
 class DurationDiagnostics(BaseModel):
     """Unphysical-duration test (LEO-Vetter §3.4): q = duration/period vs the
     circular-orbit expectation from stellar density. Nullable fields are absent
@@ -114,6 +131,7 @@ class ScoreResponse(BaseModel):
 
     # LEO-Vetter-style cautions (optional: absent on older serving builds).
     duration_check: DurationDiagnostics | None = None
+    secondary: SecondaryDiagnostics | None = None
 
     # Plain-language verdict rendered in the console.
     verdict: str

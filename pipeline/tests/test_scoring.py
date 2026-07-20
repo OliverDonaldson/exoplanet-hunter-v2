@@ -8,6 +8,7 @@ from exoplanet_hunter.scoring import (
     FoldMember,
     ScoringEnsemble,
     odd_even_depths,
+    significant_secondary,
     unphysical_duration,
     verdict,
 )
@@ -151,6 +152,73 @@ def test_verdict_language():
     assert "Strong planet candidate" in verdict(0.95, 0.3, centroid_snr=1.0, odd_even=None)
     assert "background-EB" in verdict(0.95, 0.3, centroid_snr=5.0, odd_even=None)
     assert "Unlikely" in verdict(0.05, 0.3, centroid_snr=1.0, odd_even=None)
+
+
+# ------------------------------------------------ significant secondary (§4.3) --
+
+
+def synthetic_with_secondary(
+    primary_depth: float,
+    secondary_depth: float,
+    period: float = 2.0,
+    secondary_phase: float = 0.5,
+    n_periods: int = 40,
+):
+    """Box primary at phase 0 plus an optional secondary dip elsewhere."""
+    rng = np.random.default_rng(2)
+    time = np.arange(0, period * n_periods, period / 400)
+    flux = np.ones_like(time) + rng.normal(0, 1e-4, len(time))
+    phase = (time / period) % 1.0
+    flux[np.minimum(phase, 1 - phase) < 0.025] -= primary_depth
+    if secondary_depth > 0:
+        flux[np.abs(phase - secondary_phase) < 0.025] -= secondary_depth
+    return time, flux
+
+
+def test_secondary_flags_injected_eb_eclipse():
+    time, flux = synthetic_with_secondary(0.01, 0.003)
+    result = significant_secondary(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.secondary_phase == pytest.approx(0.5, abs=0.02)
+    assert result.secondary_depth_ppm == pytest.approx(3_000, rel=0.2)
+    assert result.secondary_significance > result.fa_threshold
+    assert result.depth_ratio == pytest.approx(0.3, rel=0.2)
+    assert result.suspicious
+
+
+def test_secondary_quiet_for_clean_transit():
+    time, flux = synthetic_with_secondary(0.01, 0.0)
+    result = significant_secondary(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert not result.suspicious
+
+
+def test_secondary_occultation_escape_hatch():
+    # Hot Jupiter: 1% primary, 250 ppm occultation at P=1.5 d on a Sun-like
+    # star -> depth ratio 2.5% and implied albedo ~0.8 < 1: no caution.
+    time, flux = synthetic_with_secondary(0.01, 0.00025, period=1.5)
+    result = significant_secondary(
+        time, flux, period=1.5, t0=0.0, duration=0.075, stellar_radius=1.0, stellar_logg=4.44
+    )
+    assert result is not None
+    assert result.secondary_significance > result.fa_threshold  # detected...
+    assert result.albedo is not None and result.albedo < 1.0
+    assert result.occultation_like
+    assert not result.suspicious  # ...but excused as an occultation
+
+    # Same secondary without stellar params: hatch cannot fire, caution stands.
+    no_stellar = significant_secondary(time, flux, period=1.5, t0=0.0, duration=0.075)
+    assert no_stellar is not None
+    assert no_stellar.albedo is None
+    assert no_stellar.suspicious
+
+
+def test_secondary_verdict_language():
+    time, flux = synthetic_with_secondary(0.01, 0.003)
+    result = significant_secondary(time, flux, period=2.0, t0=0.0, duration=0.1)
+    text = verdict(0.9, 0.3, centroid_snr=None, odd_even=None, secondary=result)
+    assert "secondary eclipse" in text
+    assert "Caution" in text
 
 
 # ------------------------------------------------- unphysical duration (§3.4) --

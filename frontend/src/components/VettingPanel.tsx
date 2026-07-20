@@ -346,6 +346,13 @@ export default function VettingPanel({ candidate }: { candidate: CandidateRow | 
                 warn={score.odd_even.timing_suspicious === true}
               />
             )}
+            {score.secondary && (
+              <Readout
+                label="Secondary eclipse"
+                value={`${score.secondary.secondary_depth_ppm.toFixed(0)} ppm @ φ=${score.secondary.secondary_phase.toFixed(2)} (${score.secondary.secondary_significance.toFixed(1)}σ vs ${score.secondary.fa_threshold.toFixed(1)}σ FA)${score.secondary.occultation_like ? " — occultation-like" : ""}`}
+                warn={score.secondary.suspicious}
+              />
+            )}
             {score.duration_check && (
               <Readout
                 label="Duration check"

@@ -29,6 +29,7 @@ from app.schemas import (
     Periodogram,
     PhaseView,
     ScoreResponse,
+    SecondaryDiagnostics,
 )
 
 router = APIRouter()
@@ -187,6 +188,21 @@ def score_target(
                 suspicious=outcome.duration_check.suspicious,
             )
             if outcome.duration_check is not None
+            else None
+        ),
+        secondary=(
+            SecondaryDiagnostics(
+                secondary_depth_ppm=outcome.secondary.secondary_depth_ppm,
+                secondary_phase=outcome.secondary.secondary_phase,
+                secondary_significance=outcome.secondary.secondary_significance,
+                fa_threshold=outcome.secondary.fa_threshold,
+                primary_depth_ppm=outcome.secondary.primary_depth_ppm,
+                depth_ratio=outcome.secondary.depth_ratio,
+                albedo=outcome.secondary.albedo,
+                occultation_like=outcome.secondary.occultation_like,
+                suspicious=outcome.secondary.suspicious,
+            )
+            if outcome.secondary is not None
             else None
         ),
         verdict=outcome.verdict,

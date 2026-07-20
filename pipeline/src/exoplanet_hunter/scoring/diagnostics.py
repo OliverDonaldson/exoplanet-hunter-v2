@@ -21,6 +21,11 @@ DURATION_A_OVER_RSTAR_MIN = 1.5
 #: Odd/even transit-timing caution trigger (Kunimoto 2025, §4.4, Eq 13).
 ODD_EVEN_TIMING_SIGMA = 10.0
 
+#: Occultation escape hatch (Kunimoto 2025, §4.3): a secondary this shallow
+#: with a sub-unity implied albedo is consistent with planetary reflection.
+SECONDARY_DEPTH_RATIO_MAX = 0.1
+SECONDARY_ALBEDO_MAX = 1.0
+
 _G_CGS = 6.674e-8  # cm^3 g^-1 s^-2
 _R_SUN_CM = 6.957e10
 _DAY_S = 86_400.0
@@ -45,6 +50,153 @@ class DurationResult:
     suspicious: bool
 
 
+@dataclass(frozen=True)
+class SecondaryResult:
+    secondary_depth_ppm: float
+    secondary_phase: float
+    secondary_significance: float
+    fa_threshold: float
+    primary_depth_ppm: float
+    depth_ratio: float
+    albedo: float | None
+    occultation_like: bool
+    suspicious: bool
+
+
+def _a_over_rstar(
+    period: float, stellar_radius: float | None, stellar_logg: float | None
+) -> float | None:
+    """Scaled semimajor axis via Kepler's third law from the stellar density
+    (rho* = 3g / 4piGR*); None when the TIC lacks radius or logg."""
+    if (
+        stellar_radius is None
+        or stellar_logg is None
+        or stellar_radius <= 0
+        or not np.isfinite(stellar_radius)
+        or not np.isfinite(stellar_logg)
+    ):
+        return None
+    rho = 3.0 * 10.0**stellar_logg / (4.0 * np.pi * _G_CGS * stellar_radius * _R_SUN_CM)
+    return float((_G_CGS * (period * _DAY_S) ** 2 * rho / (3.0 * np.pi)) ** (1 / 3))
+
+
+def significant_secondary(
+    time: np.ndarray,
+    flux: np.ndarray,
+    period: float,
+    t0: float,
+    duration: float,
+    *,
+    stellar_radius: float | None = None,
+    stellar_logg: float | None = None,
+    min_points: int = 5,
+) -> SecondaryResult | None:
+    """Significant-secondary test (Kunimoto 2025, AJ 170:280, §3.9 + §4.3).
+
+    Simplified Model-Shift: the folded light curve is scanned with a
+    duration-wide box outside ±2 durations of the primary; each box's depth
+    significance is depth / (sigma_w / sqrt(n)). The strongest dip is the
+    secondary; following §4.3 (Eq 9) it is significant when MS4 > 0,
+    MS5 > -1, MS6 > -1 with FA1 = FA2 = sqrt(2)·erfcinv(Tdur/P)
+    (Thompson 2018, Eq 13-14, N_TCEs = 1 for single-target vetting).
+
+    Simplifications vs the paper, by design: box depths on the folded curve
+    instead of a transit-model MES series; F_red = 1 (white noise assumed, so
+    the paper's F_red > 1.8 guard is moot); tertiary/positive comparisons are
+    skipped when no valid box exists. Broad secondaries may also be partially
+    attenuated by the transit-masked detrend upstream.
+
+    Occultation escape hatch (§4.3): a significant secondary is not flagged
+    when its depth is < 10% of the primary's and the geometric albedo needed
+    to produce it, A = delta_sec·(a/Rp)² (Eq 10, with a/Rp from stellar
+    density and Rp/R* = sqrt(delta_pri)), is < 1. The paper's additional
+    impact-parameter < 0.95 and Rp < 22 R_Earth conditions are skipped — we
+    fit neither; without stellar params the hatch cannot fire and the
+    caution stands.
+    """
+    from scipy.special import erfcinv
+
+    ok = np.isfinite(time) & np.isfinite(flux)
+    t, f = time[ok], flux[ok]
+    q = duration / period if period > 0 else 0.0
+    if len(t) == 0 or q <= 0 or 1.0 - 4.0 * q <= 2.0 * q:  # no phase space left
+        return None
+
+    phase = ((t - t0) / period) % 1.0  # primary at 0
+    dist_pri = np.minimum(phase, 1.0 - phase)
+    masked = dist_pri >= 2.0 * q
+    if masked.sum() < min_points:
+        return None
+    baseline = float(np.median(f[masked]))
+    sigma_w = 1.4826 * float(np.median(np.abs(f[masked] - baseline)))
+    if sigma_w <= 0:
+        return None
+
+    in_pri = dist_pri < q / 2
+    if in_pri.sum() < min_points:
+        return None
+    primary_depth = baseline - float(np.mean(f[in_pri]))
+
+    centers = np.arange(2.0 * q, 1.0 - 2.0 * q, q / 4)
+    sigs, depths_by_center = {}, {}
+    for c in centers:
+        sel = masked & (np.abs(phase - c) < q / 2)
+        n = int(sel.sum())
+        if n < min_points:
+            continue
+        depth = baseline - float(np.mean(f[sel]))
+        sigs[float(c)] = depth / (sigma_w / np.sqrt(n))
+        depths_by_center[float(c)] = depth
+    if not sigs:
+        return None
+
+    def wrap_dist(a: float, b: float) -> float:
+        d = abs(a - b)
+        return min(d, 1.0 - d)
+
+    sec_phase = max(sigs, key=lambda c: sigs[c])
+    sec_sig = sigs[sec_phase]
+    sec_depth = depths_by_center[sec_phase]
+
+    ter_sigs = [s for c, s in sigs.items() if wrap_dist(c, sec_phase) >= 2.0 * q]
+    pos_sigs = [
+        -s
+        for c, s in sigs.items()
+        if wrap_dist(c, sec_phase) >= 3.0 * q and min(c, 1.0 - c) >= 3.0 * q
+    ]
+
+    fa = float(np.sqrt(2.0) * erfcinv(q))
+    ms4 = sec_sig - fa
+    ms5 = (sec_sig - max(ter_sigs)) - fa if ter_sigs else None
+    ms6 = (sec_sig - max(pos_sigs)) - fa if pos_sigs else None
+    significant = ms4 > 0 and (ms5 is None or ms5 > -1) and (ms6 is None or ms6 > -1)
+
+    depth_ratio = sec_depth / primary_depth if primary_depth > 0 else float("inf")
+    albedo = None
+    a_rs = _a_over_rstar(period, stellar_radius, stellar_logg)
+    if a_rs is not None and primary_depth > 0 and sec_depth > 0:
+        # A = delta_sec·(a/Rp)² with a/Rp = (a/R*)/sqrt(delta_pri) (Eq 10).
+        albedo = float(sec_depth * a_rs**2 / primary_depth)
+
+    occultation_like = bool(
+        significant
+        and 0 < depth_ratio < SECONDARY_DEPTH_RATIO_MAX
+        and albedo is not None
+        and albedo < SECONDARY_ALBEDO_MAX
+    )
+    return SecondaryResult(
+        secondary_depth_ppm=float(sec_depth * 1e6),
+        secondary_phase=float(sec_phase),
+        secondary_significance=float(sec_sig),
+        fa_threshold=fa,
+        primary_depth_ppm=float(primary_depth * 1e6),
+        depth_ratio=float(depth_ratio),
+        albedo=albedo,
+        occultation_like=occultation_like,
+        suspicious=bool(significant and not occultation_like),
+    )
+
+
 def unphysical_duration(
     period: float,
     duration: float,
@@ -67,16 +219,9 @@ def unphysical_duration(
         return None
     q = duration / period
 
-    q_circ = q_ratio = a_over_rstar = None
-    if (
-        stellar_radius is not None
-        and stellar_logg is not None
-        and stellar_radius > 0
-        and np.isfinite(stellar_radius)
-        and np.isfinite(stellar_logg)
-    ):
-        rho = 3.0 * 10.0**stellar_logg / (4.0 * np.pi * _G_CGS * stellar_radius * _R_SUN_CM)
-        a_over_rstar = float((_G_CGS * (period * _DAY_S) ** 2 * rho / (3.0 * np.pi)) ** (1 / 3))
+    q_circ = q_ratio = None
+    a_over_rstar = _a_over_rstar(period, stellar_radius, stellar_logg)
+    if a_over_rstar is not None:
         q_circ = float(np.arcsin(min(1.0, 1.0 / a_over_rstar)) / np.pi)
         q_ratio = q / q_circ
 
@@ -180,6 +325,7 @@ def verdict(
     odd_even: OddEvenResult | None,
     *,
     duration_check: DurationResult | None = None,
+    secondary: SecondaryResult | None = None,
 ) -> str:
     """Plain-language summary rendered in the vetting console."""
     concerns: list[str] = []
@@ -201,6 +347,12 @@ def verdict(
         concerns.append(
             f"odd/even transit timings differ by {odd_even.timing_diff_sigma:.1f}σ "
             "(eccentric eclipsing binary at half period)"
+        )
+    if secondary is not None and secondary.suspicious:
+        concerns.append(
+            f"significant secondary eclipse at phase {secondary.secondary_phase:.2f} "
+            f"({secondary.secondary_significance:.1f}σ, "
+            f"{secondary.secondary_depth_ppm:.0f} ppm — eclipsing-binary signature)"
         )
     if duration_check is not None and duration_check.suspicious:
         bits = [f"q={duration_check.q:.3g}"]

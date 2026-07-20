@@ -31,6 +31,18 @@ export interface OddEvenDiagnostics {
   timing_suspicious?: boolean | null;
 }
 
+export interface SecondaryDiagnostics {
+  secondary_depth_ppm: number;
+  secondary_phase: number;
+  secondary_significance: number;
+  fa_threshold: number;
+  primary_depth_ppm: number;
+  depth_ratio: number;
+  albedo: number | null;
+  occultation_like: boolean;
+  suspicious: boolean;
+}
+
 export interface DurationDiagnostics {
   q: number;
   q_circ: number | null;
@@ -72,6 +84,7 @@ export interface ScoreResponse {
   centroid_track: CentroidTrack | null;
   periodogram: Periodogram | null;
   duration_check?: DurationDiagnostics | null;
+  secondary?: SecondaryDiagnostics | null;
   verdict: string;
   model_version: string;
   n_mc_samples: number;
