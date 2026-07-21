@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -310,14 +311,24 @@ class LightCurveDownloader:
                     )
                     break
                 except Exception as exc:
+                    if attempt == 1:
+                        return self._record_failure(target_id, mission, f"download error: {exc}")
                     # Self-heal: evict the truncated file an interrupted
-                    # download left behind and retry once.
-                    corrupt = _corrupt_product_path(exc) if attempt == 0 else None
+                    # download left behind and retry immediately; anything
+                    # else gets one spaced retry to ride out a transient
+                    # MAST/network blip before giving up.
+                    corrupt = _corrupt_product_path(exc)
                     if corrupt is not None:
                         corrupt.unlink()
                         log.warning("[download] evicted corrupt cache file %s — retrying", corrupt)
-                        continue
-                    return self._record_failure(target_id, mission, f"download error: {exc}")
+                    else:
+                        log.warning(
+                            "[download] %s %d download failed (%s) — retrying in 3s",
+                            mission,
+                            target_id,
+                            exc,
+                        )
+                        time.sleep(3)
 
             if lc_collection is None or len(lc_collection) == 0:
                 return self._record_failure(target_id, mission, "empty download")

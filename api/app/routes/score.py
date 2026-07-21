@@ -87,6 +87,10 @@ def score_target(
 
     cache_key = (tic_id, period_days, t0_btjd, duration_hours, n_mc, force_bls, include_periodogram)
     if not force_download and cache_key in _cache:
+        # Touch on hit: re-insertion moves the key to the end of the dict's
+        # insertion order, so eviction below drops the least-recently *used*
+        # entry, not merely the oldest.
+        _cache[cache_key] = _cache.pop(cache_key)
         return _cache[cache_key]
 
     try:

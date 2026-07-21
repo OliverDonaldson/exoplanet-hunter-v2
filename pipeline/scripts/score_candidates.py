@@ -22,12 +22,14 @@ Usage:
     # TESS only:
     python scripts/score_candidates.py limit_mission=TESS
 
-    # Override fold-model bundle (defaults to branch-3 final):
+    # Override fold-model bundle (defaults to the promoted registry run):
     python scripts/score_candidates.py cv_dir=models/cv/<HASH>
 """
 
 from __future__ import annotations
 
+import json
+import sys
 import time
 from pathlib import Path
 
@@ -47,8 +49,13 @@ from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
 
 log = get_logger(__name__)
 
-DEFAULT_CV_DIR = "models/cv/58570d85f1dd4f68a7e888988c88eeab"
 DEFAULT_OUT = "results/candidates_scored.parquet"
+
+
+def _registry_cv_dir(root: Path) -> Path:
+    """Default to the promoted run, exactly like the serving path."""
+    registry = json.loads((root / "models" / "registry.json").read_text())
+    return root / "models" / "cv" / registry["run_id"]
 
 
 def _load_fold_bundles(cv_dir: Path, n_folds: int = 5) -> list[dict]:
@@ -63,6 +70,7 @@ def _load_fold_bundles(cv_dir: Path, n_folds: int = 5) -> list[dict]:
                 "model": model,
                 "calibrator": bundle.get("calibrator"),
                 "aux_pipeline": bundle.get("aux_pipeline"),
+                "aux_dim": bundle.get("aux_dim"),
                 "threshold": float(bundle.get("threshold", 0.5)),
             }
         )
@@ -203,11 +211,16 @@ def main(cfg: DictConfig) -> None:
     n_mc = int(getattr(cfg, "n_mc", 30))
     max_candidates = getattr(cfg, "max_candidates", None)
     limit_mission = getattr(cfg, "limit_mission", None)
-    cv_dir_arg = str(getattr(cfg, "cv_dir", DEFAULT_CV_DIR))
+    cv_dir_arg = getattr(cfg, "cv_dir", None)
     out_arg = str(getattr(cfg, "out_path", DEFAULT_OUT))
     save_every = int(getattr(cfg, "save_every", 25))
 
-    cv_dir = Path(cv_dir_arg) if Path(cv_dir_arg).is_absolute() else paths.root / cv_dir_arg
+    if cv_dir_arg is None:
+        cv_dir = _registry_cv_dir(paths.root)
+    else:
+        cv_dir = (
+            Path(cv_dir_arg) if Path(cv_dir_arg).is_absolute() else paths.root / str(cv_dir_arg)
+        )
     out_path = Path(out_arg) if Path(out_arg).is_absolute() else paths.root / out_arg
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -244,6 +257,20 @@ def main(cfg: DictConfig) -> None:
     # ----- model bundles ----------------------------------------------------
     folds = _load_fold_bundles(cv_dir, n_folds=5)
     log.info("[score-candidates] loaded %d fold bundles", len(folds))
+
+    # This script assembles the legacy 9-dim aux vector; a model trained on
+    # the 13-dim vetting-aux layout (build_dataset.py) needs the vetting
+    # diagnostics + pink-noise SNR wired in here first. Abort up front rather
+    # than emitting 6,000 sklearn dimension errors.
+    bundle_dims = {f["aux_dim"] for f in folds if f["aux_dim"] is not None}
+    if bundle_dims - {8, 9}:
+        log.error(
+            "[score-candidates] bundle aux_dim=%s but this script builds the "
+            "legacy 9-dim aux vector — update _aux_vector for the vetting-aux "
+            "layout (or pass cv_dir=models/cv/<legacy-run>).",
+            sorted(bundle_dims),
+        )
+        sys.exit(1)
 
     # ----- downloaders ------------------------------------------------------
     # TESS PCs cache to data/raw/ (alongside training cache, distinct IDs).
