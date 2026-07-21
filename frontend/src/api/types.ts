@@ -41,6 +41,7 @@ export interface SecondaryDiagnostics {
   albedo: number | null;
   occultation_like: boolean;
   suspicious: boolean;
+  f_red?: number | null;
 }
 
 export interface FalseAlarmDiagnostics {

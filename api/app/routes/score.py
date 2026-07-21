@@ -202,6 +202,7 @@ def score_target(
                 albedo=outcome.secondary.albedo,
                 occultation_like=outcome.secondary.occultation_like,
                 suspicious=outcome.secondary.suspicious,
+                f_red=outcome.secondary.f_red,
             )
             if outcome.secondary is not None
             else None

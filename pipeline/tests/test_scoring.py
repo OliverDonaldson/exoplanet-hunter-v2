@@ -266,6 +266,14 @@ def test_secondary_flags_injected_eb_eclipse():
     assert result.suspicious
 
 
+def test_secondary_f_red_near_unity_on_white_noise():
+    time, flux = synthetic_with_secondary(0.01, 0.0)
+    result = significant_secondary(time, flux, period=2.0, t0=0.0, duration=0.1)
+    assert result is not None
+    assert result.f_red is not None
+    assert 0.5 < result.f_red < 1.8  # white-noise curve: sig scatter ~1
+
+
 def test_secondary_quiet_for_clean_transit():
     time, flux = synthetic_with_secondary(0.01, 0.0)
     result = significant_secondary(time, flux, period=2.0, t0=0.0, duration=0.1)

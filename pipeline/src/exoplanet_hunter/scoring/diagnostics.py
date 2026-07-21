@@ -25,6 +25,8 @@ ODD_EVEN_TIMING_SIGMA = 10.0
 #: with a sub-unity implied albedo is consistent with planetary reflection.
 SECONDARY_DEPTH_RATIO_MAX = 0.1
 SECONDARY_ALBEDO_MAX = 1.0
+#: Above this red/white-noise ratio the MS4 condition is unreliable (§4.3).
+SECONDARY_F_RED_MAX = 1.8
 
 #: False-alarm caution triggers for BLS-found ephemerides (Kunimoto 2025):
 #: SWEET §3.3, asymmetry §3.5, depth mean/median §3.6, gap fraction §3.12.
@@ -70,6 +72,7 @@ class SecondaryResult:
     albedo: float | None
     occultation_like: bool
     suspicious: bool
+    f_red: float | None = None
 
 
 @dataclass(frozen=True)
@@ -253,10 +256,13 @@ def significant_secondary(
     (Thompson 2018, Eq 13-14, N_TCEs = 1 for single-target vetting).
 
     Simplifications vs the paper, by design: box depths on the folded curve
-    instead of a transit-model MES series; F_red = 1 (white noise assumed, so
-    the paper's F_red > 1.8 guard is moot); tertiary/positive comparisons are
-    skipped when no valid box exists. Broad secondaries may also be partially
-    attenuated by the transit-masked detrend upstream.
+    instead of a transit-model MES series; tertiary/positive comparisons are
+    skipped when no valid box exists. F_red — the red/white noise ratio at
+    the transit duration (§3.9) — is the standard deviation of the box
+    significance series outside the primary and secondary (≈1 for white
+    noise); MS4 uses sig/F_red, and per §4.3 the MS4 condition is ignored
+    when F_red > 1.8 (deep secondaries inflate F_red). Broad secondaries may
+    also be partially attenuated by the transit-masked detrend upstream.
 
     Occultation escape hatch (§4.3): a significant secondary is not flagged
     when its depth is < 10% of the primary's and the geometric albedo needed
@@ -316,12 +322,19 @@ def significant_secondary(
         for c, s in sigs.items()
         if wrap_dist(c, sec_phase) >= 3.0 * q and min(c, 1.0 - c) >= 3.0 * q
     ]
+    f_red = float(np.std(ter_sigs)) if len(ter_sigs) >= 5 else None
 
     fa = float(np.sqrt(2.0) * erfcinv(q))
-    ms4 = sec_sig - fa
+    # MS4 is unreliable when red noise dominates — rely on MS5/MS6 (§4.3).
+    ms4 = None if f_red is None or f_red > SECONDARY_F_RED_MAX else sec_sig / max(f_red, 1e-6) - fa
     ms5 = (sec_sig - max(ter_sigs)) - fa if ter_sigs else None
     ms6 = (sec_sig - max(pos_sigs)) - fa if pos_sigs else None
-    significant = ms4 > 0 and (ms5 is None or ms5 > -1) and (ms6 is None or ms6 > -1)
+    significant = (
+        (ms4 is None or ms4 > 0)
+        and (ms5 is None or ms5 > -1)
+        and (ms6 is None or ms6 > -1)
+        and sec_sig > fa  # floor: never flag a sub-threshold dip
+    )
 
     depth_ratio = sec_depth / primary_depth if primary_depth > 0 else float("inf")
     albedo = None
@@ -346,6 +359,7 @@ def significant_secondary(
         albedo=albedo,
         occultation_like=occultation_like,
         suspicious=bool(significant and not occultation_like),
+        f_red=f_red,
     )
 
 

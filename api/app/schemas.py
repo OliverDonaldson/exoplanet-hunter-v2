@@ -67,6 +67,7 @@ class SecondaryDiagnostics(BaseModel):
     albedo: float | None
     occultation_like: bool
     suspicious: bool
+    f_red: float | None = None  # red/white noise ratio at the transit duration
 
 
 class FalseAlarmDiagnostics(BaseModel):
