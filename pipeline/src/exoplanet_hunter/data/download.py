@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -153,6 +154,12 @@ class LightCurveDownloader:
         self.cadence = cadence
         self._manifest_path = self.cache_dir / "manifest.json"
         self._manifest: dict[str, dict[str, Any]] = self._load_manifest()
+        # Guards the manifest read-modify-write so parallel download_many
+        # workers can't interleave (a mutation during json.dumps' iteration
+        # raises "dictionary changed size during iteration") or clobber each
+        # other's writes. Only the mutating paths take it; single-key cache
+        # reads in download_one are atomic dict ops and stay lock-free.
+        self._manifest_lock = threading.Lock()
 
     # ---------------------------------------------------------------- helpers
 
@@ -166,7 +173,12 @@ class LightCurveDownloader:
             return {}
 
     def _save_manifest(self) -> None:
-        self._manifest_path.write_text(json.dumps(self._manifest, indent=2, default=str))
+        # Atomic tmp-replace: a concurrent reader (another process, or the
+        # next run) never sees a half-written manifest, and a crash mid-write
+        # leaves the previous good file intact. Callers hold _manifest_lock.
+        tmp = self._manifest_path.with_suffix(self._manifest_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(self._manifest, indent=2, default=str))
+        tmp.replace(self._manifest_path)
 
     def _target_path(self, target_id: int, mission: str = "TESS") -> Path:
         mcfg = self._MISSION_CFG[mission]
@@ -354,13 +366,14 @@ class LightCurveDownloader:
             n_points=len(stitched),
             path=target_path,
         )
-        self._manifest[key] = {
-            "success": True,
-            "n_sectors": result.n_sectors,
-            "n_points": result.n_points,
-            "path": str(target_path),
-        }
-        self._save_manifest()
+        with self._manifest_lock:
+            self._manifest[key] = {
+                "success": True,
+                "n_sectors": result.n_sectors,
+                "n_points": result.n_points,
+                "path": str(target_path),
+            }
+            self._save_manifest()
         return result
 
     def _record_failure(self, target_id: int, mission: str, reason: str) -> DownloadResult:
@@ -374,8 +387,9 @@ class LightCurveDownloader:
         log.warning("[download] %s %d: %s", mission, target_id, reason)
         if not _is_transient_error(reason):
             key = f"{mission}:{target_id}"
-            self._manifest[key] = {"success": False, "reason": reason}
-            self._save_manifest()
+            with self._manifest_lock:
+                self._manifest[key] = {"success": False, "reason": reason}
+                self._save_manifest()
         return DownloadResult(
             target_id=target_id,
             mission=mission,
@@ -481,28 +495,57 @@ class LightCurveDownloader:
         target_ids: list[int],
         missions: list[str] | None = None,
         force: bool = False,
+        workers: int = 1,
     ) -> list[DownloadResult]:
-        """Download a list of targets sequentially with progress logging.
+        """Download a list of targets with progress logging.
 
         Parameters
         ----------
         target_ids : List of TIC/KIC IDs.
         missions   : Parallel list of mission strings ("TESS"/"Kepler").
                      If None, defaults to "TESS" for all.
+        force      : Re-download even when a target is already cached.
+        workers    : Concurrent download threads. ``1`` (default) keeps the
+                     original sequential behaviour; higher values overlap the
+                     30 s-3 min MAST round-trips. Keep it modest (~4) to stay
+                     polite to the archive. Duplicate ``(mission, target_id)``
+                     pairs are collapsed so two threads never rewrite the same
+                     FITS under each other's memory-map — the SIGBUS failure
+                     mode; the shared manifest is lock-guarded.
         """
         from tqdm.auto import tqdm
 
         if missions is None:
             missions = ["TESS"] * len(target_ids)
 
-        results: list[DownloadResult] = []
-        for tid, mis in tqdm(
-            zip(target_ids, missions, strict=False),
-            total=len(target_ids),
-            desc="downloading",
-            unit="target",
-        ):
-            results.append(self.download_one(int(tid), mission=mis, force=force))
+        # Dedupe (mission, target_id), preserving first-seen order. Distinct
+        # targets are independent and safe to fetch concurrently; the same
+        # target must only be fetched once.
+        seen: set[tuple[str, int]] = set()
+        jobs: list[tuple[str, int]] = []
+        for tid, mis in zip(target_ids, missions, strict=False):
+            job = (str(mis), int(tid))
+            if job not in seen:
+                seen.add(job)
+                jobs.append(job)
+
+        if workers <= 1:
+            results = [
+                self.download_one(tid, mission=mis, force=force)
+                for mis, tid in tqdm(jobs, desc="downloading", unit="target")
+            ]
+        else:
+            by_job: dict[tuple[str, int], DownloadResult] = {}
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(self.download_one, tid, mission=mis, force=force): (mis, tid)
+                    for mis, tid in jobs
+                }
+                for fut in tqdm(
+                    as_completed(futures), total=len(futures), desc="downloading", unit="target"
+                ):
+                    by_job[futures[fut]] = fut.result()
+            results = [by_job[job] for job in jobs]  # restore input order
 
         n_ok = sum(r.success for r in results)
         log.info("[download] complete — %d/%d succeeded", n_ok, len(results))

@@ -51,6 +51,11 @@ log = get_logger(__name__)
 
 DEFAULT_OUT = "results/candidates_scored.parquet"
 
+#: Concurrent MAST fetches while warming the FITS cache before scoring.
+#: Modest to stay polite to the archive (Kepler targets also fan out
+#: internally over quarter files).
+_PREFETCH_WORKERS = 4
+
 
 def _registry_cv_dir(root: Path) -> Path:
     """Default to the promoted run, exactly like the serving path."""
@@ -283,11 +288,36 @@ def main(cfg: DictConfig) -> None:
         cadence=None,
     )
 
+    todo_records = todo.to_dict("records")
+
+    # ----- prefetch downloads in parallel -----------------------------------
+    # FITS fetches (30 s-3 min each of MAST latency) are the wall-time killer;
+    # the scoring loop below is TF-bound and already saturates the CPU. Warm
+    # the cache up front with a few concurrent download threads so the loop
+    # then runs ~100% cache-hit. Split by mission — TESS and Kepler use
+    # different downloader instances and cache dirs. Blocks until done, so no
+    # download runs concurrently with scoring.
+    tess_ids = [int(r["tic_id"]) for r in todo_records if str(r.get("mission", "TESS")) != "Kepler"]
+    kepler_ids = [
+        int(r["tic_id"]) for r in todo_records if str(r.get("mission", "TESS")) == "Kepler"
+    ]
+    if tess_ids:
+        log.info("[score-candidates] prefetching %d TESS light curves", len(tess_ids))
+        tess_dl.download_many(tess_ids, workers=_PREFETCH_WORKERS)
+    if kepler_ids:
+        log.info("[score-candidates] prefetching %d Kepler light curves", len(kepler_ids))
+        kepler_dl.download_many(
+            kepler_ids, missions=["Kepler"] * len(kepler_ids), workers=_PREFETCH_WORKERS
+        )
+
     # ----- scoring loop -----------------------------------------------------
+    # Sequential by design: each _score_one runs 5 folds x MC-Dropout, which
+    # saturates the CPU (Keras predict is not guaranteed thread-safe), and the
+    # slow part — the download — was just parallelised above.
     out_rows = list(prior_rows)
     t_start = time.time()
 
-    for i, row_dict in enumerate(tqdm(todo.to_dict("records"), desc="scoring")):
+    for i, row_dict in enumerate(tqdm(todo_records, desc="scoring")):
         mission = str(row_dict.get("mission", "TESS"))
         dl = kepler_dl if mission == "Kepler" else tess_dl
         try:

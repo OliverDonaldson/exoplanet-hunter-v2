@@ -60,3 +60,89 @@ def test_existing_file_is_a_cache_hit_despite_stale_manifest(tmp_path):
     assert result.success
     assert result.path == raw / "tic_295413003.fits"
     assert result.n_sectors == 3  # metadata still comes from the manifest
+
+
+def test_manifest_survives_concurrent_downloads(tmp_path, monkeypatch):
+    """Parallel download_one on distinct targets must not corrupt the shared
+    manifest: without the lock, a mutation during another thread's json.dumps
+    iteration raises "dictionary changed size during iteration", and a
+    non-atomic write could leave a torn file."""
+    import json
+    from concurrent.futures import ThreadPoolExecutor
+    from pathlib import Path
+
+    from exoplanet_hunter.data.download import LightCurveDownloader
+
+    class _FakeLC:
+        def __len__(self):
+            return 100
+
+        def to_fits(self, path, overwrite=True):
+            Path(path).write_bytes(b"fake fits")
+
+    class _FakeCollection:
+        def __len__(self):
+            return 2
+
+        def stitch(self):
+            return _FakeLC()
+
+    # Fake the fetch so download_one runs its real success path — stitch,
+    # to_fits, and the lock-guarded manifest write — without any network.
+    monkeypatch.setattr(
+        LightCurveDownloader,
+        "_fetch_kepler_via_direct_archive",
+        lambda self, target_id, dl_dir: _FakeCollection(),
+    )
+
+    dl = LightCurveDownloader(tmp_path, author="Kepler", cadence=None)
+    kics = list(range(1000, 1128))  # 128 distinct targets
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(lambda k: dl.download_one(k, mission="Kepler"), kics))
+
+    assert all(r.success for r in results)
+    # Every write landed, the on-disk manifest is valid JSON, and the atomic
+    # tmp-replace left no debris.
+    on_disk = json.loads((tmp_path / "manifest.json").read_text())
+    assert len(on_disk) == len(kics)
+    assert all(f"Kepler:{k}" in on_disk for k in kics)
+    assert not (tmp_path / "manifest.json.tmp").exists()
+
+
+def test_download_many_parallel_dedupes_targets(tmp_path, monkeypatch):
+    """workers>1 collapses duplicate (mission, target_id) pairs so the same
+    FITS is never fetched twice, and preserves input order in the results."""
+    from pathlib import Path
+
+    from exoplanet_hunter.data.download import LightCurveDownloader
+
+    fetched: list[int] = []
+
+    def fake_fetch(self, target_id, dl_dir):
+        fetched.append(target_id)
+
+        class _LC:
+            def __len__(self):
+                return 100
+
+            def to_fits(self, path, overwrite=True):
+                Path(path).write_bytes(b"x")
+
+        class _Coll:
+            def __len__(self):
+                return 1
+
+            def stitch(self):
+                return _LC()
+
+        return _Coll()
+
+    monkeypatch.setattr(LightCurveDownloader, "_fetch_kepler_via_direct_archive", fake_fetch)
+
+    dl = LightCurveDownloader(tmp_path, author="Kepler", cadence=None)
+    ids = [10, 11, 10, 12, 11]  # 10 and 11 repeat
+    results = dl.download_many(ids, missions=["Kepler"] * len(ids), workers=4)
+
+    assert sorted(fetched) == [10, 11, 12]  # each distinct target fetched once
+    assert [r.target_id for r in results] == [10, 11, 12]  # first-seen order
