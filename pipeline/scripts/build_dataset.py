@@ -29,7 +29,13 @@ from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.exofop import enrich_catalog_snr
 from exoplanet_hunter.data.stellar import fetch_stellar_params
 from exoplanet_hunter.features.centroid import extract_centroid_offset
+from exoplanet_hunter.features.noise import pink_noise_snr
 from exoplanet_hunter.preprocess import build_views, clean_lightcurve, flatten_lightcurve
+from exoplanet_hunter.scoring.diagnostics import (
+    odd_even_depths,
+    significant_secondary,
+    unphysical_duration,
+)
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
 
 log = get_logger(__name__)
@@ -74,9 +80,8 @@ def main(cfg: DictConfig) -> None:
     if "mission" not in catalog.columns:
         catalog["mission"] = "TESS"
 
-    # TESS rows get their transit SNR from the ExoFOP TOI export — the TAP
-    # catalogue only carries SNR for Kepler (koi_model_snr), and an all-NaN
-    # snr aux column fails the views validation gate.
+    # Catalogue transit SNR kept as labels metadata (the aux vector now uses
+    # the light-curve pink-noise SNR instead — see the aux comment below).
     catalog = enrich_catalog_snr(catalog, paths.root / "data" / "catalogue" / "candidates.parquet")
     catalog.to_parquet(paths.data_labels / "labels.parquet", index=False)
 
@@ -178,45 +183,60 @@ def main(cfg: DictConfig) -> None:
             skips["preprocess_error"] += 1
             continue
 
-        # Aux feature vector (9 dims — matches aux_transform.CENTROID_COL):
-        #   [teff, radius, logg, tmag, depth, duration, log_period, snr, centroid_snr]
+        # Aux feature vector (13 dims — centroid stays at aux_transform.
+        # CENTROID_COL == 8; the serving path branches on aux_dim so models
+        # trained on the legacy 9-dim layout keep working):
+        #   [teff, radius, logg, tmag, depth, duration, log_period,
+        #    pink_snr, centroid_snr, oe_depth_sigma, oe_timing_sigma,
+        #    secondary_sig, q_ratio]
         # Stellar params come from the KOI catalog row for Kepler targets and
-        # from a TIC lookup for TESS targets. SNR: koi_model_snr for Kepler,
-        # ExoFOP TOI transit SNR for TESS (joined by enrich_catalog_snr in
-        # stage 1 — TESS rows are no longer hardcoded NaN).
+        # from a TIC lookup for TESS targets. pink_snr (Kunimoto 2025 §2.1)
+        # replaces the catalogue transit SNR: computed from the light curve,
+        # it exists for every target at train AND serve time, closing the
+        # non-TOI NaN->imputed-median mismatch. The vetting features come
+        # from the same diagnostics the API serves as cautions.
         log_period = np.log(float(period)) if float(period) > 0 else np.nan
         depth_val = float(row["depth"]) if pd.notna(row.get("depth")) else np.nan
         dur_val = float(row["duration"]) if pd.notna(row.get("duration")) else np.nan
-        snr_val = float(row["snr"]) if pd.notna(row.get("snr")) else np.nan
         if mission == "Kepler":
-            aux.append(
-                [
-                    float(row["teff"]) if pd.notna(row.get("teff")) else np.nan,
-                    float(row["radius"]) if pd.notna(row.get("radius")) else np.nan,
-                    float(row["logg"]) if pd.notna(row.get("logg")) else np.nan,
-                    float(row["tmag"]) if pd.notna(row.get("tmag")) else np.nan,
-                    depth_val,
-                    dur_val,
-                    log_period,
-                    snr_val,
-                    centroid_snr,
-                ]
-            )
+            stellar = [
+                float(row["teff"]) if pd.notna(row.get("teff")) else np.nan,
+                float(row["radius"]) if pd.notna(row.get("radius")) else np.nan,
+                float(row["logg"]) if pd.notna(row.get("logg")) else np.nan,
+                float(row["tmag"]) if pd.notna(row.get("tmag")) else np.nan,
+            ]
         else:
             sp = fetch_stellar_params(tic)
-            aux.append(
-                [
-                    sp.teff if sp.teff is not None else np.nan,
-                    sp.radius if sp.radius is not None else np.nan,
-                    sp.logg if sp.logg is not None else np.nan,
-                    sp.tmag if sp.tmag is not None else np.nan,
-                    depth_val,
-                    dur_val,
-                    log_period,
-                    snr_val,
-                    centroid_snr,
-                ]
-            )
+            stellar = [
+                sp.teff if sp.teff is not None else np.nan,
+                sp.radius if sp.radius is not None else np.nan,
+                sp.logg if sp.logg is not None else np.nan,
+                sp.tmag if sp.tmag is not None else np.nan,
+            ]
+        t_arr = np.asarray(lc.time.value, dtype=float)
+        f_arr = np.asarray(lc.flux.value, dtype=float)
+        pn = pink_noise_snr(t_arr, f_arr, float(period), float(t0), float(duration))
+        oe = odd_even_depths(t_arr, f_arr, float(period), float(t0), float(duration))
+        sec = significant_secondary(t_arr, f_arr, float(period), float(t0), float(duration))
+        dc = unphysical_duration(
+            float(period), float(duration), stellar_radius=stellar[1], stellar_logg=stellar[2]
+        )
+        aux.append(
+            [
+                *stellar,
+                depth_val,
+                dur_val,
+                log_period,
+                pn.snr if pn is not None else np.nan,
+                centroid_snr,
+                oe.depth_diff_sigma if oe is not None else np.nan,
+                oe.timing_diff_sigma
+                if oe is not None and oe.timing_diff_sigma is not None
+                else np.nan,
+                sec.secondary_significance if sec is not None else np.nan,
+                dc.q_ratio if dc is not None and dc.q_ratio is not None else np.nan,
+            ]
+        )
         g_views.append(views.global_view)
         l_views.append(views.local_view)
         labels.append(int(row["label"]))

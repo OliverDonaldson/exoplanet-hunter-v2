@@ -365,6 +365,51 @@ def _bare_scorer(candidates_path):
     return scorer
 
 
+def test_aux_row_layouts_by_aux_dim():
+    """aux_dim >= 13 gets the vetting-aux layout; 9 keeps the legacy one."""
+    from exoplanet_hunter.data.stellar import StellarParams
+    from exoplanet_hunter.features.noise import pink_noise_snr
+    from exoplanet_hunter.scoring.diagnostics import unphysical_duration
+
+    scorer = _bare_scorer(None)
+    scorer._snr_series = None
+    scorer._fetch_stellar = lambda tic: StellarParams(
+        tic_id=tic, teff=5800.0, radius=1.0, logg=4.44, tmag=10.0
+    )
+
+    class StubEnsemble:
+        aux_dim = 13
+
+    scorer.ensemble = StubEnsemble()
+
+    time, flux = synthetic_transits(0.005, 0.005)
+    oe = odd_even_depths(time, flux, period=2.0, t0=0.0, duration=0.1)
+    dc = unphysical_duration(2.0, 0.1, stellar_radius=1.0, stellar_logg=4.44)
+    kwargs = dict(
+        flat_time=time,
+        flat_flux=flux,
+        centroid_snr=1.5,
+        odd_even=oe,
+        secondary=None,
+        duration_check=dc,
+    )
+
+    row = scorer._aux_row(1, 2.0, 0.0, 0.1, **kwargs)
+    assert row.shape == (13,)
+    pn = pink_noise_snr(time, flux, 2.0, 0.0, 0.1)
+    assert row[7] == pytest.approx(pn.snr, rel=1e-5)
+    assert row[8] == pytest.approx(1.5)  # centroid stays at CENTROID_COL
+    assert row[9] == pytest.approx(oe.depth_diff_sigma, rel=1e-5)
+    assert np.isnan(row[11])  # no secondary result -> NaN
+    assert row[12] == pytest.approx(dc.q_ratio, rel=1e-5)
+
+    StubEnsemble.aux_dim = 9
+    legacy = scorer._aux_row(1, 2.0, 0.0, 0.1, **kwargs)
+    assert legacy.shape == (9,)
+    assert np.isnan(legacy[7])  # no candidates.parquet -> catalogue snr NaN
+    assert legacy[8] == pytest.approx(1.5)
+
+
 def test_catalogue_ephemeris_converts_bjd_to_btjd(tmp_path):
     import pandas as pd
 

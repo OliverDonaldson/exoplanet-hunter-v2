@@ -24,6 +24,7 @@ import pandas as pd
 from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.stellar import fetch_stellar_params
 from exoplanet_hunter.features.centroid import centroid_phase_track, extract_centroid_offset
+from exoplanet_hunter.features.noise import pink_noise_snr
 from exoplanet_hunter.preprocess import (
     clean_lightcurve,
     flatten_lightcurve,
@@ -183,12 +184,31 @@ class TargetScorer:
         return period, t0, duration
 
     def _aux_row(
-        self, tic_id: int, raw_lc: Any, period: float, t0: float, duration: float
+        self,
+        tic_id: int,
+        period: float,
+        t0: float,
+        duration: float,
+        *,
+        flat_time: np.ndarray,
+        flat_flux: np.ndarray,
+        centroid_snr: float | None,
+        odd_even: OddEvenResult | None,
+        secondary: SecondaryResult | None,
+        duration_check: DurationResult | None,
     ) -> np.ndarray | None:
+        """Aux features matching the served model's training-time layout.
+
+        aux_dim >= 13 is the vetting-aux layout (see build_dataset.py):
+        light-curve pink-noise SNR at index 7 plus the vetting diagnostics.
+        Legacy models (aux_dim 8/9) get the catalogue ExoFOP snr there
+        instead — the branch keeps old bundles serving byte-identically.
+        """
         aux_dim = self.ensemble.aux_dim
         if not aux_dim:
             return None
         sp = self._fetch_stellar(tic_id)
+        centroid = centroid_snr if centroid_snr is not None else float("nan")
         row = [
             sp.teff if sp.teff is not None else np.nan,
             sp.radius if sp.radius is not None else np.nan,
@@ -197,14 +217,25 @@ class TargetScorer:
             np.nan,  # depth — unknown for an ad-hoc target (as in training)
             float(duration),
             float(np.log(period)) if period > 0 else np.nan,
-            self._exofop_snr(tic_id),
         ]
-        if aux_dim >= 9:
-            try:
-                row.append(float(extract_centroid_offset(raw_lc, period, t0, duration)))
-            except Exception as exc:  # centroid columns often missing
-                log.warning("[score] centroid extraction for aux failed: %s", exc)
-                row.append(float("nan"))
+        if aux_dim >= 13:
+            pn = pink_noise_snr(flat_time, flat_flux, period, t0, duration)
+            row += [
+                pn.snr if pn is not None else np.nan,
+                centroid,
+                odd_even.depth_diff_sigma if odd_even is not None else np.nan,
+                odd_even.timing_diff_sigma
+                if odd_even is not None and odd_even.timing_diff_sigma is not None
+                else np.nan,
+                secondary.secondary_significance if secondary is not None else np.nan,
+                duration_check.q_ratio
+                if duration_check is not None and duration_check.q_ratio is not None
+                else np.nan,
+            ]
+        else:
+            row.append(self._exofop_snr(tic_id))
+            if aux_dim >= 9:
+                row.append(centroid)
         return np.array(row, dtype=np.float32)
 
     def _search_lightcurve(self, cleaned, tic_id: int):
@@ -287,33 +318,24 @@ class TargetScorer:
             local_durations=self.preprocess.local_durations,
         )
 
-        prediction = self.ensemble.predict(
-            views.global_view,
-            views.local_view,
-            self._aux_row(tic_id, raw, period, t0, duration),
-            n_mc=n_mc,
-        )
+        flat_time = np.asarray(flat.time.value, dtype=float)
+        flat_flux = np.asarray(flat.flux.value, dtype=float)
 
+        # Vetting diagnostics come before the model pass: models trained on
+        # the 13-dim vetting-aux layout consume them as features.
         try:
             centroid_snr: float | None = float(extract_centroid_offset(raw, period, t0, duration))
         except Exception as exc:
             log.warning("[score] centroid extraction failed: %s", exc)
             centroid_snr = None
-        oe = odd_even_depths(
-            np.asarray(flat.time.value, dtype=float),
-            np.asarray(flat.flux.value, dtype=float),
-            period,
-            t0,
-            duration,
-        )
-
+        oe = odd_even_depths(flat_time, flat_flux, period, t0, duration)
         sp = self._fetch_stellar(tic_id)
         duration_check = unphysical_duration(
             period, duration, stellar_radius=sp.radius, stellar_logg=sp.logg
         )
         secondary = significant_secondary(
-            np.asarray(flat.time.value, dtype=float),
-            np.asarray(flat.flux.value, dtype=float),
+            flat_time,
+            flat_flux,
             period,
             t0,
             duration,
@@ -324,13 +346,25 @@ class TargetScorer:
         # ephemeris gets the noise/systematic false-alarm bundle too.
         false_alarms = None
         if source == "bls":
-            false_alarms = false_alarm_checks(
-                np.asarray(flat.time.value, dtype=float),
-                np.asarray(flat.flux.value, dtype=float),
+            false_alarms = false_alarm_checks(flat_time, flat_flux, period, t0, duration)
+
+        prediction = self.ensemble.predict(
+            views.global_view,
+            views.local_view,
+            self._aux_row(
+                tic_id,
                 period,
                 t0,
                 duration,
-            )
+                flat_time=flat_time,
+                flat_flux=flat_flux,
+                centroid_snr=centroid_snr,
+                odd_even=oe,
+                secondary=secondary,
+                duration_check=duration_check,
+            ),
+            n_mc=n_mc,
+        )
 
         half = float(min(max(self.preprocess.local_durations * duration / period, 1e-3), 0.5))
 
