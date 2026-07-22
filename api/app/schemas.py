@@ -210,6 +210,12 @@ class CandidateRow(BaseModel):
     teq_k: float | None = None
     tsm: float | None = None
     esm: float | None = None
+    # POE observables (NASA archive formulae), computed for every row from the
+    # stellar parameters + period: insolation in Earth flux, habitable-zone
+    # edges in AU (luminosity-scaled recent-Venus / early-Mars).
+    insolation_earth: float | None = None
+    hz_inner_au: float | None = None
+    hz_outer_au: float | None = None
     predicted_mass_me: float | None = None
     predicted_k_ms: float | None = None
     stellar_teff_k: float | None = None

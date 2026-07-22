@@ -127,6 +127,9 @@ export interface CandidateRow {
   teq_k: number | null;
   tsm: number | null;
   esm: number | null;
+  insolation_earth: number | null;
+  hz_inner_au: number | null;
+  hz_outer_au: number | null;
   predicted_mass_me: number | null;
   predicted_k_ms: number | null;
   stellar_teff_k: number | null;

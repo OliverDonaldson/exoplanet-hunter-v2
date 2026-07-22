@@ -17,10 +17,18 @@ const COLUMNS: { key: string; label: string; sortable: boolean; render: (r: Cand
   { key: "tsm", label: "TSM", sortable: true, render: (r) => fmt(r.tsm, 0) },
   { key: "esm", label: "ESM", sortable: true, render: (r) => fmt(r.esm, 0) },
   { key: "teq_k", label: "Teq (K)", sortable: true, render: (r) => fmt(r.teq_k, 0) },
+  { key: "insolation_earth", label: "Insol (S⊕)", sortable: true, render: (r) => fmt(r.insolation_earth, 1) },
+  { key: "hz_au", label: "HZ (AU)", sortable: false, render: (r) => hzRange(r) },
 ];
 
 function fmt(value: number | null, digits: number): string {
   return value === null ? "—" : value.toFixed(digits);
+}
+
+// Star's habitable zone (recent-Venus inner .. early-Mars outer), as a range.
+function hzRange(r: CandidateRow): string {
+  if (r.hz_inner_au === null || r.hz_outer_au === null) return "—";
+  return `${r.hz_inner_au.toFixed(2)}–${r.hz_outer_au.toFixed(2)}`;
 }
 
 export default function CandidatesTable({

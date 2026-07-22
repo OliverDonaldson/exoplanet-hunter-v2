@@ -63,6 +63,46 @@ def equilibrium_temperature_k(
     return np.asanyarray(teff_k, dtype=float) * np.sqrt(ratio) * 0.25**0.25
 
 
+#: IAU 2015 nominal solar effective temperature [K] — the Teff that reproduces
+#: the nominal solar luminosity at the nominal solar radius, so the
+#: Stefan-Boltzmann constants cancel in the Sun-normalised luminosity ratio.
+_TEFF_SUN_K = 5772.0
+
+#: Kasting et al. (1993) empirical habitable-zone edges for the Sun [AU]:
+#: recent-Venus (inner) and early-Mars (outer), scaled by sqrt(L*/Lsun). These
+#: are the archive's POE bounds — the conservative Kopparapu (2013) edges add a
+#: Teff term we deliberately omit to match the published recent-Venus/early-Mars.
+_HZ_RECENT_VENUS_AU = 0.75
+_HZ_EARLY_MARS_AU = 1.77
+
+
+def stellar_luminosity_lsun(r_star_rsun: FloatArray, teff_k: FloatArray) -> FloatArray:
+    """L* [Lsun] from Stefan-Boltzmann, L = 4π R*² σ Teff⁴.
+
+    Written as the Sun-normalised ratio (R*/Rsun)² (Teff/Teff_sun)⁴ so the 4π σ
+    constants cancel exactly; a Sun (R*=1 Rsun, Teff=5772 K) returns 1.0.
+    """
+    r = np.asanyarray(r_star_rsun, dtype=float)
+    teff = np.asanyarray(teff_k, dtype=float)
+    return r**2 * (teff / _TEFF_SUN_K) ** 4
+
+
+def insolation_flux_earth(luminosity_lsun: FloatArray, a_au: FloatArray) -> FloatArray:
+    """Insolation S [S_earth] = (L*/Lsun) / (a/AU)² — inverse-square law,
+    Earth-normalised so an Earth (L*=1 Lsun, a=1 AU) returns 1.0."""
+    a = np.asanyarray(a_au, dtype=float)
+    a = np.where(a > 0, a, np.nan)  # ExoFOP uses 0 for unknown period -> a
+    return np.asanyarray(luminosity_lsun, dtype=float) / a**2
+
+
+def habitable_zone_au(luminosity_lsun: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """(inner, outer) habitable-zone radii [AU] via the luminosity-scaled Kasting
+    edges r = r_sun · sqrt(L*/Lsun): recent-Venus inner, early-Mars outer. A Sun
+    (L*=1 Lsun) returns (0.75, 1.77) AU."""
+    scale = np.sqrt(np.asanyarray(luminosity_lsun, dtype=float))
+    return _HZ_RECENT_VENUS_AU * scale, _HZ_EARLY_MARS_AU * scale
+
+
 def predict_planet_mass_me(radius_re: FloatArray) -> FloatArray:
     """Mp [Mearth] from radius via Chen & Kipping 2017 / Louie et al. 2018.
 

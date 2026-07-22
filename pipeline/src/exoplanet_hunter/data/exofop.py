@@ -43,6 +43,9 @@ CATALOGUE_COLUMNS: list[str] = [
     "teq_k",
     "tsm",
     "esm",
+    "insolation_earth",
+    "hz_inner_au",
+    "hz_outer_au",
     "predicted_mass_me",
     "predicted_k_ms",
     "stellar_teff_k",
@@ -68,6 +71,9 @@ _NUMERIC_COLUMNS = [
     "teq_k",
     "tsm",
     "esm",
+    "insolation_earth",
+    "hz_inner_au",
+    "hz_outer_au",
     "predicted_mass_me",
     "predicted_k_ms",
     "stellar_teff_k",
@@ -275,6 +281,26 @@ def enrich_catalog_snr(catalog: pd.DataFrame, candidates_path: Path) -> pd.DataF
     return out
 
 
+def _add_poe_observables(catalogue: pd.DataFrame) -> pd.DataFrame:
+    """Fill insolation + habitable-zone columns from the archive's POE formulae.
+
+    Computed uniformly for TOIs and CTOIs from the stellar radius/Teff/logg and
+    the orbital period — neither ExoFOP export publishes them. Insolation needs
+    the semi-major axis (Kepler-3 from the logg-derived mass), the HZ edges only
+    the Stefan-Boltzmann luminosity. NaN stellar inputs propagate to NaN, as for
+    the other `followup` columns.
+    """
+    out = catalogue
+    r_star = out["stellar_radius_rsun"].to_numpy()
+    teff = out["stellar_teff_k"].to_numpy()
+    lum = followup.stellar_luminosity_lsun(r_star, teff)
+    m_star = followup.stellar_mass_from_logg(out["stellar_logg"].to_numpy(), r_star)
+    a_au = followup.semi_major_axis_au(m_star, out["period_days"].to_numpy())
+    out["insolation_earth"] = followup.insolation_flux_earth(lum, a_au)
+    out["hz_inner_au"], out["hz_outer_au"] = followup.habitable_zone_au(lum)
+    return out
+
+
 def build_candidate_catalogue(toi_path: Path, ctoi_path: Path) -> pd.DataFrame:
     """One row per candidate: all TOIs plus all not-yet-promoted CTOIs."""
     catalogue = pd.concat(
@@ -283,5 +309,6 @@ def build_candidate_catalogue(toi_path: Path, ctoi_path: Path) -> pd.DataFrame:
     ).sort_values(["source", "tic_id"], ignore_index=True)
     if catalogue["name"].isna().any():
         raise ValueError("candidate catalogue has rows without a name — ingest bug")
+    catalogue = _add_poe_observables(catalogue)
     log.info("[exofop] combined catalogue: %d candidates", len(catalogue))
     return catalogue

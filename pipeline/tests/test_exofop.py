@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from exoplanet_hunter.data.exofop import (
+    _add_poe_observables,
     enrich_catalog_snr,
     load_ctoi_table,
     load_toi_table,
@@ -51,6 +52,27 @@ def test_endpoint_dialect_ctoi_columns(tmp_path):
     assert row["depth_ppm"] == 500.0
     assert row["teq_k"] == 890.0  # fitted value kept, not overwritten
     assert row["date_modified"] == "2026-07-01"
+
+
+def test_poe_observables_solar_analog():
+    """POE enrichment fills insolation + HZ from the stellar params + period; a
+    solar-analog star (logg 4.4377, R*=1, Teff=5772) with an Earth-period planet
+    reproduces S≈1 and HZ 0.75-1.77 AU, and NaN stellar inputs propagate."""
+    out = _add_poe_observables(
+        pd.DataFrame(
+            {
+                "stellar_radius_rsun": [1.0, np.nan],
+                "stellar_teff_k": [5772.0, 5000.0],
+                "stellar_logg": [4.4377, 4.5],
+                "period_days": [365.25, 10.0],
+            }
+        )
+    )
+    assert out["insolation_earth"].iloc[0] == pytest.approx(1.0, rel=2e-3)
+    assert out["hz_inner_au"].iloc[0] == pytest.approx(0.75, rel=2e-3)
+    assert out["hz_outer_au"].iloc[0] == pytest.approx(1.77, rel=2e-3)
+    assert np.isnan(out["insolation_earth"].iloc[1])  # missing R* -> NaN
+    assert np.isnan(out["hz_inner_au"].iloc[1])
 
 
 def candidates_fixture(tmp_path):

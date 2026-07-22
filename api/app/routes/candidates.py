@@ -38,6 +38,7 @@ _SORTABLE = {
     "teq_k",
     "tsm",
     "esm",
+    "insolation_earth",
     "predicted_mass_me",
     "predicted_k_ms",
     "stellar_teff_k",

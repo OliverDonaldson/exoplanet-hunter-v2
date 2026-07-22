@@ -9,13 +9,18 @@ K=36.9 m/s, TSM scale=1.15, TSM=257, ESM=132.
 
 import numpy as np
 import pytest
+from astropy import units as u
 
 from exoplanet_hunter.features.followup import (
+    _TEFF_SUN_K,
     equilibrium_temperature_k,
     esm,
+    habitable_zone_au,
+    insolation_flux_earth,
     predict_planet_mass_me,
     rv_semi_amplitude_ms,
     semi_major_axis_au,
+    stellar_luminosity_lsun,
     stellar_mass_from_logg,
     tsm,
     tsm_scale_factor,
@@ -68,8 +73,37 @@ def test_rv_semi_amplitude_worked_example():
     assert rv_semi_amplitude_ms(PERIOD, 1.516, 128.0) == pytest.approx(36.9, rel=0.01)
 
 
+def test_stellar_luminosity_lsun():
+    assert stellar_luminosity_lsun(1.0, _TEFF_SUN_K) == pytest.approx(1.0, rel=1e-9)  # the Sun
+    # TOI-664: L = R*^2 (Teff/Tsun)^4 = 2.79^2 (5302/5772)^4
+    assert stellar_luminosity_lsun(R_STAR, TEFF) == pytest.approx(5.54, rel=5e-3)
+
+
+def test_insolation_and_habitable_zone_earth_sun():
+    assert insolation_flux_earth(1.0, 1.0) == pytest.approx(1.0, rel=1e-9)  # Earth around the Sun
+    inner, outer = habitable_zone_au(1.0)
+    assert inner == pytest.approx(0.75) and outer == pytest.approx(1.77)
+    # HZ scales as sqrt(L): a 4x-luminosity star pushes both edges out 2x.
+    inner4, outer4 = habitable_zone_au(4.0)
+    assert inner4 == pytest.approx(1.5) and outer4 == pytest.approx(3.54)
+
+
+def test_insolation_consistent_with_equilibrium_temperature():
+    """Cross-check the new POE insolation against the independent Teq recipe:
+    Teq = Teq_earth · S^(1/4), with Teq_earth the zero-albedo full-redistribution
+    value at 1 AU. Agreement ties L*, a and S to the pinned TOI-664 Teq."""
+    lum = stellar_luminosity_lsun(R_STAR, TEFF)
+    a = semi_major_axis_au(1.516, PERIOD)
+    s = insolation_flux_earth(lum, a)
+    teq_earth = _TEFF_SUN_K * np.sqrt((1 * u.Rsun).to(u.AU).value) * 0.25**0.25
+    assert teq_earth * s**0.25 == pytest.approx(
+        equilibrium_temperature_k(1.516, PERIOD, R_STAR, TEFF), rel=2e-3
+    )
+
+
 def test_nan_and_zero_period_propagate():
     assert np.isnan(semi_major_axis_au(1.0, 0.0))  # ExoFOP's "period unknown"
+    assert np.isnan(insolation_flux_earth(1.0, semi_major_axis_au(1.0, 0.0)))
     assert np.isnan(predict_planet_mass_me(np.nan))
     out = esm(np.array([np.nan, 1699.0]), TEFF, RP, R_STAR, MK)
     assert np.isnan(out[0]) and np.isfinite(out[1])
