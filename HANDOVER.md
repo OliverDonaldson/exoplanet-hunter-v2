@@ -332,17 +332,62 @@ and since-confirmed as "remaining." All shipped before this arc:
    `ca906040` (9-dim) keeps serving with no change needed (the serving
    branch handles both); compare fold tables in MLflow to see whether the
    vetting features helped or the flat optimum held.
-2. **Since-confirmed holdout eval (data-gated, low effort when ready).**
-   `eval_since_confirmed.py` exists (checkpointed/resumable). This retrain
-   rewrites candidates.parquet → resets the holdout, so flips ≈ 0 until a
+2. **Archive-expansion data pass (queued after Step 1 — the next big
+   data/model pass).** Broaden the label base beyond TESS-TOI + Kepler-KOI and
+   add the NASA Exoplanet Archive's predicted observables (see
+   `docs/data_provenance.md`). Do the sub-steps in this order — risk rises down
+   the list, and (a) ships on its own without a retrain:
+
+   **2a. POE observables — self-contained, ships without a retrain.**
+   - In `features/followup.py` implement, from the NASA POE equations:
+     stellar luminosity `L* = 4π R*² σ Teff⁴` (when not given), **insolation
+     flux** `S = L*/d²` in Earth units (inverse-square), and **habitable-zone
+     radii** (Kasting recent-Venus / early-Mars, 0.75 & 1.77 AU for the Sun,
+     scaled by √L*).
+   - Add `insolation_earth`, `hz_inner_au`, `hz_outer_au` columns to the
+     candidate catalogue → `api/app/schemas.py::CandidateRow` **and**
+     `frontend/src/api/types.ts` (pinned contract — move together) → render in
+     the console.
+   - Cross-check the existing transit-depth + RV forms against POE's.
+   - Unit-test to the worked case: Earth→Sun gives S≈1 and HZ 0.75–1.77 AU.
+   - Ship as its own commit; no model change.
+
+   **2b. Cleaner Kepler negatives — TAP-only, feeds the next build.**
+   - In `data/catalog.py` add `_query_certified_fp()` against the **`fpwg`**
+     (Certified False Positives) table, and optionally `koifpp` (FP
+     probabilities).
+   - Use it to confirm/upgrade the `koi_disposition == 'FALSE POSITIVE'`
+     negatives (higher-quality negative labels). No new download path.
+
+   **2c. K2 mission integration — the big one.**
+   - `_query_k2()` in `data/catalog.py` against **`k2pandc`**: map disposition
+     → label, normalise period/t0/depth/duration units, `mission="K2"`, key on
+     the **EPIC** id.
+   - Add a K2 fetch path to `data/download.py` (`lightkurve` `mission="K2"`,
+     campaign-aware; K2 light curves are on MAST — a third branch beside TESS
+     SPOC and the Kepler direct-archive path).
+   - EPIC stellar params in `data/stellar.py`.
+   - Wire `n_confirmed_k2` / `n_false_pos_k2` into `CatalogRequest` +
+     `build_label_catalog`. K2 adds ecliptic-plane coverage — a third band on
+     the sky map.
+
+   **2d. Rebuild + retrain + promote + deploy.**
+   - Run `refresh_pipeline.py --force-train` with the expanded config; the gate
+     must beat the incumbent (AUC up, Brier/ECE not degraded).
+   - Commit registry + `.dvc` pointer bumps; Ollie `fly deploy`s; regenerate
+     the `docs/data_provenance.md` figures (K2 band now visible); verify live.
+
+3. **Since-confirmed holdout eval (data-gated, low effort when ready).**
+   `eval_since_confirmed.py` exists (checkpointed/resumable). Retrains
+   rewrite candidates.parquet → reset the holdout, so flips ≈ 0 until a
    few weekly Saturday refreshes accumulate newly-flipped dispositions. Run
    it then — it's the most convincing single prospective number. Not active
    work now.
-3. **Tidy-up sweep (mostly closed — ~30 min consistency pass).** Light
+4. **Tidy-up sweep (mostly closed — ~30 min consistency pass).** Light
    audit for drift this arc left: `score_candidates.py`'s module docstring
    still says "branch-3" / "9-dim aux" in places; a few comments predate the
    13-dim layout. Nothing functional.
-4. **FINAL — UI/UX design upgrades (deliberate, scoped — memory says don't
+5. **FINAL — UI/UX design upgrades (deliberate, scoped — memory says don't
    redesign in passing).** (a) The vetting panel grew to 6+ diagnostic rows
    this arc (centroid, odd/even depth, odd/even timing, secondary, duration,
    FA bundle) — needs hierarchy: group "cautions firing" vs "clean checks,"
