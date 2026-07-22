@@ -246,3 +246,107 @@ junk/false-alarm tests for BLS-found ephemerides (model never trained on
 that regime), and a train/serve mismatch where the `snr` aux is
 NaN→imputed for every non-TOI target at serve time (`_exofop_snr`).
 Paper PDF: ~/Downloads/Kunimoto_2025_AJ_170_280.pdf.
+
+---
+
+## Vetting-cautions + model-features + perf sprint (2026-07-22)
+
+This arc turned the LEO-Vetter review (above) into shipped code, then added
+the model-level features it flagged, then absorbed a Copilot performance
+review. Commits `15d19f3`..`bbdfa2a` on `v2` == GitHub `main`.
+
+**Serving cautions — LIVE (Fly + Render), verified end-to-end.** Four
+LEO-Vetter tests, each a *caution* not a gate (`prob_calibrated` stays the
+headline): they add numbers + a boolean to `ScoreResponse` and a console
+readout, mirroring the odd/even + centroid pattern. All new response fields
+are OPTIONAL, so old clients keep working and deploy order never matters.
+- Unphysical duration (§3.4, `15d19f3`): q vs q_circ from stellar density,
+  a/R* from Kepler-3 (not a model fit — noted deviation).
+- Odd/even timing (§4.4 Eq 13, `8a417c2`): flux-weighted per-transit
+  midtimes, 10σ threshold — catches eccentric EBs at half period.
+- Significant secondary (§3.9+§4.3, `9b88404`, F_red added `b4277bb`):
+  simplified box-scan Model-Shift, MS4/5/6 with FA1=FA2=√2·erfcinv(Tdur/P)
+  (Thompson 2018 Eq 13-14, N_TCEs=1); occultation escape hatch (depth
+  ratio <10% + albedo <1); real F_red from the sig series, MS4 ignored when
+  F_red>1.8. Simplifications documented in the docstring.
+- FA bundle (§3.3/3.5/3.6/3.12, `4b062c7`): SWEET, asymmetry, depth
+  mean/median, gap fraction — computed ONLY when ephemeris source=="bls"
+  (the model never trained on junk), surfaced as one grouped low-trust chip.
+
+**Model-level features — CODE COMPLETE, retrain IN FLIGHT.** Closes the
+train/serve `snr` mismatch and feeds the diagnostics into the model:
+- `features/noise.py` pink-noise transit SNR (§2.1 Eq 1-3, `fcb027f`):
+  computed from the light curve so it exists for every target at train AND
+  serve time — unlike the catalogue `_exofop_snr` (NaN→imputed for non-TOIs).
+- 13-dim vetting-aux layout (`25a3e5c`): `[teff, radius, logg, tmag, depth,
+  duration, log_period, pink_snr, centroid_snr, oe_depth_σ, oe_timing_σ,
+  secondary_sig, q_ratio]`. pink_snr replaces the catalogue snr at idx 7;
+  centroid stays at CENTROID_COL=8 so the fitted aux pipeline is unchanged.
+  Serving `_aux_row` branches on the bundle's `aux_dim`: ≥13 builds the new
+  layout, 8/9-dim legacy bundles serve BYTE-IDENTICALLY (verified: EB score
+  0.0033255746024988377 unchanged after restart). Deploy-order-safe.
+- **STATUS: Ollie is running the rebuild+retrain now** (`refresh_pipeline.py
+  --force-train`, started 2026-07-22 ~12:40; multi-hour build+train). Serving
+  is still `ca906040` (9-dim) until the new run promotes + is fly-deployed.
+  An aux-only change does NOT trip the refresh trigger — this run had to be
+  manual; Saturday's plist would not have retrained.
+
+**Perf/quality (Copilot review triaged, `6b9da3e` + `bbdfa2a`).** Applied:
+/score cache FIFO→LRU touch-on-hit; download_one 3s-spaced transient retry;
+score_candidates.py default cv_dir now reads registry.json (was a dead V1
+hash) + aborts if the bundle is 13-dim (it still builds legacy 9-dim aux —
+rework before the next shortlist run); parallel download stage (manifest
+threading.Lock + atomic tmp-replace write; `download_many(workers=N)` with
+(mission,tid) dedup; score_candidates prefetches all targets at 4 workers
+before the sequential TF loop). Rejected with receipts (in project memory):
+per-TIC score lock (1-vCPU Fly box + SIGBUS history), prefetch reorder,
+index copies, removing the score-what-you-ship checkpoint reload, session
+pooling, threading the scoring loop.
+
+## The pasted "Track A / Track B" list is SUPERSEDED
+
+A prior summary listed console panels, automation, Optuna, uncertainty eval,
+and since-confirmed as "remaining." All shipped before this arc:
+- Console vetting panels (odd/even overlay, opt-in periodogram, centroid
+  track): DONE `6220f0c`.
+- Automation (weekly launchd refresh + new-candidate webhook): DONE
+  `569b2fb`; plist loaded 2026-07-21 (fires Sat 09:00).
+- Optuna re-tune: harness rebuilt `b36bd38`, campaign adopted `6245a75`,
+  full run `ca906040` promoted + deployed 2026-07-19.
+- Uncertainty validation: DONE (`uncertainty_eval.py`) — MC-Dropout std
+  barely predicts errors (AUROC 0.545) vs distance-to-threshold 0.769 → NO
+  abstain band; figure `docs/figures/risk_coverage.png`.
+- Tidy-ups it named are closed: honest cold-start copy + DEPLOY.md
+  suspend/remote-only + SIGBUS notes were `41ddc09`.
+
+## What actually remains — do in this order
+
+1. **Land the 13-dim retrain (IN FLIGHT — immediate).** When the flow
+   finishes: read the log tail for the CV summary + `promotion gate:
+   PROMOTED|rejected`; confirm the new bundle is `aux_dim==13`
+   (`joblib.load(models/cv/<run>/fold_0/cnn_calibrator.joblib)["aux_dim"]`
+   — the whole point). If PROMOTED: registry + `.dvc` pointers update
+   in-flow → commit the bumps; Ollie runs `fly deploy --remote-only -a
+   exoplanet-hunter-api`; verify live (/healthz = new run, /reliability ECE,
+   EB TIC 50365310 → cautions fire, KP TIC 6892385 → clean). If rejected:
+   `ca906040` (9-dim) keeps serving with no change needed (the serving
+   branch handles both); compare fold tables in MLflow to see whether the
+   vetting features helped or the flat optimum held.
+2. **Since-confirmed holdout eval (data-gated, low effort when ready).**
+   `eval_since_confirmed.py` exists (checkpointed/resumable). This retrain
+   rewrites candidates.parquet → resets the holdout, so flips ≈ 0 until a
+   few weekly Saturday refreshes accumulate newly-flipped dispositions. Run
+   it then — it's the most convincing single prospective number. Not active
+   work now.
+3. **Tidy-up sweep (mostly closed — ~30 min consistency pass).** Light
+   audit for drift this arc left: `score_candidates.py`'s module docstring
+   still says "branch-3" / "9-dim aux" in places; a few comments predate the
+   13-dim layout. Nothing functional.
+4. **FINAL — UI/UX design upgrades (deliberate, scoped — memory says don't
+   redesign in passing).** (a) The vetting panel grew to 6+ diagnostic rows
+   this arc (centroid, odd/even depth, odd/even timing, secondary, duration,
+   FA bundle) — needs hierarchy: group "cautions firing" vs "clean checks,"
+   a one-line caution-summary chip row up top, consistent colour/iconography
+   with the probability bar. (b) The reliability diagram Ollie finds
+   confusing — rethink or replace with a plain "is it well-calibrated?"
+   readout. (c) Cold-start expectation-setting, empty/error states, mobile.
