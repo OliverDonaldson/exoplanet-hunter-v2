@@ -125,6 +125,45 @@ def test_aux_pipeline_survives_all_nan_column():
     np.testing.assert_allclose(tf_out, sk_out, rtol=1e-4, atol=1e-5)
 
 
+def test_log_heavy_tail_signed_log_on_13dim():
+    """The 13-dim vetting layout signed-logs pink_snr (7) + secondary_sig (11),
+    log1p's centroid (8), and leaves every other column untouched — with tf/sklearn
+    parity preserved even on the negative tail those two columns take."""
+    from exoplanet_hunter.datasets.aux_transform import (
+        CENTROID_COL,
+        PINK_SNR_COL,
+        SECONDARY_SIG_COL,
+        _log_heavy_tail_aux,
+        _signed_log1p,
+    )
+
+    rng = np.random.default_rng(11)
+    aux = rng.normal(size=(60, 13)).astype(np.float32)
+    aux[:, CENTROID_COL] = np.abs(aux[:, CENTROID_COL]) * 100  # centroid >= 0
+    aux[:, PINK_SNR_COL] = rng.normal(90, 240, size=60)  # heavy-tailed, signed
+    aux[:, SECONDARY_SIG_COL] = rng.normal(70, 640, size=60)
+    aux[rng.random(size=aux.shape) < 0.1] = np.nan
+
+    # the column transform itself: signed-log where expected, identity elsewhere
+    clean = np.nan_to_num(aux, nan=1.0)
+    out = _log_heavy_tail_aux(clean)
+    np.testing.assert_allclose(out[:, PINK_SNR_COL], _signed_log1p(clean[:, PINK_SNR_COL]))
+    np.testing.assert_allclose(
+        out[:, SECONDARY_SIG_COL], _signed_log1p(clean[:, SECONDARY_SIG_COL])
+    )
+    np.testing.assert_allclose(out[:, CENTROID_COL], np.log1p(clean[:, CENTROID_COL]))
+    untouched = [c for c in range(13) if c not in (CENTROID_COL, PINK_SNR_COL, SECONDARY_SIG_COL)]
+    np.testing.assert_allclose(out[:, untouched], clean[:, untouched])
+
+    # train/serve skew guard holds through the signed-log branch
+    pipeline = fit_aux_pipeline(aux[:40])
+    constants = aux_constants_from_pipeline(pipeline)
+    assert constants.aux_dim == 13
+    sk_out = pipeline.transform(aux).astype(np.float32)
+    tf_out = np.stack([tf_aux_transform(tf.constant(row), constants).numpy() for row in aux])
+    np.testing.assert_allclose(tf_out, sk_out, rtol=1e-4, atol=1e-5)
+
+
 def test_augment_preserves_shape_and_is_stochastic():
     tf.random.set_seed(7)
     g = tf.random.normal((GLOBAL_BINS, 1))
