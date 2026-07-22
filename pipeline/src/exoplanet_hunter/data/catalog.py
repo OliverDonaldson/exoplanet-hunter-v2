@@ -45,6 +45,12 @@ KEPLER_DISPOSITION_LABELS: dict[str, int] = {
     "CANDIDATE": -1,
 }
 
+#: A DR25 FALSE POSITIVE with koi_score below this is a *certified* negative:
+#: koi_score is the Robovetter's Monte-Carlo P(planet candidate), so < 0.5 means
+#: the majority vote was false-positive. Kept as a module constant so the
+#: certification threshold is one obvious knob.
+CERTIFIED_FP_MAX_SCORE = 0.5
+
 
 def _stable_sample(df: pd.DataFrame, n: int, seed: int, key: str = "tic_id") -> pd.DataFrame:
     """Rank rows by md5(seed:key) and take the first `n`.
@@ -231,6 +237,31 @@ def _query_koi() -> pd.DataFrame:
     return df.drop_duplicates(subset="tic_id").reset_index(drop=True)
 
 
+def _query_certified_fp() -> set[str]:
+    """kepoi_names the DR25 catalogue certifies as false positives.
+
+    The Q1-Q17 DR25 Robovetter is the definitive uniform Kepler vetting run; a
+    KOI it dispositions FALSE POSITIVE with ``koi_score < CERTIFIED_FP_MAX_SCORE``
+    is a high-confidence negative — cleaner than the bare ``cumulative``
+    ``koi_disposition``, which also carries later, less-uniform dispositions
+    (and, for ~1 in 5 of its FPs, ones DR25 either disputes or never vetted).
+
+    This is the modern stand-in for the retired ``fpwg`` Certified-False-Positive
+    table: the archive no longer serves ``fpwg``/``koifpp`` through TAP or the
+    legacy API, and DR25's ``koi_score`` + FP flags are the very evidence that
+    certification rested on. Keyed on ``kepoi_name`` so it certifies the exact
+    signal, not merely the host star.
+    """
+    adql = (
+        "select kepoi_name from q1_q17_dr25_koi "
+        "where koi_disposition = 'FALSE POSITIVE' "
+        f"  and koi_score < {CERTIFIED_FP_MAX_SCORE}"
+    )
+    names = set(_tap_query(adql)["kepoi_name"].dropna())
+    log.info("[catalog] DR25 certified false positives: %d KOIs", len(names))
+    return names
+
+
 def build_label_catalog(req: CatalogRequest, out_dir: Path) -> pd.DataFrame:
     """Build the combined labelled catalogue and persist to parquet.
 
@@ -278,6 +309,28 @@ def build_label_catalog(req: CatalogRequest, out_dir: Path) -> pd.DataFrame:
         koi_pos = koi[koi["label"] == 1]
         koi_neg = koi[koi["label"] == 0]
         koi_pc = koi[koi["label"] == -1]
+
+        # Restrict Kepler negatives to DR25-certified false positives — cleaner
+        # labels than the bare cumulative disposition. Fail open: an empty
+        # certified set (unexpected TAP result) must never silently zero the
+        # negatives, so fall back to the cumulative FPs with a loud warning.
+        certified = _query_certified_fp()
+        if certified:
+            n_before = len(koi_neg)
+            koi_neg = koi_neg[koi_neg["name"].isin(certified)].reset_index(drop=True)
+            log.info(
+                "[catalog] Kepler negatives: %d DR25-certified of %d cumulative FPs "
+                "(dropped %d uncertified)",
+                len(koi_neg),
+                n_before,
+                n_before - len(koi_neg),
+            )
+        else:
+            log.warning(
+                "[catalog] DR25 certified-FP set empty — keeping all %d cumulative FP "
+                "negatives uncertified (check q1_q17_dr25_koi availability)",
+                len(koi_neg),
+            )
 
         log.info(
             "[catalog] KOI sources: confirmed=%d, FP=%d, PC=%d",

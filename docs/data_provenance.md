@@ -96,13 +96,21 @@ considering in a future data pass (not yet implemented):
 
 - **K2 planets & candidates** (`k2pandc`) — a whole mission of labelled
   transits along the ecliptic that we currently ignore.
-- **Kepler Certified False Positives** (`fpwg`) and **KOI False-Positive
-  Probabilities** (`koifpp`) — higher-quality / vetted negative labels than
-  the bare `koi_disposition`.
 - **PSCompPars** (composite parameters) — a cleaner one-row-per-planet merge
   of stellar/planet parameters than the default-flag `ps` rows.
-- **POE (Predicted Observables for Exoplanets)** equations — the archive's
-  authoritative formulae for insolation, habitable-zone radii, RV/astrometric
-  semi-amplitude, and transit depth. Overlaps our `features/followup.py`
-  (TSM/ESM/predicted mass/RV) and would let us add insolation and HZ columns
-  and cross-check the ones we compute.
+
+Now implemented (kept here for provenance):
+
+- **Cleaner Kepler negatives** — DONE (Step 2b). The **Kepler Certified False
+  Positives** (`fpwg`) and **KOI False-Positive Probabilities** (`koifpp`)
+  tables are no longer served by the archive (neither via TAP nor the retired
+  legacy API), so `data/catalog.py::_query_certified_fp` reconstructs the
+  certification from the DR25 KOI table (`q1_q17_dr25_koi`): Kepler training
+  negatives are restricted to KOIs DR25 dispositions FALSE POSITIVE with
+  `koi_score < 0.5` (a majority false-positive Robovetter vote) — the same
+  evidence the certification rested on, TAP-native. ~79% of the bare
+  `cumulative` FPs certify; the rest are dropped as DR25-disputed or unvetted.
+- **POE (Predicted Observables for Exoplanets)** — DONE (Step 2a). Insolation +
+  habitable-zone columns computed in `features/followup.py` from the archive's
+  formulae (`stellar_luminosity_lsun` / `insolation_flux_earth` /
+  `habitable_zone_au`) and cross-checked against our own Teq recipe.
