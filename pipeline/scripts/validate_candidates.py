@@ -18,7 +18,7 @@ Usage (terminal-first — this is minutes per target):
 ``--candidates`` supplies the ephemeris (tic_id, period, t0, duration, depth) —
 the held-out candidate table `score_candidates.py` scores, NOT the ExoFOP
 `data/catalogue` table (different column names/units);
-``--shortlist`` (optional) ranks by ``prob_calibrated`` to pick ``--top`` TESS
+``--shortlist`` (optional) ranks by ``prob_mean`` to pick ``--top`` TESS
 targets. Rows that fail (no SAP light curve, TIC gaps) are logged and skipped;
 output is written incrementally so a long run is resumable-by-rerun.
 """
@@ -84,10 +84,8 @@ def _select(
         scored = (
             pd.read_parquet(shortlist) if shortlist.suffix == ".parquet" else pd.read_csv(shortlist)
         )
-        rank = scored[["tic_id", "prob_calibrated"]].dropna()
-        df = df.merge(rank, on="tic_id", how="inner").sort_values(
-            "prob_calibrated", ascending=False
-        )
+        rank = scored[["tic_id", "prob_mean"]].dropna()
+        df = df.merge(rank, on="tic_id", how="inner").sort_values("prob_mean", ascending=False)
     return df.head(top).reset_index(drop=True)
 
 
