@@ -341,6 +341,7 @@ class TargetScorer:
             duration,
             stellar_radius=sp.radius,
             stellar_logg=sp.logg,
+            stellar_teff=sp.teff,
         )
         # The model never trained on junk detections — a search-sourced
         # ephemeris gets the noise/systematic false-alarm bundle too.

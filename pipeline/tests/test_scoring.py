@@ -301,6 +301,42 @@ def test_secondary_occultation_escape_hatch():
     assert no_stellar.suspicious
 
 
+def test_secondary_thermal_escape_hatch_rescues_hot_jupiter():
+    # 500 ppm occultation on a 1% hot Jupiter (P=1.5 d, Sun-like): the implied
+    # albedo is > 1 (reflected light alone fails), but the brightness temperature
+    # it implies (~2700 K) is under 2x the equilibrium temp (~1740 K), so thermal
+    # emission excuses it (DV Eq 3).
+    time, flux = synthetic_with_secondary(0.01, 0.0005, period=1.5)
+    kw = dict(period=1.5, t0=0.0, duration=0.075, stellar_radius=1.0, stellar_logg=4.44)
+
+    reflected_only = significant_secondary(time, flux, **kw)  # no teff
+    assert reflected_only.albedo is not None and reflected_only.albedo > 1.0
+    assert reflected_only.suspicious  # reflected arm alone flags it
+
+    with_teff = significant_secondary(time, flux, stellar_teff=5772.0, **kw)
+    assert with_teff.planet_temp_k is not None and with_teff.eq_temp_k is not None
+    assert with_teff.planet_temp_k < 2.0 * with_teff.eq_temp_k
+    assert with_teff.occultation_like
+    assert not with_teff.suspicious  # thermal arm rescues the hot Jupiter
+
+
+def test_secondary_thermal_hatch_still_flags_deep_eclipsing_binary():
+    # A 30%-of-primary secondary blows past the 10% depth gate, so neither arm
+    # rescues it even with a temperature: a genuine EB stays flagged.
+    time, flux = synthetic_with_secondary(0.01, 0.003, period=2.0)
+    result = significant_secondary(
+        time,
+        flux,
+        period=2.0,
+        t0=0.0,
+        duration=0.1,
+        stellar_radius=1.0,
+        stellar_logg=4.44,
+        stellar_teff=5772.0,
+    )
+    assert result is not None and result.suspicious
+
+
 def test_secondary_verdict_language():
     time, flux = synthetic_with_secondary(0.01, 0.003)
     result = significant_secondary(time, flux, period=2.0, t0=0.0, duration=0.1)

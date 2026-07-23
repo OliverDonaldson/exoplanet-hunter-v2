@@ -25,6 +25,12 @@ ODD_EVEN_TIMING_SIGMA = 10.0
 #: with a sub-unity implied albedo is consistent with planetary reflection.
 SECONDARY_DEPTH_RATIO_MAX = 0.1
 SECONDARY_ALBEDO_MAX = 1.0
+#: Thermal-emission arm of the escape hatch (Kepler DV, Twicken 2018, Eq 3): a
+#: shallow secondary is also planet-consistent if the brightness temperature it
+#: implies, T_p = T_*·(delta_sec/delta_pri)^(1/4), is not far above the planet's
+#: equilibrium temperature. The zero-albedo/zero-redistribution dayside maxes at
+#: sqrt(2)·Teq; 2.0 leaves a margin for band-specific brightness temperature.
+SECONDARY_TEMP_MAX_FACTOR = 2.0
 #: Above this red/white-noise ratio the MS4 condition is unreliable (§4.3).
 SECONDARY_F_RED_MAX = 1.8
 
@@ -73,6 +79,8 @@ class SecondaryResult:
     occultation_like: bool
     suspicious: bool
     f_red: float | None = None
+    planet_temp_k: float | None = None
+    eq_temp_k: float | None = None
 
 
 @dataclass(frozen=True)
@@ -244,6 +252,7 @@ def significant_secondary(
     *,
     stellar_radius: float | None = None,
     stellar_logg: float | None = None,
+    stellar_teff: float | None = None,
     min_points: int = 5,
 ) -> SecondaryResult | None:
     """Significant-secondary test (Kunimoto 2025, AJ 170:280, §3.9 + §4.3).
@@ -264,13 +273,20 @@ def significant_secondary(
     when F_red > 1.8 (deep secondaries inflate F_red). Broad secondaries may
     also be partially attenuated by the transit-masked detrend upstream.
 
-    Occultation escape hatch (§4.3): a significant secondary is not flagged
-    when its depth is < 10% of the primary's and the geometric albedo needed
-    to produce it, A = delta_sec·(a/Rp)² (Eq 10, with a/Rp from stellar
-    density and Rp/R* = sqrt(delta_pri)), is < 1. The paper's additional
-    impact-parameter < 0.95 and Rp < 22 R_Earth conditions are skipped — we
-    fit neither; without stellar params the hatch cannot fire and the
-    caution stands.
+    Occultation escape hatch: a shallow significant secondary (< 10% of the
+    primary) is not flagged when a planet's own occultation could produce it —
+    by EITHER reflected light OR thermal emission:
+      * reflected (Kunimoto 2025, §4.3, Eq 10): the implied geometric albedo
+        A = delta_sec·(a/Rp)² (a/Rp from stellar density, Rp/R* = sqrt(delta_pri))
+        is < 1;
+      * thermal (Kepler DV, Twicken 2018, Eq 3): the implied brightness
+        temperature T_p = T_*·(delta_sec/delta_pri)^(1/4) is within
+        SECONDARY_TEMP_MAX_FACTOR of the equilibrium temperature Teq =
+        T_*/sqrt(2·a/R*). This rescues hot Jupiters whose real thermal
+        secondaries push the reflected-only albedo above 1.
+    The paper's impact-parameter < 0.95 and Rp < 22 R_Earth conditions are
+    skipped — we fit neither. Without stellar params neither arm can fire and
+    the caution stands.
     """
     from scipy.special import erfcinv
 
@@ -343,11 +359,25 @@ def significant_secondary(
         # A = delta_sec·(a/Rp)² with a/Rp = (a/R*)/sqrt(delta_pri) (Eq 10).
         albedo = float(sec_depth * a_rs**2 / primary_depth)
 
+    # Thermal arm: brightness temperature the secondary implies vs the planet's
+    # equilibrium temperature (DV Eq 3; Teq is zero-albedo/full-redistribution).
+    planet_temp = eq_temp = None
+    teff_ok = stellar_teff is not None and np.isfinite(stellar_teff) and stellar_teff > 0
+    if teff_ok and 0 < depth_ratio < np.inf:
+        planet_temp = float(stellar_teff * depth_ratio**0.25)
+    if teff_ok and a_rs is not None and a_rs > 0:
+        eq_temp = float(stellar_teff / np.sqrt(2.0 * a_rs))
+
+    reflected_like = albedo is not None and albedo < SECONDARY_ALBEDO_MAX
+    thermal_like = (
+        planet_temp is not None
+        and eq_temp is not None
+        and planet_temp < SECONDARY_TEMP_MAX_FACTOR * eq_temp
+    )
     occultation_like = bool(
         significant
         and 0 < depth_ratio < SECONDARY_DEPTH_RATIO_MAX
-        and albedo is not None
-        and albedo < SECONDARY_ALBEDO_MAX
+        and (reflected_like or thermal_like)
     )
     return SecondaryResult(
         secondary_depth_ppm=float(sec_depth * 1e6),
@@ -360,6 +390,8 @@ def significant_secondary(
         occultation_like=occultation_like,
         suspicious=bool(significant and not occultation_like),
         f_red=f_red,
+        planet_temp_k=planet_temp,
+        eq_temp_k=eq_temp,
     )
 
 
