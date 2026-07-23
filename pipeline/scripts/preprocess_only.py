@@ -127,6 +127,8 @@ def main(cfg: DictConfig) -> None:
 
         if mission == "Kepler":
             path = (kepler_dir or paths.data_raw) / f"kic_{tic}.fits"
+        elif mission == "K2":
+            path = paths.data_raw / f"epic_{tic}.fits"
         else:
             path = paths.data_raw / f"tic_{tic}.fits"
         if not path.exists():
@@ -180,7 +182,7 @@ def main(cfg: DictConfig) -> None:
         log_period = np.log(float(period)) if float(period) > 0 else np.nan
         depth_val = float(row["depth"]) if pd.notna(row.get("depth")) else np.nan
         dur_val = float(row["duration"]) if pd.notna(row.get("duration")) else np.nan
-        if mission == "Kepler":
+        if mission in ("Kepler", "K2"):
             snr_val = float(row["snr"]) if pd.notna(row.get("snr")) else np.nan
             aux.append(
                 [

@@ -136,6 +136,15 @@ class LightCurveDownloader:
             "mission": "Kepler",
             "cadence": None,
         },
+        # K2 products live on MAST like TESS (author "K2", EPIC-indexed), so they
+        # flow through the lightkurve search path — not the Kepler direct archive.
+        "K2": {
+            "prefix": "epic",
+            "search": "EPIC",
+            "author": "K2",
+            "mission": "K2",
+            "cadence": None,
+        },
     }
 
     def __init__(

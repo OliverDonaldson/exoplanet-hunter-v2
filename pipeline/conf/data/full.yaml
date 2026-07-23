@@ -15,6 +15,11 @@ n_false_pos: 1000000
 n_confirmed_kepler: 1250
 n_false_pos_kepler: 1250
 
+# K2 (k2pandc) targets — the whole labelled ecliptic-plane pool. Uncapped:
+# build_label_catalog takes min(requested, available) ≈ 315 CP + 215 FP/REFUTED.
+n_confirmed_k2: 1000000
+n_false_pos_k2: 1000000
+
 sectors: null
 author: SPOC
 cadence: 120

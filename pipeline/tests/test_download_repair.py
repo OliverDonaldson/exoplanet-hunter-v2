@@ -146,3 +146,15 @@ def test_download_many_parallel_dedupes_targets(tmp_path, monkeypatch):
 
     assert sorted(fetched) == [10, 11, 12]  # each distinct target fetched once
     assert [r.target_id for r in results] == [10, 11, 12]  # first-seen order
+
+
+def test_k2_mission_config_uses_epic_prefix_and_shared_cache(tmp_path):
+    """K2 flows through the lightkurve search path (EPIC-indexed, author "K2"),
+    with FITS in the default cache under an epic_ prefix — not the Kepler
+    direct-archive branch or the Kepler cache dir."""
+    from exoplanet_hunter.data.download import LightCurveDownloader
+
+    dl = LightCurveDownloader(tmp_path, kepler_cache_dir=tmp_path / "kepler")
+    cfg = dl._MISSION_CFG["K2"]
+    assert (cfg["search"], cfg["author"], cfg["mission"]) == ("EPIC", "K2", "K2")
+    assert dl._target_path(211390903, mission="K2") == tmp_path / "epic_211390903.fits"

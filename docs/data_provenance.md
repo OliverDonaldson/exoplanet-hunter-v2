@@ -91,16 +91,23 @@ cleaning, flattening, or phase-folding:
 
 ## Archive tables we do *not* yet exploit (opportunities)
 
-The NASA Exoplanet Archive offers more than the three tables we query. Worth
+The NASA Exoplanet Archive offers more than the tables we query. Worth
 considering in a future data pass (not yet implemented):
 
-- **K2 planets & candidates** (`k2pandc`) — a whole mission of labelled
-  transits along the ecliptic that we currently ignore.
 - **PSCompPars** (composite parameters) — a cleaner one-row-per-planet merge
   of stellar/planet parameters than the default-flag `ps` rows.
 
 Now implemented (kept here for provenance):
 
+- **K2 planets & candidates** (`k2pandc`) — DONE (Step 2c). `data/catalog.py::
+  _query_k2` adds the K2 mission (ecliptic-plane coverage — a third sky band):
+  EPIC-keyed dispositions (CONFIRMED→1, FALSE POSITIVE/REFUTED→0, CANDIDATE
+  held out), stored in `tic_id` with `mission="K2"` and downloaded EPIC-indexed
+  via lightkurve (`download.py` K2 config). The archive's `default_flag=1` set
+  often omits the transit ephemeris (RV-confirmed planets), so we instead
+  require period+epoch+duration and prefer the default row when it has them —
+  recovering ~315 CONFIRMED + ~215 FP/REFUTED + ~834 held-out candidates. Depth
+  is percent (÷100, verified against (Rp/R*)²); stellar params come inline.
 - **Cleaner Kepler negatives** — DONE (Step 2b). The **Kepler Certified False
   Positives** (`fpwg`) and **KOI False-Positive Probabilities** (`koifpp`)
   tables are no longer served by the archive (neither via TAP nor the retired

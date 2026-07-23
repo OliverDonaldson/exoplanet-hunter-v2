@@ -71,6 +71,8 @@ def main(cfg: DictConfig) -> None:
             n_false_pos=int(cfg.data.n_false_pos),
             n_confirmed_kepler=int(cfg.data.get("n_confirmed_kepler", 0)),
             n_false_pos_kepler=int(cfg.data.get("n_false_pos_kepler", 0)),
+            n_confirmed_k2=int(cfg.data.get("n_confirmed_k2", 0)),
+            n_false_pos_k2=int(cfg.data.get("n_false_pos_k2", 0)),
             seed=int(cfg.data.seed),
         ),
         out_dir=paths.data_labels,
@@ -141,6 +143,8 @@ def main(cfg: DictConfig) -> None:
         # Resolve the FITS path based on mission.
         if mission == "Kepler":
             path = (kepler_dir or paths.data_raw) / f"kic_{tic}.fits"
+        elif mission == "K2":
+            path = paths.data_raw / f"epic_{tic}.fits"
         else:
             path = paths.data_raw / f"tic_{tic}.fits"
         if not path.exists():
@@ -198,7 +202,10 @@ def main(cfg: DictConfig) -> None:
         log_period = np.log(float(period)) if float(period) > 0 else np.nan
         depth_val = float(row["depth"]) if pd.notna(row.get("depth")) else np.nan
         dur_val = float(row["duration"]) if pd.notna(row.get("duration")) else np.nan
-        if mission == "Kepler":
+        # Kepler and K2 carry stellar params in the catalogue row (KOI / k2pandc);
+        # TESS needs a TIC lookup. An EPIC id is not a TIC id, so K2 must use the
+        # row — never fetch_stellar_params(tic).
+        if mission in ("Kepler", "K2"):
             stellar = [
                 float(row["teff"]) if pd.notna(row.get("teff")) else np.nan,
                 float(row["radius"]) if pd.notna(row.get("radius")) else np.nan,

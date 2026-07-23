@@ -45,6 +45,15 @@ KEPLER_DISPOSITION_LABELS: dict[str, int] = {
     "CANDIDATE": -1,
 }
 
+# K2 (k2pandc) dispositions. REFUTED = was published as a planet, since
+# disproven — a false positive for our purposes.
+K2_DISPOSITION_LABELS: dict[str, int] = {
+    "CONFIRMED": 1,
+    "FALSE POSITIVE": 0,
+    "REFUTED": 0,
+    "CANDIDATE": -1,
+}
+
 #: A DR25 FALSE POSITIVE with koi_score below this is a *certified* negative:
 #: koi_score is the Robovetter's Monte-Carlo P(planet candidate), so < 0.5 means
 #: the majority vote was false-positive. Kept as a module constant so the
@@ -71,6 +80,8 @@ class CatalogRequest:
     n_false_pos: int
     n_confirmed_kepler: int = 0
     n_false_pos_kepler: int = 0
+    n_confirmed_k2: int = 0
+    n_false_pos_k2: int = 0
     seed: int = 42
 
 
@@ -262,6 +273,51 @@ def _query_certified_fp() -> set[str]:
     return names
 
 
+def _query_k2() -> pd.DataFrame:
+    """K2 planets and candidates from the ``k2pandc`` archive table.
+
+    Keyed on the EPIC id, stored in ``tic_id`` exactly as the KIC id is for
+    Kepler; the ``mission`` column ("K2") disambiguates for the EPIC-indexed MAST
+    download path. k2pandc carries several rows per candidate (one per reference)
+    and the archive's ``default_flag=1`` set often omits the transit ephemeris
+    (confirmation came from RV), so rather than that flag we require a usable
+    ephemeris (period + epoch + duration) and *prefer* the default row when it
+    has one. Units match the other sources: ``pl_trandep`` is percent (÷100 →
+    fraction, verified against (Rp/R*)²), ``pl_trandur`` hours (÷24 → days).
+    ``pl_tranmid`` is full BJD → BKJD (−2454833), the K2 light-curve time system.
+    Stellar parameters come inline — no separate lookup at build time.
+    """
+    adql = (
+        "select epic_hostname, epic_candname as name, disposition, default_flag, "
+        "       pl_orbper as period, pl_tranmid - 2454833.0 as t0, "
+        "       pl_trandep / 100.0 as depth, pl_trandur / 24.0 as duration, "
+        "       st_teff as teff, st_rad as radius, st_logg as logg, sy_kepmag as tmag "
+        "from k2pandc "
+        "where disposition is not null "
+        "  and pl_orbper is not null "
+        "  and pl_tranmid is not null "
+        "  and pl_trandur is not null"
+    )
+    df = _tap_query(adql)
+    df["label"] = df["disposition"].map(K2_DISPOSITION_LABELS)
+    df = df.dropna(subset=["label"])
+    df["label"] = df["label"].astype(int)
+    df["mission"] = "K2"
+    # EPIC id from "EPIC 211390903" -> 211390903, stored in tic_id like the KIC.
+    df["tic_id"] = (
+        df["epic_hostname"]
+        .astype(str)
+        .str.replace("EPIC ", "", regex=False)
+        .str.strip()
+        .astype("int64")
+    )
+    # Prefer the default parameter set, then keep one row per candidate and one
+    # candidate per star (one signal per light curve, mirroring the KOI dedup).
+    df = df.sort_values("default_flag", ascending=False, kind="stable")
+    df = df.drop_duplicates(subset="name").drop_duplicates(subset="tic_id")
+    return df.drop(columns=["default_flag"]).reset_index(drop=True)
+
+
 def build_label_catalog(req: CatalogRequest, out_dir: Path) -> pd.DataFrame:
     """Build the combined labelled catalogue and persist to parquet.
 
@@ -345,6 +401,27 @@ def build_label_catalog(req: CatalogRequest, out_dir: Path) -> pd.DataFrame:
 
         # Persist Kepler held-out candidates alongside TESS candidates.
         pc = pd.concat([pc, koi_pc], ignore_index=True)
+
+    # --- K2 targets (optional) ------------------------------------------
+    if req.n_confirmed_k2 > 0 or req.n_false_pos_k2 > 0:
+        k2 = _query_k2()
+        k2_pos = k2[k2["label"] == 1]
+        k2_neg = k2[k2["label"] == 0]
+        k2_pc = k2[k2["label"] == -1]
+
+        log.info(
+            "[catalog] K2 sources: confirmed=%d, FP=%d, PC=%d",
+            len(k2_pos),
+            len(k2_neg),
+            len(k2_pc),
+        )
+
+        k2_pos = _stable_sample(k2_pos, req.n_confirmed_k2, req.seed)
+        k2_neg = _stable_sample(k2_neg, req.n_false_pos_k2, req.seed)
+        parts.extend([k2_pos, k2_neg])
+
+        # Persist K2 held-out candidates alongside the rest.
+        pc = pd.concat([pc, k2_pc], ignore_index=True)
 
     catalog = pd.concat(parts, ignore_index=True)
     catalog["tic_id"] = catalog["tic_id"].astype("int64")
