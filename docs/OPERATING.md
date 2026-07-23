@@ -92,6 +92,28 @@ Or click any row in the console. Under the hood: fetch light curve
 dropout-active forward passes → calibrated probability ± uncertainty →
 centroid & odd/even checks → plain-language verdict.
 
+## Statistical validation (TRICERATOPS)
+
+The model ranks candidates from the light curve but never reads the pixels, so
+it cannot tell a transit on the target from an eclipse on a nearby star in the
+aperture. TRICERATOPS (Giacalone 2021) does — computing a false-positive
+probability (FPP) and a nearby-FPP (NFPP) from the TESS pixels + surrounding
+stars. It is slow and network-bound (minutes/target), so it runs offline over
+the top of a scored shortlist, not on `/score`.
+
+```bash
+pip install -e 'pipeline[validation]'          # optional heavy dep, one-time
+python scripts/validate_candidates.py \
+    --shortlist results/candidates_scored.parquet --top 20 \
+    --out results/candidates_validated.csv
+```
+
+Thresholds (Giacalone §4): **validated** = FPP < 0.015 & NFPP < 1e-3; **likely
+planet** = FPP < 0.5 & NFPP < 1e-3; **likely nearby FP** = NFPP > 0.1. FPP is
+unreliable below transit S/N ~15 (reported per row as `snr` / `snr_reliable`).
+Uses SAP (not PDCSAP) flux by design — PDC removes the nearby-star contamination
+NFPP exists to catch.
+
 ## Running the refresh on a schedule
 
 The refresh + retrain loop needs this Mac (data, GPU), so scheduling is a

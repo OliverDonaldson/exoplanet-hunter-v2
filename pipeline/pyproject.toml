@@ -49,6 +49,12 @@ dependencies = [
 orchestration = [
     "prefect>=3",
 ]
+# Statistical validation of shortlist candidates (Giacalone 2021). Heavy and
+# network-bound (TIC queries, pixel cutouts, TRILEGAL) — kept out of the core
+# and serving image; installed only where the shortlist is vetted.
+validation = [
+    "triceratops>=1.0",
+]
 dev = [
     "dvc[s3]>=3.30",
     "pytest>=8",
