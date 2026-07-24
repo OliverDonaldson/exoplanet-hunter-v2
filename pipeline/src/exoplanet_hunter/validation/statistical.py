@@ -284,16 +284,20 @@ def validate_target(
     )
     probs = tgt.probs
     fpp, nfpp = float(tgt.FPP), float(tgt.NFPP)
-    best = probs.loc[probs["prob"].idxmax()]
+    scenario_probs = {
+        str(s): float(p) for s, p in zip(probs["scenario"], probs["prob"], strict=False)
+    }
+    # Highest-probability *named* scenario — TRICERATOPS leaves the scenario blank
+    # on padding rows, so filter those out rather than report an empty label.
+    named = {s: p for s, p in scenario_probs.items() if s.strip()}
+    best_scenario = max(named, key=lambda s: named[s], default="")
     return StatisticalValidation(
         tic_id=int(tic_id),
         fpp=fpp,
         nfpp=nfpp,
         classification=classify(fpp, nfpp),
-        best_scenario=str(best["scenario"]),
-        scenario_probs={
-            str(s): float(p) for s, p in zip(probs["scenario"], probs["prob"], strict=False)
-        },
+        best_scenario=best_scenario,
+        scenario_probs=scenario_probs,
         n_nearby_stars=len(tgt.stars),
         snr=snr,
         snr_reliable=(snr >= SNR_RELIABLE_MIN) if snr is not None else None,
