@@ -28,6 +28,8 @@ Caveats carried straight from the paper:
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import numpy as np
@@ -160,10 +162,11 @@ def _install_triceratops_compat_shims() -> None:
         _si.trapz = _si.trapezoid
 
     import importlib.util
+    import sys
 
-    if importlib.util.find_spec("pkg_resources") is None:
+    # find_spec raises on our spec-less stub, so short-circuit once it's installed.
+    if "pkg_resources" not in sys.modules and importlib.util.find_spec("pkg_resources") is None:
         import os
-        import sys
         import types
 
         def _resource_filename(package: str, resource: str) -> str:
@@ -195,6 +198,33 @@ def _load_target_cls() -> type:
     return target
 
 
+@contextlib.contextmanager
+def _trilegal_ssl_disabled() -> Iterator[None]:
+    """Scope an SSL-verification bypass to TRICERATOPS' TRILEGAL query only.
+
+    The TRILEGAL server (stev.oapd.inaf.it) ships an incomplete certificate
+    chain that even an up-to-date CA bundle cannot verify — a known issue, which
+    is why TRICERATOPS gave ``query_TRILEGAL`` a ``verify_ssl`` flag. But
+    ``target()`` hardcodes ``verify_ssl=True`` and never exposes it, so we patch
+    the reference it calls to force verification off, then restore it. The query
+    is a public, unauthenticated star-count lookup (only RA/Dec is sent), so
+    skipping verification here carries no data-exposure risk.
+    """
+    import triceratops.triceratops as _tt
+
+    original = _tt.query_TRILEGAL
+
+    def _no_verify(ra: float, dec: float, *args: object, **kwargs: object) -> object:
+        kwargs["verify_ssl"] = False
+        return original(ra, dec, *args, **kwargs)
+
+    _tt.query_TRILEGAL = _no_verify
+    try:
+        yield
+    finally:
+        _tt.query_TRILEGAL = original
+
+
 def validate_target(
     *,
     tic_id: int,
@@ -211,6 +241,8 @@ def validate_target(
     parallel: bool = False,
     apertures: list[np.ndarray] | None = None,
     snr: float | None = None,
+    trilegal_fname: str | None = None,
+    verify_ssl: bool = True,
     verbose: int = 0,
 ) -> StatisticalValidation:
     """Run TRICERATOPS for one target and return its FPP/NFPP disposition.
@@ -218,16 +250,27 @@ def validate_target(
     ``phase_time`` is days from the transit midpoint, ``flux`` normalised to a
     baseline of 1, ``flux_err`` a scalar (all as produced by
     :func:`prepare_lightcurve`); ``depth_ppm`` seeds the per-star required-depth
-    calculation. Constructing the target hits the network (TIC + pixel cutout),
-    so this is never called on the live serving path.
+    calculation. Constructing the target hits the network (TIC + pixel cutout +
+    a TRILEGAL galactic-model query), so this is never called on live serving.
+
+    Two escapes for TRILEGAL's broken TLS cert: pass ``trilegal_fname`` to use a
+    pre-downloaded table (skips the query entirely — fully secure), or opt into
+    ``verify_ssl=False`` to bypass verification for that one public query.
     """
     target_cls = _load_target_cls()
-    tgt = target_cls(
-        ID=int(tic_id),
-        sectors=np.asarray(sectors, dtype=int),
-        mission=mission,
-        search_radius=search_radius,
+    ssl_ctx = (
+        contextlib.nullcontext()
+        if verify_ssl or trilegal_fname is not None
+        else _trilegal_ssl_disabled()
     )
+    with ssl_ctx:
+        tgt = target_cls(
+            ID=int(tic_id),
+            sectors=np.asarray(sectors, dtype=int),
+            mission=mission,
+            search_radius=search_radius,
+            trilegal_fname=trilegal_fname,
+        )
     tgt.calc_depths(tdepth=float(depth_ppm), all_ap_pixels=apertures)
     tgt.calc_probs(
         time=np.asarray(phase_time, dtype=float),

@@ -105,8 +105,18 @@ the top of a scored shortlist, not on `/score`.
 pip install -e 'pipeline[validation]'          # optional heavy dep, one-time
 python scripts/validate_candidates.py \
     --shortlist results/candidates_scored.parquet --top 20 \
+    --insecure-trilegal \
     --out results/candidates_validated.csv
 ```
+
+`--insecure-trilegal` skips SSL verification for TRICERATOPS' background-star
+query to the TRILEGAL server (`stev.oapd.inaf.it`), whose certificate chain is
+broken and unverifiable even with an up-to-date CA bundle — a known issue. The
+query is a public, unauthenticated star-count lookup (only RA/Dec is sent), so
+this is safe; omit the flag to keep verification on (it will then fail on that
+server). `validate_target(..., trilegal_fname=...)` accepts a pre-downloaded
+TRILEGAL table as a fully-verified alternative. The wrapper also auto-shims
+three names pytransit needs that this env's numpy/scipy/setuptools removed.
 
 Thresholds (Giacalone §4): **validated** = FPP < 0.015 & NFPP < 1e-3; **likely
 planet** = FPP < 0.5 & NFPP < 1e-3; **likely nearby FP** = NFPP > 0.1. FPP is

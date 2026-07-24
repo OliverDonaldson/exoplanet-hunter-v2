@@ -89,7 +89,9 @@ def _select(
     return df.head(top).reset_index(drop=True)
 
 
-def _validate_row(row: pd.Series, mission: str, n_draws: int, search_radius: int) -> dict:
+def _validate_row(
+    row: pd.Series, mission: str, n_draws: int, search_radius: int, verify_ssl: bool
+) -> dict:
     tic_id = int(row["tic_id"])
     period, t0, duration = float(row["period"]), float(row["t0"]), float(row["duration"])
     depth_ppm = float(row["depth"]) * 1e6  # catalogue depth is fractional
@@ -109,6 +111,7 @@ def _validate_row(row: pd.Series, mission: str, n_draws: int, search_radius: int
         n_draws=n_draws,
         search_radius=search_radius,
         snr=snr,
+        verify_ssl=verify_ssl,
     )
     return {
         "tic_id": tic_id,
@@ -131,6 +134,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("results/candidates_validated.csv"))
     parser.add_argument("--n-draws", type=int, default=1_000_000)
     parser.add_argument("--search-radius", type=int, default=10)
+    parser.add_argument(
+        "--insecure-trilegal",
+        action="store_true",
+        help="Skip SSL verification for the public TRILEGAL star-count query "
+        "(its server ships a broken cert chain). Only RA/Dec is sent.",
+    )
     args = parser.parse_args()
 
     candidates = pd.read_parquet(args.candidates)
@@ -142,7 +151,9 @@ def main() -> None:
     for i, (_, row) in enumerate(targets.iterrows(), 1):
         tic_id = int(row["tic_id"])
         try:
-            out = _validate_row(row, args.mission, args.n_draws, args.search_radius)
+            out = _validate_row(
+                row, args.mission, args.n_draws, args.search_radius, not args.insecure_trilegal
+            )
             log.info(
                 "[validate] %d/%d TIC %d: FPP=%.3g NFPP=%.3g -> %s",
                 i,

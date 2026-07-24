@@ -64,9 +64,10 @@ def test_prepare_lightcurve_rejects_bad_inputs():
 class _FakeTarget:
     """Stand-in for triceratops.triceratops.target (no network, no pixels)."""
 
-    def __init__(self, ID, sectors, mission, search_radius):
+    def __init__(self, ID, sectors, mission, search_radius, trilegal_fname=None):
         self.ID = ID
         self.sectors = sectors
+        self.trilegal_fname = trilegal_fname
         self.calls: dict = {}
         self.stars = pd.DataFrame({"ID": [ID, 111, 222]})  # target + 2 neighbours
 
@@ -114,6 +115,28 @@ def test_compat_shims_restore_removed_names():
 
     assert hasattr(pkg_resources, "resource_filename")
     sv._install_triceratops_compat_shims()  # idempotent
+
+
+def test_trilegal_ssl_disabled_forces_verify_off(monkeypatch):
+    import sys
+    import types
+
+    calls = []
+
+    def query_TRILEGAL(ra, dec, verbose=0, verify_ssl=True):
+        calls.append(verify_ssl)
+        return "url"
+
+    fake_tt = types.ModuleType("triceratops.triceratops")
+    fake_tt.query_TRILEGAL = query_TRILEGAL
+    monkeypatch.setitem(sys.modules, "triceratops", types.ModuleType("triceratops"))
+    monkeypatch.setitem(sys.modules, "triceratops.triceratops", fake_tt)
+    original = fake_tt.query_TRILEGAL
+
+    with sv._trilegal_ssl_disabled():
+        fake_tt.query_TRILEGAL(10.0, 20.0, verify_ssl=True)  # target() passes True
+    assert calls == [False]  # ...but the patch forced verification off
+    assert fake_tt.query_TRILEGAL is original  # restored on exit
 
 
 def test_validate_target_raises_helpful_error_without_dep(monkeypatch):
