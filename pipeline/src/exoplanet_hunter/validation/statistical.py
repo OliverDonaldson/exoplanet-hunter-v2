@@ -34,6 +34,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from exoplanet_hunter.utils.logging import get_logger
+
+log = get_logger(__name__)
+
 #: Validated-planet thresholds (Giacalone 2021, §4): NFPP < 1e-3 and FPP < 0.015.
 FPP_VALIDATED = 0.015
 #: A candidate with FPP at or above this is more likely a false positive.
@@ -225,6 +229,57 @@ def _trilegal_ssl_disabled() -> Iterator[None]:
         _tt.query_TRILEGAL = original
 
 
+def _aperture_to_cutout_pixels(
+    pipeline_mask: np.ndarray,
+    target_xy_tpf: tuple[float, float],
+    target_xy_cutout: np.ndarray,
+) -> np.ndarray:
+    """Map a SPOC pipeline aperture into TRICERATOPS' TessCut cutout frame.
+
+    ``pipeline_mask`` is the boolean [row, col] SPOC aperture on the TPF grid;
+    ``target_xy_tpf`` the target's [col, row] position on that grid;
+    ``target_xy_cutout`` its [col, row] position in TRICERATOPS' cutout. Both
+    products sample the same native CCD pixels, so each aperture pixel's offset
+    from the target is frame-invariant — shift those offsets onto the target's
+    cutout position. Returns the (N, 2) [col, row] array ``calc_depths`` expects.
+    """
+    rows, cols = np.nonzero(pipeline_mask)
+    dcol = cols - target_xy_tpf[0]
+    drow = rows - target_xy_tpf[1]
+    return np.column_stack([target_xy_cutout[0] + dcol, target_xy_cutout[1] + drow])
+
+
+def _fetch_pipeline_apertures(tgt: object, tic_id: int, sectors: np.ndarray) -> list | None:
+    """The real SPOC photometric aperture per sector, in TRICERATOPS' cutout frame.
+
+    TRICERATOPS otherwise assumes a 5x5 box, which admits more contaminant flux
+    than the pipeline aperture and inflates FPP. Keyed to ``tgt.pix_coords`` so
+    sector order matches; returns None on any gap (missing TPF, mask, or a
+    sector-count mismatch) so the caller cleanly falls back to the 5x5 default.
+    """
+    import lightkurve as lk
+
+    pix_coords = getattr(tgt, "pix_coords", None)
+    stars = getattr(tgt, "stars", None)
+    if pix_coords is None or stars is None or len(pix_coords) != len(sectors):
+        return None
+    ra, dec = float(stars.iloc[0]["ra"]), float(stars.iloc[0]["dec"])
+    apertures = []
+    for k, sector in enumerate(sectors):
+        search = lk.search_targetpixelfile(
+            f"TIC {tic_id}", mission="TESS", author="SPOC", sector=int(sector)
+        )
+        if len(search) == 0:
+            return None
+        tpf = search.download()
+        mask = np.asarray(tpf.pipeline_mask)
+        if not mask.any():
+            return None
+        xt, yt = tpf.wcs.all_world2pix(ra, dec, 0)
+        apertures.append(_aperture_to_cutout_pixels(mask, (float(xt), float(yt)), pix_coords[k][0]))
+    return apertures
+
+
 def validate_target(
     *,
     tic_id: int,
@@ -240,6 +295,7 @@ def validate_target(
     n_draws: int = 1_000_000,
     parallel: bool = False,
     apertures: list[np.ndarray] | None = None,
+    use_pipeline_aperture: bool = True,
     snr: float | None = None,
     trilegal_fname: str | None = None,
     verify_ssl: bool = True,
@@ -253,8 +309,11 @@ def validate_target(
     calculation. Constructing the target hits the network (TIC + pixel cutout +
     a TRILEGAL galactic-model query), so this is never called on live serving.
 
-    Two escapes for TRILEGAL's broken TLS cert: pass ``trilegal_fname`` to use a
-    pre-downloaded table (skips the query entirely — fully secure), or opt into
+    ``use_pipeline_aperture`` (TESS) fetches the real SPOC aperture instead of
+    TRICERATOPS' 5x5 default, which otherwise inflates FPP; it falls back to the
+    default (with a warning) if the aperture can't be built. ``apertures``
+    overrides it. Two escapes for TRILEGAL's broken TLS cert: pass
+    ``trilegal_fname`` (pre-downloaded table, fully secure) or opt into
     ``verify_ssl=False`` to bypass verification for that one public query.
     """
     target_cls = _load_target_cls()
@@ -271,6 +330,18 @@ def validate_target(
             search_radius=search_radius,
             trilegal_fname=trilegal_fname,
         )
+    if apertures is None and use_pipeline_aperture and mission == "TESS":
+        try:
+            apertures = _fetch_pipeline_apertures(tgt, int(tic_id), np.asarray(sectors))
+        except Exception as exc:
+            log.warning("[validation] SPOC aperture fetch failed for TIC %d: %s", tic_id, exc)
+            apertures = None
+        if apertures is None:
+            log.warning(
+                "[validation] TIC %d: no SPOC pipeline aperture — TRICERATOPS 5x5 "
+                "default (FPP will read looser/higher)",
+                tic_id,
+            )
     tgt.calc_depths(tdepth=float(depth_ppm), all_ap_pixels=apertures)
     tgt.calc_probs(
         time=np.asarray(phase_time, dtype=float),

@@ -94,6 +94,7 @@ def test_validate_target_orchestrates_and_classifies(monkeypatch):
         flux_err=sigma,
         snr=25.0,
         n_draws=1000,
+        use_pipeline_aperture=False,
     )
     assert result.fpp == 0.03 and result.nfpp == 0.01
     assert result.classification == sv.INCONCLUSIVE  # NFPP 0.01 in the mid band
@@ -115,6 +116,24 @@ def test_compat_shims_restore_removed_names():
 
     assert hasattr(pkg_resources, "resource_filename")
     sv._install_triceratops_compat_shims()  # idempotent
+
+
+def test_aperture_to_cutout_pixels_shifts_by_ccd_offset():
+    # target on the central True pixel (TPF col=1,row=1); the same star sits at
+    # (col=10,row=20) in TRICERATOPS' cutout. Aperture pixels keep their offset.
+    mask = np.array([[False, False, False], [False, True, True], [False, False, False]])
+    out = sv._aperture_to_cutout_pixels(mask, (1.0, 1.0), np.array([10.0, 20.0]))
+    assert out.shape == (2, 2)  # (N pixels, [col, row])
+    assert out.tolist() == [[10.0, 20.0], [11.0, 20.0]]
+
+
+def test_fetch_pipeline_apertures_falls_back_on_gaps():
+    # No pix_coords / sector-count mismatch -> None (caller uses the 5x5 default),
+    # and never touches the network.
+    class _Bare:
+        pass
+
+    assert sv._fetch_pipeline_apertures(_Bare(), 1, np.array([1, 2])) is None
 
 
 def test_trilegal_ssl_disabled_forces_verify_off(monkeypatch):

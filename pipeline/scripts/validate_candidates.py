@@ -90,7 +90,12 @@ def _select(
 
 
 def _validate_row(
-    row: pd.Series, mission: str, n_draws: int, search_radius: int, verify_ssl: bool
+    row: pd.Series,
+    mission: str,
+    n_draws: int,
+    search_radius: int,
+    verify_ssl: bool,
+    use_pipeline_aperture: bool,
 ) -> dict:
     tic_id = int(row["tic_id"])
     period, t0, duration = float(row["period"]), float(row["t0"]), float(row["duration"])
@@ -112,6 +117,7 @@ def _validate_row(
         search_radius=search_radius,
         snr=snr,
         verify_ssl=verify_ssl,
+        use_pipeline_aperture=use_pipeline_aperture,
     )
     return {
         "tic_id": tic_id,
@@ -140,6 +146,12 @@ def main() -> None:
         help="Skip SSL verification for the public TRILEGAL star-count query "
         "(its server ships a broken cert chain). Only RA/Dec is sent.",
     )
+    parser.add_argument(
+        "--no-pipeline-aperture",
+        action="store_true",
+        help="Use TRICERATOPS' 5x5 default aperture instead of the SPOC pipeline "
+        "aperture (FPP will read looser/higher).",
+    )
     args = parser.parse_args()
 
     candidates = pd.read_parquet(args.candidates)
@@ -152,7 +164,12 @@ def main() -> None:
         tic_id = int(row["tic_id"])
         try:
             out = _validate_row(
-                row, args.mission, args.n_draws, args.search_radius, not args.insecure_trilegal
+                row,
+                args.mission,
+                args.n_draws,
+                args.search_radius,
+                not args.insecure_trilegal,
+                not args.no_pipeline_aperture,
             )
             log.info(
                 "[validate] %d/%d TIC %d: FPP=%.3g NFPP=%.3g -> %s",
