@@ -102,6 +102,20 @@ def test_validate_target_orchestrates_and_classifies(monkeypatch):
     assert result.scenario_probs["NEB"] == 0.01
 
 
+def test_compat_shims_restore_removed_names():
+    # pytransit imports names that modern numpy/scipy/setuptools dropped; the
+    # shim restores them so `import triceratops` doesn't die in a dependency.
+    import scipy.integrate as si
+
+    sv._install_triceratops_compat_shims()
+    assert np.int is int  # noqa: NPY001 — NumPy 1.24 alias restored by the shim
+    assert si.trapz is si.trapezoid  # SciPy trapz->trapezoid bridged
+    import pkg_resources  # real (setuptools<81) or our stub
+
+    assert hasattr(pkg_resources, "resource_filename")
+    sv._install_triceratops_compat_shims()  # idempotent
+
+
 def test_validate_target_raises_helpful_error_without_dep(monkeypatch):
     def _boom():
         raise ImportError("pip install -e 'pipeline[validation]'")

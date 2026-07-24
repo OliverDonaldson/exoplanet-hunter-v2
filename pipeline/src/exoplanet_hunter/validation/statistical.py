@@ -136,13 +136,61 @@ class StatisticalValidation:
     contrast_curve_used: bool = False
 
 
+def _install_triceratops_compat_shims() -> None:
+    """Make pytransit (a TRICERATOPS dependency) importable under this env's
+    modern numpy / scipy / setuptools. pytransit 2.2.0 predates three removals:
+
+      * ``numpy.int`` — dropped in NumPy 1.24 (restore the alias to the builtin);
+      * ``scipy.integrate.trapz`` — renamed ``trapezoid``, dropped in SciPy 1.14;
+      * ``pkg_resources`` — dropped in setuptools 81; pytransit's contamination
+        module imports only ``resource_filename`` from it, so stub that.
+
+    Each shim is a no-op when the real name is present, so a compatible env is
+    left untouched. Without these, ``import triceratops`` dies deep in pytransit
+    with an unhelpful ImportError.
+    """
+    import numpy as _np
+
+    if not hasattr(_np, "int"):
+        _np.int = int  # type: ignore[attr-defined]  # noqa: NPY001 — intentional legacy-alias restore
+
+    import scipy.integrate as _si
+
+    if not hasattr(_si, "trapz"):
+        _si.trapz = _si.trapezoid
+
+    import importlib.util
+
+    if importlib.util.find_spec("pkg_resources") is None:
+        import os
+        import sys
+        import types
+
+        def _resource_filename(package: str, resource: str) -> str:
+            base = os.path.dirname(importlib.import_module(package).__file__ or "")
+            return os.path.join(base, resource)
+
+        stub = types.ModuleType("pkg_resources")
+        stub.resource_filename = _resource_filename  # type: ignore[attr-defined]
+        stub.get_distribution = lambda name: types.SimpleNamespace(version="0")  # type: ignore[attr-defined]
+        stub.DistributionNotFound = Exception  # type: ignore[attr-defined]
+        sys.modules["pkg_resources"] = stub
+
+
 def _load_target_cls() -> type:
+    _install_triceratops_compat_shims()
     try:
         from triceratops.triceratops import target
-    except ImportError as exc:  # pragma: no cover - exercised via monkeypatch
+    except ModuleNotFoundError as exc:
+        missing = (exc.name or "").split(".")[0]
+        if missing == "triceratops":
+            raise ImportError(
+                "TRICERATOPS is not installed. Install the validation extra:\n"
+                "    pip install -e 'pipeline[validation]'"
+            ) from exc
         raise ImportError(
-            "TRICERATOPS is not installed. Install the validation extra:\n"
-            "    pip install -e 'pipeline[validation]'"
+            f"TRICERATOPS is installed but its dependency {missing!r} failed to "
+            "import in this environment."
         ) from exc
     return target
 
