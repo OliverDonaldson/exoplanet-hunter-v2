@@ -456,17 +456,23 @@ correct + serving-safe):**
 1. ~~**Resolve the 2d rejection + reconcile data.**~~ **DONE 2026-07-25** — see
    the section below.
 2. ~~**Propagate 2a to production.**~~ **DONE 2026-07-25** — see below.
-3. **Build the validation runners against the served model.** (a) the
-   injection-recovery runner on eval/injection_recovery (drive real LCs through
-   preprocess + 13-dim aux + ensemble → completeness curve — the defensible
-   sensitivity number CV-AUC can't give); (b) an FPP/NFPP shortlist run
-   (`validate_candidates.py --insecure-trilegal`). Optional review gaps here:
-   ephemeris-match test, statistical-bootstrap FA (DV §3.5).
+3. **Build the validation runners against the served model.**
+   (a) ~~injection-recovery runner~~ **DONE 2026-07-25** — 50% completeness at
+   S/N ≈ 15, 90% at ≈ 44 (baseline-corrected); see the section below.
+   (b) **NEXT — the FPP/NFPP shortlist run.** `score_candidates.py` first
+   (~4,685 TESS candidates, ~45 min, resumable, checkpoints every 25 rows),
+   then `validate_candidates.py --insecure-trilegal` — minutes per target, so
+   terminal-first. Commands in "Step 3(b) — how to run it" below. Optional
+   review gaps still open here: ephemeris-match test, statistical-bootstrap FA
+   (DV §3.5).
 4. **Step 3 — since-confirmed holdout eval.** Data-gated: needs a few weekly
    Saturday refreshes to accumulate flips, then run eval_since_confirmed.py.
-5. **Step 4 — tidy sweep.** score_candidates.py still builds legacy 9-dim aux
-   (rework to share the 13-dim path before the next shortlist run); stale
-   docstrings.
+   **The clock starts 2026-07-25** — that is the first Saturday the cron
+   actually published, so earlier runs accumulated nothing.
+5. **Step 4 — tidy sweep.** The aux unification landed (`78b37a2`) and
+   `score_candidates.py` is rebuilt on it. What remains is the numbered list in
+   "Still open" at the end of this file — `preprocess_only.py` first, it can
+   still silently destroy the data-of-record — plus stale docstrings.
 6. **FINAL — UI/UX redesign (the locked last step; do NOT do it in passing).**
    Mission Control aesthetic, **manus** north star (source ZIP `~/Downloads/
    Exoplanet Hunter UI Webpage Design for Vetting Console.zip`; Tailwind v4 +
@@ -663,3 +669,146 @@ instead of 26.4%) if you want a cleaner run rather than a corrected one.
 path bypasses activation entirely, verified: `exoplanet_hunter` resolved to
 `/Users/ollie/Project/v2/pipeline/src/`, PYTHONPATH unset. This is exactly why
 the commands use the full path rather than relying on `conda activate`.
+
+## Audit sessions reviewed and committed (2026-07-25, later)
+
+Commits `1431660`..`c41fa62`. Two audit sessions (security, V1-remnants) had
+left work uncommitted with their findings unwritten. Every claim was
+re-derived before committing; the notes below are what survived checking, not
+what was reported. **Serving still `ca906040` (9-dim) on Fly — untouched.**
+215 tests green, tree clean.
+
+**Credentials never leaked, and now cannot.** `.dvc/config.local` holds the
+live R2 keys. It has never been committed — no blob of that name in any of the
+137 commits across all refs, and the key id and secret appear in zero commits.
+The Dockerfile does a targeted `COPY .dvc/config`, so it never reached an image
+layer either. The real exposure was narrower and real: `fly deploy` tars the
+whole build context to the remote builder, and `.dockerignore` excluded
+`.dvc/cache/` and `.dvc/tmp/` but not `config.local`. Now excluded.
+
+**The `inf` claim is true, and worse than "rejects bad input".** Measured
+against the pre-fix signature: `inf`, `Infinity` and `1e400` all satisfy a bare
+`gt=0` and reach the handler (`nan` was already rejected — `nan > 0` is false).
+An inf period is not a crash, it is a silent one: `((t - t0 + P/2) % P) / P`
+leaves *every* cadence non-finite, so the phase fold has zero usable points.
+`tic_id` was likewise unbounded — `/score/-1` and a 20-digit id both reached
+MAST and the manifest.
+
+**The cache race is real but needs help to show.** A plain contended loop finds
+nothing, because CPython's 5 ms switch interval lets a short check-then-act
+finish before preemption. At `sys.setswitchinterval(1e-6)` and 320k iterations
+the pre-fix idiom gives **2,276 KeyErrors and 1,605 RuntimeErrors, and breaches
+the 128 cap (134 entries)**; the locked version, zero and 128. Real requests
+interleave on I/O, so production has the preemption points this had to force.
+Worth knowing for the next time a lock looks speculative.
+
+**Found in review, not by either audit: the 404 leaked paths too.** Both audits
+redacted the 503 bodies and stopped. But `score.py` did `detail=str(exc)` on
+`NoLightCurveError`, whose message interpolates `DownloadResult.reason`, and
+several reasons in `download.py` interpolate the underlying exception —
+`download error: {exc}`, `fits write error: {exc}`. An `OSError` carries the
+absolute path it failed on. Reproduced end to end: an ENOSPC returns
+`/srv/data/raw/.lightkurve/...` in the response body. Redacted at the boundary,
+keeping the diagnosis and any MAST URL.
+
+**`render_vetting.py` is alive; the loose end was a wrong column, not a dead
+script.** Its input is `results/candidates_scored.parquet` from
+`score_candidates.py` — exactly what step 3(b) produces. What was dead is the
+branch preferring `results/discovery_shortlist.parquet`, from V1's
+`discovery_shortlist.py`: that script lives only on V1's `main` and was never
+ported (`git cat-file -e v2:scripts/discovery_shortlist.py` exits 128, `main`
+exits 0), so nothing can write that artefact. The enrichment it carried was
+*wrong*, not merely unreachable: the figure read `row["TFOPWG Disposition"]`,
+ExoFOP's raw header, but the ingest renames it to `disposition`. On the live
+catalogue the old key returns None on all 7,149 rows and the new one returns PC
+(4,685) / CANDIDATE (2,464) — **every vetting figure v2 has ever rendered had a
+blank TFOPWG subtitle.**
+
+**Test hygiene worth keeping:** the API tests share a process-lifetime response
+cache, so a TIC scored by one test was served from cache to the next and never
+reached its stub. The autouse fixture now clears it. This is what made two new
+404 tests pass alone and fail in suite.
+
+### Still open — reported by the audits, deliberately not applied
+
+Verified as still true after `78b37a2`. In rough priority:
+
+1. **`preprocess_only.py` can silently destroy the data-of-record** — the same
+   class as this morning's refresh clobber, still live. It writes
+   `LEGACY_AUX_DIM` (9) into `data/processed/views.npz` where
+   `build_dataset.py` writes `TRAINING_AUX_DIM` (13), and it is now the *only*
+   script that bypasses `build_labels_from_cfg`, hand-rolling a
+   `CatalogRequest` with no `n_confirmed_k2`/`n_false_pos_k2` — so it drops all
+   530 K2 rows. `shard_views.py` then re-shards from `aux_features.shape[1]`
+   and the trainer trains happily. No error anywhere. It is a *documented
+   recovery script*, which is the dangerous part.
+2. **`force_download=true` is an unauthenticated remote disk-fill primitive** —
+   bypasses both the response cache and the FITS cache, ~116 MB staged per
+   request on a 44-sector target, staging never cleaned, no `[mounts]` in
+   `fly.toml` so it lands on ephemeral rootfs that `suspend` preserves. The
+   console never sends the parameter. Cleanest fix is to drop it from the HTTP
+   surface and keep it CLI-only.
+3. **9-dim promoted model vs 13-dim shards** crashes four scripts with a raw TF
+   trace (`make_performance_figures.py`, `uncertainty_eval.py`,
+   `export_predictions.py`, `recalibrate_run.py --rescore` — the documented
+   calibration-recovery path). Nothing guards the mismatch.
+4. **`score_target.py` is the last hand-rolled aux implementation** — still
+   capped at 9 dims (`bundle.get("aux_dim", 8)`, `if aux_dim >= 9`), never
+   imports `build_aux_row`. Breaks the moment a 13-dim model is promoted.
+5. Smaller: one `/score` request can hold the only scoring slot for minutes
+   with no timeout (`force_bls` + `include_periodogram` runs two full BLS
+   passes under `_score_lock`, `hard_limit = 25`); `/candidates.csv` has no row
+   cap (3.5 MB/request, no cache); `/healthz` trusts `registry.json` alone and
+   can report healthy on a machine whose artefacts never pulled; `make
+   data-push`/`data-pull` still shell out to a bare `dvc`; `promotion_gate.py
+   --models-dir` is half-honoured (`promotion.py:107` opens `cv_summary`
+   relative to cwd); the flow's `train()` runs without a data group so MLflow
+   names a `full` build `cnn-cv-default`; `ci.yml` lacks the catalogue/promotion
+   gate jobs its own trailing comment promises, so "gates are the same code CI
+   runs" is false — CI runs ruff + pytest only.
+
+Housekeeping the security audit raised, none of it code: `chmod 600
+.dvc/config.local` (currently 0644); `DVC_NO_ANALYTICS=1` in the Dockerfile
+(the container phones home per cold start); check Cloudflare R2 → bucket →
+Settings that the Public Development URL reads "Not enabled" (the S3 endpoint
+refuses anonymous access, but an `r2.dev` binding is invisible from outside);
+add "fetch all branches first" to the `dvc gc -c --all-commits` recipe in
+`docs/OPERATING.md`, since it reads local git history only. Disclosure: that
+audit made three live verification requests to the production API, which added
+three junk entries to the download manifest on the Fly machine's ephemeral
+rootfs; they clear on the next full restart.
+
+## Step 3(b) — how to run it
+
+Nothing has been run yet: there is no `results/candidates_scored.parquet` and
+no `outputs/score-candidates.log`. Two stages, both terminal-first (the second
+is minutes per target).
+
+Stage 1 — score the TESS candidates. Hydra-style `key=value`, **not** `--out`.
+~4,685 rows, ~45 min, resumable, checkpoints every 25 rows:
+
+```bash
+caffeinate -dis /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python \
+  pipeline/scripts/score_candidates.py limit_mission=TESS \
+  2>&1 | tee outputs/score-candidates.log
+```
+
+Stage 2 — FPP/NFPP on the top of that shortlist. argparse flags here:
+
+```bash
+caffeinate -dis /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python \
+  pipeline/scripts/validate_candidates.py \
+  --candidates data/labels/candidates.parquet \
+  --shortlist results/candidates_scored.parquet \
+  --top 20 --out results/candidates_validated.csv --insecure-trilegal \
+  2>&1 | tee outputs/validate-candidates.log
+```
+
+`--insecure-trilegal` is needed because stev.oapd.inaf.it ships a broken cert
+chain; only RA/Dec is sent. **Read NFPP as the headline and FPP as
+directional** — NFPP reproduced the paper exactly on WASP-156b (0.00), FPP did
+not (0.75 vs 0.33), and that gap is raw-SAP light-curve prep, not a bug.
+
+Then `render_vetting.py` draws the six-panel figures from the same scored
+parquet — it now reads the ingest's `disposition`, so the TFOPWG subtitle
+finally populates.
