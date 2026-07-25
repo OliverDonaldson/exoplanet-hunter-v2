@@ -13,11 +13,14 @@ process lifetime. 503 until a model has been promoted to the registry;
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi import Path as FastPath
 
 from app.schemas import (
     CentroidDiagnostics,
@@ -34,6 +37,7 @@ from app.schemas import (
 )
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 # Repo root both locally and in the container (/srv); override via env.
 _ROOT = Path(__file__).resolve().parents[3]
@@ -45,8 +49,37 @@ _scorer = None
 
 # Process-lifetime response cache — a score is deterministic given the
 # ephemeris and n_mc, and the console re-requests a target on every click.
+# Every read and write goes through _cache_lock: the check-then-pop and the
+# evict-then-insert are both multi-step, and two request threads interleaving
+# in either raises (KeyError, or RuntimeError from the eviction's iterator).
 _cache: dict[tuple, ScoreResponse] = {}
+_cache_lock = threading.Lock()
 _CACHE_MAX = 128
+
+# TIC IDs are positive and the catalogue's largest is ~2.05e9; this leaves an
+# order of magnitude of headroom while keeping an unbounded path segment from
+# reaching MAST and the download manifest. The float bounds are likewise far
+# above any real value (catalogue maxima: 8900 d period, 378 h duration) —
+# they exist to reject `inf`, which passes a bare `gt=0` and poisons the
+# phase-fold arithmetic.
+_MAX_TIC_ID = 10_000_000_000
+_MAX_PERIOD_DAYS = 100_000.0
+_MAX_DURATION_HOURS = 100_000.0
+_MAX_ABS_BTJD = 1_000_000.0
+
+# Absolute POSIX paths, but not the path part of a URL (lookbehind rejects a
+# preceding word char or slash) — MAST URLs in a failure reason are public and
+# worth keeping.
+_ABS_PATH = re.compile(r"(?<![\w/])/(?:[\w.\-@+]+/)*[\w.\-@+]+")
+
+
+def _redact_paths(message: str) -> str:
+    """Strip server paths from a client-facing message.
+
+    Download failures interpolate the underlying OSError, which carries the
+    absolute path it failed on.
+    """
+    return _ABS_PATH.sub("<path>", message)
 
 
 def get_scorer():
@@ -69,10 +102,17 @@ def get_scorer():
 
 @router.get("/score/{tic_id}", response_model=ScoreResponse)
 def score_target(
-    tic_id: int,
-    period_days: float | None = Query(None, gt=0, description="Override BLS period search"),
-    t0_btjd: float | None = Query(None, description="Transit epoch (BTJD); requires period_days"),
-    duration_hours: float | None = Query(None, gt=0),
+    tic_id: int = FastPath(..., ge=1, le=_MAX_TIC_ID),
+    period_days: float | None = Query(
+        None, gt=0, le=_MAX_PERIOD_DAYS, description="Override BLS period search"
+    ),
+    t0_btjd: float | None = Query(
+        None,
+        ge=-_MAX_ABS_BTJD,
+        le=_MAX_ABS_BTJD,
+        description="Transit epoch (BTJD); requires period_days",
+    ),
+    duration_hours: float | None = Query(None, gt=0, le=_MAX_DURATION_HOURS),
     n_mc: int = Query(20, ge=10, le=500, description="MC-Dropout samples"),
     force_download: bool = Query(False),
     force_bls: bool = Query(
@@ -86,19 +126,25 @@ def score_target(
     from exoplanet_hunter.scoring.diagnostics import ODD_EVEN_TIMING_SIGMA
 
     cache_key = (tic_id, period_days, t0_btjd, duration_hours, n_mc, force_bls, include_periodogram)
-    if not force_download and cache_key in _cache:
-        # Touch on hit: re-insertion moves the key to the end of the dict's
-        # insertion order, so eviction below drops the least-recently *used*
-        # entry, not merely the oldest.
-        _cache[cache_key] = _cache.pop(cache_key)
-        return _cache[cache_key]
+    if not force_download:
+        with _cache_lock:
+            # Touch on hit: re-insertion moves the key to the end of the dict's
+            # insertion order, so eviction below drops the least-recently *used*
+            # entry, not merely the oldest.
+            hit = _cache.pop(cache_key, None)
+            if hit is not None:
+                _cache[cache_key] = hit
+                return hit
 
     try:
         scorer = get_scorer()
     except FileNotFoundError as exc:
+        # The exception carries the registry's absolute path; the client only
+        # needs to know the model isn't promoted yet.
+        log.warning("[score] no promoted model: %s", exc)
         raise HTTPException(
             status_code=503,
-            detail=f"No promoted model in the registry yet: {exc}",
+            detail="No promoted model in the registry yet.",
         ) from exc
 
     try:
@@ -114,7 +160,8 @@ def score_target(
                 include_periodogram=include_periodogram,
             )
     except NoLightCurveError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        log.info("[score] tic=%s no light curve: %s", tic_id, exc)
+        raise HTTPException(status_code=404, detail=_redact_paths(str(exc))) from exc
 
     response = ScoreResponse(
         tic_id=outcome.tic_id,
@@ -230,7 +277,8 @@ def score_target(
         model_version=outcome.model_version,
         n_mc_samples=outcome.n_mc_samples,
     )
-    if len(_cache) >= _CACHE_MAX:
-        _cache.pop(next(iter(_cache)))
-    _cache[cache_key] = response
+    with _cache_lock:
+        while len(_cache) >= _CACHE_MAX:
+            _cache.pop(next(iter(_cache)))
+        _cache[cache_key] = response
     return response

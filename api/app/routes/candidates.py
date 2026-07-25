@@ -11,6 +11,7 @@ scores.parquet joined onto the catalogue.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from app.schemas import CandidatesPage
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 # repo-root/data/catalogue/candidates.parquet, both locally and in the
 # container (where the repo root is /srv); override with CATALOGUE_PATH.
@@ -51,12 +53,12 @@ _cache: dict[str, tuple[float, pd.DataFrame]] = {}
 def _load_catalogue() -> pd.DataFrame:
     path = Path(os.environ.get("CATALOGUE_PATH", _DEFAULT_PATH))
     if not path.exists():
+        # The server's absolute layout is the operator's business, not the
+        # client's — the path goes to the log, the remedy to the response.
+        log.warning("[candidates] catalogue missing at %s", path)
         raise HTTPException(
             status_code=503,
-            detail=(
-                f"Candidate catalogue not found at {path}. "
-                "Run pipeline/scripts/ingest_exofop.py first."
-            ),
+            detail="Candidate catalogue is not available on this server yet.",
         )
     mtime = path.stat().st_mtime
     key = str(path)
