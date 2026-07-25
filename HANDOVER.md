@@ -453,15 +453,9 @@ correct + serving-safe):**
 
 ## Final steps — the path to done (in order)
 
-1. **Resolve the 2d rejection + reconcile data (immediate).** Read the fold
-   tables above; decide keep-vs-revert the Step-2 data pipeline (**lean KEEP** —
-   changes are correct, serving unaffected via the aux_dim branch). The
-   `data/*.dvc` pointers have sat staged across the rejected runs — reconcile:
-   on-disk data is now the K2-inclusive 13-dim build; either commit the pointer
-   bumps (data-of-record = K2 build, model still ca906040) or `git restore` them.
-2. **Propagate 2a to production.** `ingest_exofop` + `dvc push` so the live
-   console shows insolation/HZ; regenerate the data_provenance figures (K2 = a
-   third ecliptic sky band).
+1. ~~**Resolve the 2d rejection + reconcile data.**~~ **DONE 2026-07-25** — see
+   the section below.
+2. ~~**Propagate 2a to production.**~~ **DONE 2026-07-25** — see below.
 3. **Build the validation runners against the served model.** (a) the
    injection-recovery runner on eval/injection_recovery (drive real LCs through
    preprocess + 13-dim aux + ensemble → completeness curve — the defensible
@@ -484,3 +478,67 @@ correct + serving-safe):**
    full sweep), study manus transitions, drop the two lens-flare glints, make
    Upload first-class (small backend: FITS→preprocess→score; RA/Dec→MAST cone-
    search→TIC→score).
+
+## Rejection resolved + weekly-refresh data bug (2026-07-25)
+
+Commits `0898939`..`f640318`. **Serving still `ca906040` (9-dim) on Fly —
+untouched, nothing deployed.** 173 tests green, tree clean, R2 in sync.
+
+**Verdict on the 2d rejection: KEEP, and the null is real.** The fold-table
+Δ (−0.00046 AUC) is **0.10 standard errors** — Welch p=0.92 across all five
+metrics. Better than the fold table, a *paired* comparison on the 4,610
+targets both runs scored out-of-fold:
+
+| benchmark | 856872ad (13-dim +K2) | ca906040 (9-dim) | Δ |
+|---|---|---|---|
+| pooled OOF AUC, **raw** scores | 0.95208 | 0.95195 | **+0.00014** (95% CI −0.0038…+0.0043) |
+| — TESS rows only (n=2,372) | 0.90566 | 0.90439 | +0.00127 |
+| — Kepler rows only (n=2,238) | 0.98861 | 0.98943 | −0.00082 |
+
+The two models are **indistinguishable in discrimination**. Method note worth
+keeping: on *calibrated* probabilities the same paired test reads −0.00371
+with a CI excluding zero — that is an **artifact of pooling OOF probabilities
+across folds with different Platt (a,b)**, not a real regression. Compare raw
+scores when comparing runs; anything that pools calibrated OOF across folds
+inherits this.
+
+**K2 was not the problem — the handover's "K2 is harder" guess was wrong.**
+K2 is the *easiest* slice: AUC **0.9606** and Brier **0.0646** on its 527 rows,
+vs 0.9570 / 0.0804 on TESS+Kepler. Including K2 *raised* the headline slightly
+(all-rows 0.95768 vs TESS+Kepler-only 0.95700). Where the real headroom is:
+**TESS AUC 0.906 vs Kepler 0.989** — an 8-point gap, on the mission we actually
+serve. That, not more archives, is the lead for any future model work.
+
+**Found while reconciling: the weekly refresh was silently destroying the
+data-of-record.** Today's 09:00 Saturday cron rewrote `data/labels/` from the
+5,686-row K2 build to a **1,000-row TESS-only** catalogue.
+
+- Cause A — `refresh_label_catalogue()` hand-rolled
+  `CatalogRequest(500, 500, seed=42)` and ignored `data_config` completely, so
+  `--data-config full` in the plist was decorative. Only
+  `preprocess_and_shard` ever honoured it, and that runs only on a retrain.
+  Fixed: stage 1 is now one implementation (`build_labels_from_cfg`) behind
+  `pipeline/scripts/refresh_labels.py`, called with the same data group; the
+  flow default follows argparse to `"full"`. Regression-tested against both
+  config groups.
+- Cause B — `publish()` shelled out to a bare `"dvc"`, which is not on
+  launchd's PATH: every cron run has died there with `FileNotFoundError` and
+  **has never versioned or pushed**. Fixed (resolve beside `sys.executable`).
+  This failure is the only reason the clobber never reached R2 — the tiny
+  catalogue was never `dvc add`ed, so the staged pointers still described the
+  K2 build and it restored cleanly from cache.
+- The gates did not catch a catalogue shrinking 82%; `decide_training` saw
+  "0 new" and skipped. **A shrink guard in validate_data.py is worth adding.**
+
+**Reconciled + 2a propagated.** Data-of-record is now the K2 build (labels
+5,686 = 2,656 TESS / 2,500 Kepler / 530 K2; views + tfrecords 5,380 examples)
+with today's fresher ExoFOP pull, pushed to R2 and pointers committed. The
+candidate catalogue carries the 2a POE columns (`insolation_earth`,
+`hz_inner_au`, `hz_outer_au`; 11,224 rows) — today's cron had already run
+`ingest_exofop` with the POE code before dying at publish, so only the push
+was outstanding. Provenance figures regenerated with the K2 ecliptic band, now
+from a committed generator (`pipeline/scripts/plot_provenance.py`) instead of
+ad-hoc code.
+
+**Not done here:** the commits are local — `git push v2origin v2:main` is
+outstanding. Serving needs no change.
