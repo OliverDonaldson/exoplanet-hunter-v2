@@ -93,10 +93,13 @@ def select_hosts(
     max_host_depth_ppm: float,
     allow_download: bool,
     seed: int,
+    host_label: int | None = None,
 ) -> pd.DataFrame:
     """TESS hosts shallow enough that their own signal will not dominate."""
     df = pd.read_parquet(labels_path)
     df = df[df["mission"] == "TESS"]
+    if host_label is not None:
+        df = df[df["label"] == host_label]
     df = df[df["depth"].fillna(np.inf) * 1e6 <= max_host_depth_ppm]
     if not allow_download:
         cached = {int(p.stem.split("_")[1]) for p in raw_dir.glob("tic_*.fits")}
@@ -128,18 +131,44 @@ def host_baseline(scorer: TargetScorer, tic_id: int) -> tuple[np.ndarray, np.nda
 
 def report(
     results: pd.DataFrame, edges: np.ndarray, levels: np.ndarray | None = None
-) -> pd.DataFrame:
-    """Recovered fraction per S/N bin; `levels` labels bins by their requested S/N."""
+) -> tuple[pd.DataFrame, float]:
+    """Recovered fraction per S/N bin, plus the control-arm baseline.
+
+    Hosts are dispositioned targets, not blank sky, so a run with no injected
+    signal still passes some fraction — the model reads the host's own transit
+    and stellar aux. The control arm (snr_target == 0, depth 0) measures that
+    directly; `completeness_corrected` rescales the raw fraction onto it, so
+    0 means "no better than the host alone".
+    """
     scored = results.dropna(subset=["snr"])
+    controls = scored[scored["snr_target"] == 0]
+    baseline = float(controls["recovered"].mean()) if len(controls) else 0.0
+
+    graded = scored[scored["snr_target"] > 0]
     centers, fraction, count = completeness_curve(
-        scored["snr"].to_numpy(), scored["recovered"].to_numpy(), edges
+        graded["snr"].to_numpy(), graded["recovered"].to_numpy(), edges
     )
     if levels is not None and len(levels) == len(centers):
         centers = np.sort(np.asarray(levels, dtype=float))
-    return pd.DataFrame({"snr": centers, "completeness": fraction, "n": count})
+    corrected = (
+        np.clip((fraction - baseline) / (1.0 - baseline), 0.0, 1.0) if baseline < 1 else fraction
+    )
+    return (
+        pd.DataFrame(
+            {
+                "snr": centers,
+                "completeness": fraction,
+                "completeness_corrected": corrected,
+                "n": count,
+            }
+        ),
+        baseline,
+    )
 
 
-def plot_completeness(curve: pd.DataFrame, out: Path, run_id: str, threshold: float) -> None:
+def plot_completeness(
+    curve: pd.DataFrame, out: Path, run_id: str, threshold: float, baseline: float = 0.0
+) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -147,7 +176,29 @@ def plot_completeness(curve: pd.DataFrame, out: Path, run_id: str, threshold: fl
 
     ok = curve["n"] > 0
     fig, ax = plt.subplots(figsize=(7.5, 4.6))
-    ax.plot(curve.loc[ok, "snr"], curve.loc[ok, "completeness"], "o-", color="royalblue")
+    ax.plot(
+        curve.loc[ok, "snr"],
+        curve.loc[ok, "completeness"],
+        "o-",
+        color="royalblue",
+        label="raw",
+    )
+    if baseline > 0:
+        ax.plot(
+            curve.loc[ok, "snr"],
+            curve.loc[ok, "completeness_corrected"],
+            "s--",
+            color="darkorange",
+            label="baseline-corrected",
+        )
+        ax.axhline(
+            baseline,
+            color="crimson",
+            lw=0.9,
+            ls=":",
+            label=f"control arm, no injection ({baseline:.2f})",
+        )
+        ax.legend(fontsize=8, loc="lower right")
     for x, y, n in curve.loc[ok, ["snr", "completeness", "n"]].itertuples(index=False):
         ax.annotate(
             f"{int(n)}",
@@ -189,6 +240,19 @@ def main() -> None:
     )
     parser.add_argument("--max-host-depth-ppm", type=float, default=3000.0)
     parser.add_argument("--allow-download", action="store_true", help="hosts need not be cached")
+    parser.add_argument(
+        "--host-label",
+        type=int,
+        choices=[0, 1],
+        default=None,
+        help="restrict hosts to false positives (0) or planet hosts (1)",
+    )
+    parser.add_argument(
+        "--no-controls",
+        dest="controls",
+        action="store_false",
+        help="skip the depth-0 control arm that measures the host-only pass rate",
+    )
     parser.add_argument("--n-mc", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -200,6 +264,7 @@ def main() -> None:
         max_host_depth_ppm=args.max_host_depth_ppm,
         allow_download=args.allow_download,
         seed=args.seed,
+        host_label=args.host_label,
     )
     if hosts.empty:
         raise SystemExit("no eligible hosts — relax --max-host-depth-ppm or pass --allow-download")
@@ -208,12 +273,14 @@ def main() -> None:
         models_dir=Path("models"), data_raw=args.raw, candidates_path=args.catalogue
     )
     run_id = scorer.ensemble.run_id
-    n_planned = len(hosts) * len(args.periods) * len(args.snr_grid)
+    levels_with_controls = ([0.0] if args.controls else []) + list(args.snr_grid)
+    n_planned = len(hosts) * len(args.periods) * len(levels_with_controls)
     log.info(
-        "[injection] %d hosts x %d periods x %d S/N levels = %d injections, run %s (aux_dim %s)",
+        "[injection] %d hosts x %d periods x %d levels%s = %d injections, run %s (aux_dim %s)",
         len(hosts),
         len(args.periods),
-        len(args.snr_grid),
+        len(levels_with_controls),
+        " (incl. control)" if args.controls else "",
         n_planned,
         run_id[:8],
         scorer.ensemble.aux_dim,
@@ -257,7 +324,7 @@ def main() -> None:
                 )
                 continue
 
-            for snr_target in args.snr_grid:
+            for snr_target in levels_with_controls:
                 if (tic_id, period, snr_target) in seen:
                     continue
                 depth_ppm = depth_for_snr(snr_target, cdpp, n_tr)
@@ -330,10 +397,11 @@ def main() -> None:
 
     results = pd.read_parquet(args.out)
     levels = np.asarray(args.snr_grid, dtype=float)
-    curve = report(results, snr_bin_edges(levels), levels)
+    curve, baseline = report(results, snr_bin_edges(levels), levels)
     threshold = float(results["threshold"].median())
     log.info("[injection] completeness by S/N bin:\n%s", curve.to_string(index=False))
-    plot_completeness(curve, args.figure, run_id, threshold)
+    log.info("[injection] control arm (no injection) passes %.3f of the time", baseline)
+    plot_completeness(curve, args.figure, run_id, threshold, baseline)
 
 
 if __name__ == "__main__":
