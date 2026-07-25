@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -30,6 +33,41 @@ log = get_logger(__name__)
 
 #: Concurrent quarter-file fetches per Kepler target (polite to the archive).
 _KEPLER_FETCH_WORKERS = 6
+
+
+@contextmanager
+def _lightkurve_stdout_swap_disabled() -> Iterator[None]:
+    """Neutralise lightkurve's ``@suppress_stdout`` for the duration.
+
+    It decorates ``SearchResult.download``/``download_all`` and saves/restores
+    the *process-global* ``sys.stdout`` around each call. Under concurrent
+    workers the pairs interleave: one thread saves another's devnull as the
+    "original", the owning thread's ``with open(...)`` closes it, and the
+    restore leaves ``sys.stdout`` pointing at a closed file for the rest of the
+    process. Every later write then raises ``ValueError: I/O operation on
+    closed file`` — including from inside ``download_all``, which turns good
+    downloads into "download error" failures, and from tqdm's flush, which
+    aborts the run outright.
+
+    ``functools.wraps`` records the undecorated functions on ``__wrapped__``,
+    so the suppression can simply be lifted while threads are running.
+    """
+    from lightkurve.search import SearchResult
+
+    patched: dict[str, Any] = {}
+    for name in ("download", "download_all"):
+        method = getattr(SearchResult, name, None)
+        original = getattr(method, "__wrapped__", None)
+        if original is not None:
+            patched[name] = method
+            setattr(SearchResult, name, original)
+    real_stdout = sys.stdout
+    try:
+        yield
+    finally:
+        for name, method in patched.items():
+            setattr(SearchResult, name, method)
+        sys.stdout = real_stdout
 
 
 # ----------------------------------------------------------------------------
@@ -545,7 +583,10 @@ class LightCurveDownloader:
             ]
         else:
             by_job: dict[tuple[str, int], DownloadResult] = {}
-            with ThreadPoolExecutor(max_workers=workers) as pool:
+            with (
+                _lightkurve_stdout_swap_disabled(),
+                ThreadPoolExecutor(max_workers=workers) as pool,
+            ):
                 futures = {
                     pool.submit(self.download_one, tid, mission=mis, force=force): (mis, tid)
                     for mis, tid in jobs

@@ -158,3 +158,79 @@ def test_k2_mission_config_uses_epic_prefix_and_shared_cache(tmp_path):
     cfg = dl._MISSION_CFG["K2"]
     assert (cfg["search"], cfg["author"], cfg["mission"]) == ("EPIC", "K2", "K2")
     assert dl._target_path(211390903, mission="K2") == tmp_path / "epic_211390903.fits"
+
+
+def test_parallel_download_leaves_stdout_usable(tmp_path, monkeypatch):
+    """lightkurve's @suppress_stdout swaps a process-global under threads.
+
+    Two workers interleave its save/restore, one closes the devnull the other
+    saved as "original", and sys.stdout is left closed for the rest of the
+    process — which turned good downloads into "download error" and aborted
+    the run at tqdm's flush.
+    """
+    import os
+    import sys
+    import threading
+    from functools import wraps
+
+    from exoplanet_hunter.data.download import _lightkurve_stdout_swap_disabled
+
+    # lightkurve/utils.py:558 verbatim — the decorator under test.
+    def suppress_stdout(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            with open(os.devnull, "w") as devnull:
+                old_out = sys.stdout
+                sys.stdout = devnull
+                try:
+                    return f(*args, **kwargs)
+                finally:
+                    sys.stdout = old_out
+
+        return wrapper
+
+    state: dict[str, object] = {}
+
+    class FakeSearchResult:
+        def download_all(self, idx):  # decorated below, like SearchResult
+            # Both threads must have swapped before either restores; then
+            # thread 0 must fully exit (restoring, and closing its devnull)
+            # before thread 1 restores. That ordering is the bug.
+            state["swapped"].wait(timeout=5)
+            if idx == 1:
+                state["first_done"].wait(timeout=5)
+            return "lc"
+
+    FakeSearchResult.download_all = suppress_stdout(FakeSearchResult.download_all)
+
+    fake_module = type(sys)("lightkurve.search")
+    fake_module.SearchResult = FakeSearchResult
+    monkeypatch.setitem(sys.modules, "lightkurve.search", fake_module)
+
+    real_stdout = sys.stdout
+
+    def race() -> None:
+        state["swapped"] = threading.Barrier(2)
+        state["first_done"] = threading.Event()
+        first = threading.Thread(target=FakeSearchResult().download_all, args=(0,))
+        second = threading.Thread(target=FakeSearchResult().download_all, args=(1,))
+        first.start()
+        second.start()
+        first.join(timeout=5)
+        state["first_done"].set()
+        second.join(timeout=5)
+
+    # Unguarded: the second thread restores the devnull the first just closed.
+    race()
+    assert sys.stdout.closed, "expected the unguarded race to close sys.stdout"
+    sys.stdout = real_stdout
+
+    # Guarded: suppression is lifted, so nothing swaps the global at all.
+    with _lightkurve_stdout_swap_disabled():
+        race()
+        assert not sys.stdout.closed
+
+    assert sys.stdout is real_stdout
+    assert not sys.stdout.closed
+    # The decorator is put back afterwards.
+    assert hasattr(FakeSearchResult.download_all, "__wrapped__")
