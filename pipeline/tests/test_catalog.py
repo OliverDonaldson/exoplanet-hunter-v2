@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from exoplanet_hunter.data import catalog as catalog_mod
@@ -11,6 +13,7 @@ from exoplanet_hunter.data.catalog import (
     _query_k2,
     _stable_sample,
     build_label_catalog,
+    request_from_cfg,
 )
 
 
@@ -171,3 +174,26 @@ def test_build_includes_k2_when_requested(monkeypatch, tmp_path):
     k2 = cat[cat["mission"] == "K2"]
     assert set(k2["tic_id"]) == {500, 501}  # CP + FP trained; PC (502) held out
     assert 502 not in set(cat["tic_id"])
+
+
+def _compose(data_group: str):
+    from hydra import compose, initialize_config_dir
+
+    conf_dir = Path(__file__).resolve().parents[1] / "conf"
+    with initialize_config_dir(config_dir=str(conf_dir), version_base="1.3"):
+        return compose(config_name="config", overrides=[f"data={data_group}"]).data
+
+
+def test_request_from_cfg_carries_kepler_and_k2_caps():
+    # The refresh flow used to hand-roll this and dropped every non-TESS
+    # mission, silently shrinking the data-of-record on each weekly run.
+    req = request_from_cfg(_compose("full"))
+    assert req.n_confirmed_kepler > 0 and req.n_false_pos_kepler > 0
+    assert req.n_confirmed_k2 > 0 and req.n_false_pos_k2 > 0
+    assert req.n_confirmed > 1000  # uncapped TESS pool, not the 500 default
+
+
+def test_request_from_cfg_default_group_is_tess_only():
+    req = request_from_cfg(_compose("default"))
+    assert (req.n_confirmed, req.n_false_pos) == (500, 500)
+    assert req.n_confirmed_kepler == req.n_confirmed_k2 == 0

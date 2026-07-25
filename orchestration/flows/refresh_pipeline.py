@@ -38,6 +38,9 @@ from prefect import flow, get_run_logger, task
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON = sys.executable
+# launchd runs the weekly refresh with a bare PATH, so a plain "dvc" is not
+# resolvable — take the one beside the interpreter running this flow.
+DVC = shutil.which("dvc") or str(Path(PYTHON).parent / "dvc")
 
 EXOFOP_URLS = {
     "tois.csv": "https://exofop.ipac.caltech.edu/tess/download_toi.php?sort=toi&output=csv",
@@ -82,29 +85,18 @@ def ingest_candidate_catalogue() -> None:
 
 
 @task(retries=2, retry_delay_seconds=120)
-def refresh_label_catalogue() -> Path:
+def refresh_label_catalogue(data_config: str) -> Path:
     """Rebuild labels.parquet from the TAP services, keeping the previous
-    version aside for the leakage guard + trigger."""
+    version aside for the leakage guard + trigger.
+
+    Must run the *same* data group the build uses: a capped rebuild here
+    silently shrinks the data-of-record and starves the refresh trigger.
+    """
     labels = REPO_ROOT / "data" / "labels" / "labels.parquet"
     previous = labels.with_suffix(".previous.parquet")
     if labels.exists():
         shutil.copy(labels, previous)
-    # build_dataset stage 1 only would be ideal; the script is monolithic, so
-    # rebuild the catalogue via the library the same way it does.
-    _run(
-        [
-            PYTHON,
-            "-c",
-            "from pathlib import Path\n"
-            "from exoplanet_hunter.data.catalog import CatalogRequest, build_label_catalog\n"
-            "from exoplanet_hunter.data.exofop import enrich_catalog_snr\n"
-            "cat = build_label_catalog(CatalogRequest(n_confirmed=500, n_false_pos=500, seed=42),"
-            " out_dir=Path('data/labels'))\n"
-            "cat['mission'] = cat.get('mission', 'TESS')\n"
-            "cat = enrich_catalog_snr(cat, Path('data/catalogue/candidates.parquet'))\n"
-            "cat.to_parquet('data/labels/labels.parquet', index=False)\n",
-        ]
-    )
+    _run([PYTHON, "pipeline/scripts/refresh_labels.py", f"data={data_config}"])
     return previous
 
 
@@ -178,7 +170,7 @@ def publish() -> None:
 
     _run(
         [
-            "dvc",
+            DVC,
             "add",
             "data/exofop",
             "data/catalogue",
@@ -188,8 +180,8 @@ def publish() -> None:
         ]
     )
     for run_dir in publishable_cv_dirs(REPO_ROOT / "models"):
-        _run(["dvc", "add", str(run_dir.relative_to(REPO_ROOT))])
-    _run(["dvc", "push"])
+        _run([DVC, "add", str(run_dir.relative_to(REPO_ROOT))])
+    _run([DVC, "push"])
 
 
 # ------------------------------------------------------------------- flow --
@@ -200,11 +192,11 @@ def refresh_pipeline(
     min_new_labelled: int = 25,
     force_train: bool = False,
     train_enabled: bool = True,
-    data_config: str = "default",
+    data_config: str = "full",
 ) -> None:
     download_exofop_exports()
     ingest_candidate_catalogue()
-    previous = refresh_label_catalogue()
+    previous = refresh_label_catalogue(data_config)
     validation_gates(previous)
 
     if not train_enabled:

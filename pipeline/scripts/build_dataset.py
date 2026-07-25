@@ -24,9 +24,8 @@ import pandas as pd
 from omegaconf import DictConfig
 from tqdm.auto import tqdm
 
-from exoplanet_hunter.data.catalog import CatalogRequest, build_label_catalog
+from exoplanet_hunter.data.catalog import build_labels_from_cfg
 from exoplanet_hunter.data.download import LightCurveDownloader
-from exoplanet_hunter.data.exofop import enrich_catalog_snr
 from exoplanet_hunter.data.stellar import fetch_stellar_params
 from exoplanet_hunter.features.centroid import extract_centroid_offset
 from exoplanet_hunter.features.noise import pink_noise_snr
@@ -65,27 +64,13 @@ def main(cfg: DictConfig) -> None:
         )
 
     # --- Stage 1 — labelled catalogue ----------------------------------
-    catalog = build_label_catalog(
-        CatalogRequest(
-            n_confirmed=int(cfg.data.n_confirmed),
-            n_false_pos=int(cfg.data.n_false_pos),
-            n_confirmed_kepler=int(cfg.data.get("n_confirmed_kepler", 0)),
-            n_false_pos_kepler=int(cfg.data.get("n_false_pos_kepler", 0)),
-            n_confirmed_k2=int(cfg.data.get("n_confirmed_k2", 0)),
-            n_false_pos_k2=int(cfg.data.get("n_false_pos_k2", 0)),
-            seed=int(cfg.data.seed),
-        ),
-        out_dir=paths.data_labels,
-    )
-
-    # Ensure every row has a mission column (backward compat with old catalogs).
-    if "mission" not in catalog.columns:
-        catalog["mission"] = "TESS"
-
-    # Catalogue transit SNR kept as labels metadata (the aux vector now uses
+    # Catalogue transit SNR is kept as labels metadata (the aux vector now uses
     # the light-curve pink-noise SNR instead — see the aux comment below).
-    catalog = enrich_catalog_snr(catalog, paths.root / "data" / "catalogue" / "candidates.parquet")
-    catalog.to_parquet(paths.data_labels / "labels.parquet", index=False)
+    catalog = build_labels_from_cfg(
+        cfg.data,
+        paths.data_labels,
+        paths.root / "data" / "catalogue" / "candidates.parquet",
+    )
 
     # --- Stage 2 — download light curves -------------------------------
     kepler_dir = paths.data_raw_kepler if paths.data_raw_kepler != paths.data_raw else None

@@ -19,6 +19,7 @@ import hashlib
 import io
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import requests
@@ -83,6 +84,39 @@ class CatalogRequest:
     n_confirmed_k2: int = 0
     n_false_pos_k2: int = 0
     seed: int = 42
+
+
+def request_from_cfg(data_cfg: Any) -> CatalogRequest:
+    """Build a CatalogRequest from a Hydra `data` config group."""
+    return CatalogRequest(
+        n_confirmed=int(data_cfg.n_confirmed),
+        n_false_pos=int(data_cfg.n_false_pos),
+        n_confirmed_kepler=int(data_cfg.get("n_confirmed_kepler", 0)),
+        n_false_pos_kepler=int(data_cfg.get("n_false_pos_kepler", 0)),
+        n_confirmed_k2=int(data_cfg.get("n_confirmed_k2", 0)),
+        n_false_pos_k2=int(data_cfg.get("n_false_pos_k2", 0)),
+        seed=int(data_cfg.seed),
+    )
+
+
+def build_labels_from_cfg(
+    data_cfg: Any, labels_dir: Path, candidates_parquet: Path
+) -> pd.DataFrame:
+    """Rebuild labels.parquet from a Hydra `data` group (dataset build stage 1).
+
+    The single implementation: both build_dataset.py and the refresh flow call
+    this. A hand-rolled copy in the flow silently ignored `data=full` and
+    regressed the catalogue to the capped build on every weekly run.
+    """
+    from exoplanet_hunter.data.exofop import enrich_catalog_snr
+
+    catalog = build_label_catalog(request_from_cfg(data_cfg), out_dir=labels_dir)
+    # Backward compat with catalogs built before the mission column existed.
+    if "mission" not in catalog.columns:
+        catalog["mission"] = "TESS"
+    catalog = enrich_catalog_snr(catalog, candidates_parquet)
+    catalog.to_parquet(labels_dir / "labels.parquet", index=False)
+    return catalog
 
 
 def _tap_query(adql: str, fmt: str = "csv", max_retries: int = 3) -> pd.DataFrame:
