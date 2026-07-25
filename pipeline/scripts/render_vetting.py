@@ -37,13 +37,7 @@ def main(cfg: DictConfig) -> None:
     set_global_seed(int(cfg.seed))
     paths = ProjectPaths.from_cfg(cfg)
 
-    # Prefer the enriched discovery shortlist (has TFOPWG disposition + follow-ups).
-    # Fall back to the raw scored parquet if shortlist hasn't been built yet.
-    shortlist_path = paths.root / "results" / "discovery_shortlist.parquet"
     scored_path = paths.root / str(getattr(cfg, "out_path", "results/candidates_scored.parquet"))
-    if shortlist_path.exists():
-        scored_path = shortlist_path
-        log.info("[render-vetting] using enriched shortlist: %s", scored_path)
     out_dir = paths.results / "vetting"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,12 +140,11 @@ def main(cfg: DictConfig) -> None:
         fold_means = list(fold_means) if isinstance(fold_means, list | np.ndarray) else None
 
         out_file = out_dir / f"tic_{tic}_p{report.period:.3f}.png"
-        # Pull enrichment from shortlist if present.
-        disposition = row.get("TFOPWG Disposition")
-        if isinstance(disposition, float) and np.isnan(disposition):
+        # "disposition" is the ingest's name for ExoFOP's "TFOPWG Disposition";
+        # score_candidates.py carries it through to the scored parquet.
+        disposition = row.get("disposition")
+        if disposition is not None and pd.isna(disposition):
             disposition = None
-        n_followup = row.get("n_followup")
-        n_followup = int(n_followup) if n_followup is not None and pd.notna(n_followup) else None
         try:
             vetting_figure(
                 raw,
@@ -164,7 +157,6 @@ def main(cfg: DictConfig) -> None:
                 mc_disagree=row.get("mc_disagree"),
                 mission=mission,
                 disposition=disposition,
-                n_followup=n_followup,
             )
             rendered.append(
                 {
