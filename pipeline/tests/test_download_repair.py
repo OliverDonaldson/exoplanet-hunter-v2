@@ -168,6 +168,7 @@ def test_parallel_download_leaves_stdout_usable(tmp_path, monkeypatch):
     process — which turned good downloads into "download error" and aborted
     the run at tqdm's flush.
     """
+    import io
     import os
     import sys
     import threading
@@ -189,15 +190,20 @@ def test_parallel_download_leaves_stdout_usable(tmp_path, monkeypatch):
 
         return wrapper
 
-    state: dict[str, object] = {}
+    state: dict[str, threading.Event] = {}
 
     class FakeSearchResult:
         def download_all(self, idx):  # decorated below, like SearchResult
-            # Both threads must have swapped before either restores; then
-            # thread 0 must fully exit (restoring, and closing its devnull)
-            # before thread 1 restores. That ordering is the bug.
-            state["swapped"].wait(timeout=5)
-            if idx == 1:
+            # The bug needs a specific order, and *both* halves of it matter:
+            # thread 0 must swap before thread 1 saves (so 1 saves 0's devnull),
+            # and thread 0 must fully exit — restoring, and closing that devnull
+            # — before thread 1 restores it. Sequencing only the second half
+            # leaves the first to chance, which is a coin flip on CI.
+            if idx == 0:
+                state["first_swapped"].set()
+                state["second_swapped"].wait(timeout=5)
+            else:
+                state["second_swapped"].set()
                 state["first_done"].wait(timeout=5)
             return "lc"
 
@@ -207,30 +213,35 @@ def test_parallel_download_leaves_stdout_usable(tmp_path, monkeypatch):
     fake_module.SearchResult = FakeSearchResult
     monkeypatch.setitem(sys.modules, "lightkurve.search", fake_module)
 
-    real_stdout = sys.stdout
+    # Never race pytest's own stdout: substitute a sentinel monkeypatch restores.
+    sentinel = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", sentinel)
 
     def race() -> None:
-        state["swapped"] = threading.Barrier(2)
-        state["first_done"] = threading.Event()
+        for key in ("first_swapped", "second_swapped", "first_done"):
+            state[key] = threading.Event()
         first = threading.Thread(target=FakeSearchResult().download_all, args=(0,))
         second = threading.Thread(target=FakeSearchResult().download_all, args=(1,))
         first.start()
+        state["first_swapped"].wait(timeout=5)  # 0 has swapped before 1 saves
         second.start()
-        first.join(timeout=5)
+        first.join(timeout=5)  # 0 restored the sentinel and closed its devnull
         state["first_done"].set()
-        second.join(timeout=5)
+        second.join(timeout=5)  # 1 restores that closed devnull
 
     # Unguarded: the second thread restores the devnull the first just closed.
     race()
+    assert sys.stdout is not sentinel
     assert sys.stdout.closed, "expected the unguarded race to close sys.stdout"
-    sys.stdout = real_stdout
+    sys.stdout = sentinel
 
     # Guarded: suppression is lifted, so nothing swaps the global at all.
     with _lightkurve_stdout_swap_disabled():
         race()
+        assert sys.stdout is sentinel
         assert not sys.stdout.closed
 
-    assert sys.stdout is real_stdout
+    assert sys.stdout is sentinel
     assert not sys.stdout.closed
     # The decorator is put back afterwards.
     assert hasattr(FakeSearchResult.download_all, "__wrapped__")
