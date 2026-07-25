@@ -7,9 +7,10 @@ actually been trained on versus everything that has been observed. It exists
 because "where did the training distribution come from?" is a first-order
 question for interpreting anything the model says.
 
-All figures are regenerated from the live artefacts; the sky positions are
-read straight from the `RA_OBJ`/`DEC_OBJ` keywords in each target's FITS
-header (4,885 of the 5,156 training targets resolved).
+All figures are regenerated from the live artefacts by
+`pipeline/scripts/plot_provenance.py`; the sky positions are read straight
+from the `RA_OBJ`/`DEC_OBJ` keywords in each target's FITS header (5,414 of
+the 5,686 training targets resolved).
 
 ## Sources of truth
 
@@ -22,6 +23,8 @@ source of truth for *labels*, queried over its TAP service
 | `ps` (Planetary Systems) | TESS-discovered **confirmed planets** (`disc_facility like '%TESS%'`) | positive labels |
 | `toi` (TESS Project Candidates) | every TOI with its **TFOPWG disposition** (`tfopwg_disp`: CP/KP/FP/PC) | pos / neg / held-out |
 | `cumulative` (Kepler Objects of Interest) | KOIs with `koi_disposition` (CONFIRMED / FALSE POSITIVE / CANDIDATE) | Kepler pos / neg |
+| `q1_q17_dr25_koi` (Kepler DR25 KOI) | `koi_score` — the Robovetter vote behind the retired certified-FP table | certifying Kepler negatives |
+| `k2pandc` (K2 Planets & Candidates) | EPIC-keyed dispositions (CONFIRMED / FALSE POSITIVE / REFUTED / CANDIDATE) | K2 pos / neg / held-out |
 
 **ExoFOP** (`exofop.ipac.caltech.edu/tess`) is a *secondary, enrichment*
 source, not the label authority (`data/exofop.py`): the TOI + **CTOI** CSVs
@@ -34,6 +37,8 @@ Raw light curves come from the mission archives, not either catalogue:
 - **Kepler** — long-cadence light curves pulled **directly from the STScI
   archive** (`archive.stsci.edu/pub/kepler/lightcurves`), with a MAST search
   fallback (`data/download.py`).
+- **K2** — EPIC-indexed campaign light curves from **MAST** (via `lightkurve`,
+  author `K2`), cached alongside TESS in `data/raw` as `epic_*.fits`.
 
 So the common shorthand "we only look at ExoFOP" is inverted: the labels are
 already anchored to the NASA Exoplanet Archive; ExoFOP only adds CTOIs and
@@ -43,7 +48,7 @@ follow-up columns on top.
 
 ![Training targets on the sky](figures/sky_map.png)
 
-The training set is two completely different observing strategies:
+The training set is three completely different observing strategies:
 
 - **Kepler (red, n=2,500)** — one fixed ~115 deg² field in **Cygnus–Lyra**,
   RA 280–302°, Dec +37–52°, centroid **(291.9°, +43.8°)**. Kepler stared here
@@ -51,6 +56,11 @@ The training set is two completely different observing strategies:
   cover only this keyhole.
 - **TESS (blue, n=2,385)** — **all-sky**, Dec −89° to +88°, every RA, from
   TESS's 27-day sector tiling.
+- **K2 (orange, n=529)** — the **ecliptic plane**, in discrete clumps: after
+  losing a second reaction wheel Kepler could only hold pointing along the
+  ecliptic, observing a chain of ~80-day campaign fields. Those campaigns are
+  the orange islands strung across the map, all within roughly ±30° of the
+  ecliptic — a footprint neither of the other two missions covers well.
 
 ## What we trained on vs what has been observed
 
@@ -67,9 +77,13 @@ transit candidates*, not a random sample of observed stars, so selection
 effects (bright-star bias, short-period bias, the confirmed/FP class balance)
 are baked in.
 
-Counts (this build): 5,156 labelled targets — **2,656 TESS + 2,500 Kepler**,
-roughly balanced planet-ish (2,565) vs false-positive (2,320). On disk the raw
-FITS cache is 2,391 TESS files (39 GB) + 4,542 Kepler files (42 GB).
+Counts (this build): 5,686 labelled targets — **2,656 TESS + 2,500 Kepler +
+530 K2**. On disk the raw FITS cache is 2,391 TESS + 529 K2 files in
+`data/raw`, plus 4,705 Kepler files in `data/raw_kepler`.
+
+The grey pool is TESS-only (TOIs/CTOIs from ExoFOP), so the Kepler and K2
+points sit outside it by construction — their held-out candidate pools live in
+`data/labels/candidates.parquet` instead (1,630 Kepler + 834 K2).
 
 ## What the raw data actually looks like
 
