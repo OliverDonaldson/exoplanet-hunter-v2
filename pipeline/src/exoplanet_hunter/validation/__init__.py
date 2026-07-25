@@ -24,6 +24,7 @@ from exoplanet_hunter.validation.schemas import (
     check_views,
     label_catalogue_schema,
 )
+from exoplanet_hunter.validation.shrink import check_catalogue_shrink
 from exoplanet_hunter.validation.trigger import RefreshDecision, evaluate_refresh
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "RefreshDecision",
     "assert_refresh_safe",
     "candidate_catalogue_schema",
+    "check_catalogue_shrink",
     "check_views",
     "diff_label_catalogues",
     "evaluate_promotion",

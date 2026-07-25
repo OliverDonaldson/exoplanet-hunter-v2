@@ -5,7 +5,9 @@ Usage (from the repository root):
     python pipeline/scripts/validate_data.py                  # validate whatever exists
     python pipeline/scripts/validate_data.py --strict         # missing artefact = failure
     python pipeline/scripts/validate_data.py \
-        --previous-labels path/to/old/labels.parquet          # + refresh leakage guard
+        --previous-labels path/to/old/labels.parquet          # + leakage and shrink guards
+    python pipeline/scripts/validate_data.py \
+        --previous-labels ... --allow-shrink                  # intentional reduction
 
 Exit code 0 = every gate passed; 1 = at least one failed. Designed to slot
 directly into the refresh DAG (orchestrator branch) and pre-training checks.
@@ -26,6 +28,7 @@ from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation import (
     assert_refresh_safe,
     candidate_catalogue_schema,
+    check_catalogue_shrink,
     check_views,
     label_catalogue_schema,
 )
@@ -57,7 +60,18 @@ def main() -> None:
         "--previous-labels",
         type=Path,
         default=None,
-        help="Previous labels.parquet — enables the refresh leakage guard",
+        help="Previous labels.parquet — enables the leakage and shrink guards",
+    )
+    parser.add_argument(
+        "--max-shrink-frac",
+        type=float,
+        default=0.10,
+        help="Fraction of the previous label catalogue that may disappear (default 0.10)",
+    )
+    parser.add_argument(
+        "--allow-shrink",
+        action="store_true",
+        help="Accept a reduction the shrink guard would otherwise reject",
     )
     parser.add_argument(
         "--strict", action="store_true", help="Treat missing artefacts as failures instead of skips"
@@ -103,6 +117,22 @@ def main() -> None:
         log.info("[gate] %-22s SKIP (%s not built yet)", "views", args.views)
 
     if args.previous_labels is not None:
+
+        def _shrink_gate() -> None:
+            problems = check_catalogue_shrink(
+                pd.read_parquet(args.previous_labels),
+                pd.read_parquet(args.labels),
+                max_shrink_frac=args.max_shrink_frac,
+            )
+            if not problems:
+                return
+            detail = "; ".join(problems)
+            if args.allow_shrink:
+                log.warning("[gate] %-22s shrink allowed: %s", "label-shrink", detail)
+                return
+            raise ValueError(f"{detail} — pass --allow-shrink if the reduction is intentional")
+
+        results.append(_gate("label-shrink", _shrink_gate))
 
         def _leakage_gate() -> None:
             flips = assert_refresh_safe(
