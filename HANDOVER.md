@@ -823,3 +823,48 @@ not (0.75 vs 0.33), and that gap is raw-SAP light-curve prep, not a bug.
 Then `render_vetting.py` draws the six-panel figures from the same scored
 parquet — it now reads the ingest's `disposition`, so the TFOPWG subtitle
 finally populates.
+
+## Step 3(b) blocked twice, then unblocked (2026-07-26)
+
+Commit `b56c56f`. `score_candidates.py` aborted at the first line of the
+scoring loop on two consecutive attempts — 7.4 h of downloads on the first,
+31 min on the second — with `ValueError: I/O operation on closed file` from
+tqdm's `status_printer`.
+
+**It was never sleep or a dead terminal.** The first run had a 2.5 h gap in
+the log that made that look obvious, and it was wrong. The second ran under
+`nohup` writing to a plain file, finished its downloads in 31 minutes with no
+gap, and died identically.
+
+**Cause: `lightkurve/utils.py:558`.** `@suppress_stdout` decorates
+`SearchResult.download`/`download_all` and saves/restores the *process-global*
+`sys.stdout` around each call. At `_PREFETCH_WORKERS = 4` the save/restore
+pairs interleave — thread B saves thread A's devnull as its "original", A
+restores the real stdout and its `with open(...)` closes that devnull, then B
+restores the closed one. `sys.stdout` stays closed for the rest of the process.
+Confirmed by instrumenting the real downloader against MAST and sampling
+`sys.stdout` from a watcher thread: **9 transitions, final state closed**.
+
+**The visible crash was the smaller half.** lightkurve logs its quality-mask
+line from *inside* `download_all`; once stdout is closed that log call raises
+through rich's handler, and `download_one`'s broad `except Exception` records a
+**successful** download as `download error`. The first run logged **1,352** of
+these starting 17 s in — so its 3,166/4,685 success rate was substantially
+spurious, not a property of the data. Nothing was pinned as permanently failed
+only because `"I/O operation on closed file"` was already in
+`_TRANSIENT_ERROR_MARKERS`.
+
+Fixed by lifting the suppression for the parallel section (`functools.wraps`
+exposes the originals on `__wrapped__`) and restoring it after. Re-ran the same
+instrumented download: **1 transition, stdout open, zero closed-file errors,
+4/4 succeeded.** The regression test drives lightkurve's decorator verbatim
+with the interleave forced deterministically. 219 tests green.
+
+**Worth generalising:** a broad `except Exception` around third-party I/O will
+happily convert an infrastructure fault into a domain verdict. The download
+path reported ~1,200 healthy targets as failures for hours without anything
+looking wrong, because "download error" is a plausible thing to see.
+
+State for the next attempt: **3,509 targets cached and ready to score**, 743
+cached as permanent "no pipeline data", **433 left to attempt**. Nothing has
+been scored yet — `results/candidates_scored.parquet` still does not exist.
