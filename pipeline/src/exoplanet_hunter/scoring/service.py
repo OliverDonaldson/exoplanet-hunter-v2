@@ -24,6 +24,7 @@ import pandas as pd
 from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.stellar import fetch_stellar_params
 from exoplanet_hunter.eval.injection_recovery import inject_box_transit
+from exoplanet_hunter.features.aux import build_aux_row
 from exoplanet_hunter.features.centroid import centroid_phase_track, extract_centroid_offset
 from exoplanet_hunter.features.noise import pink_noise_snr
 from exoplanet_hunter.preprocess import (
@@ -240,35 +241,24 @@ class TargetScorer:
         if not aux_dim:
             return None
         sp = self._fetch_stellar(tic_id)
-        centroid = centroid_snr if centroid_snr is not None else float("nan")
-        row = [
-            sp.teff if sp.teff is not None else np.nan,
-            sp.radius if sp.radius is not None else np.nan,
-            sp.logg if sp.logg is not None else np.nan,
-            sp.tmag if sp.tmag is not None else np.nan,
-            np.nan,  # depth — unknown for an ad-hoc target (as in training)
-            float(duration),
-            float(np.log(period)) if period > 0 else np.nan,
-        ]
-        if aux_dim >= 13:
-            pn = pink_noise_snr(flat_time, flat_flux, period, t0, duration)
-            row += [
-                pn.snr if pn is not None else np.nan,
-                centroid,
-                odd_even.depth_diff_sigma if odd_even is not None else np.nan,
-                odd_even.timing_diff_sigma
-                if odd_even is not None and odd_even.timing_diff_sigma is not None
-                else np.nan,
-                secondary.secondary_significance if secondary is not None else np.nan,
-                duration_check.q_ratio
-                if duration_check is not None and duration_check.q_ratio is not None
-                else np.nan,
-            ]
-        else:
-            row.append(self._exofop_snr(tic_id))
-            if aux_dim >= 9:
-                row.append(centroid)
-        return np.array(row, dtype=np.float32)
+        pn = pink_noise_snr(flat_time, flat_flux, period, t0, duration) if aux_dim >= 13 else None
+        return build_aux_row(
+            aux_dim,
+            teff=sp.teff,
+            radius=sp.radius,
+            logg=sp.logg,
+            tmag=sp.tmag,
+            depth=None,  # unknown for an ad-hoc target (as in training)
+            duration=duration,
+            period=period,
+            centroid_snr=centroid_snr,
+            pink_snr=pn.snr if pn is not None else None,
+            catalogue_snr=self._exofop_snr(tic_id) if aux_dim < 13 else None,
+            oe_depth_sigma=odd_even.depth_diff_sigma if odd_even is not None else None,
+            oe_timing_sigma=odd_even.timing_diff_sigma if odd_even is not None else None,
+            secondary_sig=secondary.secondary_significance if secondary is not None else None,
+            q_ratio=duration_check.q_ratio if duration_check is not None else None,
+        )
 
     def _search_lightcurve(self, cleaned, tic_id: int):
         """Unmasked flatten + decimation for BLS (search only, not the fold)."""

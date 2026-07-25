@@ -26,10 +26,10 @@ duration_h: null
 n_mc: 50             # MC-Dropout forward passes
 
 # CLI-only fields read by scripts/score_candidates.py. Defaults score the full
-# pool with the branch-3 final 5-fold ensemble.
+# pool with the currently promoted ensemble.
 max_candidates: null   # truncate to first N (sanity check)
 limit_mission: null    # "TESS" | "Kepler" | null (both)
-cv_dir: models/cv/58570d85f1dd4f68a7e888988c88eeab
+cv_dir: null           # null = the promoted run in models/registry.json
 out_path: results/candidates_scored.parquet
 save_every: 25
 

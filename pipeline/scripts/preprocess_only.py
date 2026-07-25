@@ -25,6 +25,7 @@ from tqdm.auto import tqdm
 
 from exoplanet_hunter.data.catalog import CatalogRequest, build_label_catalog
 from exoplanet_hunter.data.stellar import fetch_stellar_params
+from exoplanet_hunter.features.aux import LEGACY_AUX_DIM, build_aux_row
 from exoplanet_hunter.features.centroid import extract_centroid_offset
 from exoplanet_hunter.preprocess import build_views, clean_lightcurve, flatten_lightcurve
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
@@ -170,48 +171,32 @@ def main(cfg: DictConfig) -> None:
             skips["preprocess_error"] += 1
             continue
 
-        # Aux feature vector (9 dims):
-        #   [teff, radius, logg, tmag,  depth, duration, log_period, snr, centroid_snr]
-        #   stellar context (4) + transit shape (4) + centroid BEB diagnostic (1)
-        # depth/duration/period come from the catalog (already computed).
-        # SNR is available for Kepler (koi_model_snr); TESS targets use
-        # the local-view peak depth as a cheap proxy until SNR is added
-        # to the TESS catalog query.
-        # centroid_snr is the 2D in-transit centroid shift in units of σ,
-        # detrended for Kepler quarterly rolls (see features/centroid.py).
-        log_period = np.log(float(period)) if float(period) > 0 else np.nan
+        # Legacy 9-dim aux — layout in features/aux.py. Kepler/K2 carry stellar
+        # params and koi_model_snr in the catalogue row; TESS needs a TIC lookup
+        # and has no catalogue SNR in this build.
         depth_val = float(row["depth"]) if pd.notna(row.get("depth")) else np.nan
         dur_val = float(row["duration"]) if pd.notna(row.get("duration")) else np.nan
         if mission in ("Kepler", "K2"):
-            snr_val = float(row["snr"]) if pd.notna(row.get("snr")) else np.nan
-            aux.append(
-                [
-                    float(row["teff"]) if pd.notna(row.get("teff")) else np.nan,
-                    float(row["radius"]) if pd.notna(row.get("radius")) else np.nan,
-                    float(row["logg"]) if pd.notna(row.get("logg")) else np.nan,
-                    float(row["tmag"]) if pd.notna(row.get("tmag")) else np.nan,
-                    depth_val,
-                    dur_val,
-                    log_period,
-                    snr_val,
-                    centroid_snr,
-                ]
-            )
+            stellar = (row.get("teff"), row.get("radius"), row.get("logg"), row.get("tmag"))
+            snr_val = row.get("snr")
         else:
             sp = fetch_stellar_params(tic)
-            aux.append(
-                [
-                    sp.teff if sp.teff is not None else np.nan,
-                    sp.radius if sp.radius is not None else np.nan,
-                    sp.logg if sp.logg is not None else np.nan,
-                    sp.tmag if sp.tmag is not None else np.nan,
-                    depth_val,
-                    dur_val,
-                    log_period,
-                    np.nan,  # transit SNR not yet in TESS catalog query
-                    centroid_snr,
-                ]
+            stellar = (sp.teff, sp.radius, sp.logg, sp.tmag)
+            snr_val = None
+        aux.append(
+            build_aux_row(
+                LEGACY_AUX_DIM,
+                teff=stellar[0],
+                radius=stellar[1],
+                logg=stellar[2],
+                tmag=stellar[3],
+                depth=depth_val,
+                duration=dur_val,
+                period=period,
+                catalogue_snr=snr_val,
+                centroid_snr=centroid_snr,
             )
+        )
         g_views.append(views.global_view)
         l_views.append(views.local_view)
         labels.append(int(row["label"]))

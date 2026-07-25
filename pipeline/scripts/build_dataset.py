@@ -27,6 +27,7 @@ from tqdm.auto import tqdm
 from exoplanet_hunter.data.catalog import build_labels_from_cfg
 from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.stellar import fetch_stellar_params
+from exoplanet_hunter.features.aux import TRAINING_AUX_DIM, build_aux_row
 from exoplanet_hunter.features.centroid import extract_centroid_offset
 from exoplanet_hunter.features.noise import pink_noise_snr
 from exoplanet_hunter.preprocess import build_views, clean_lightcurve, flatten_lightcurve
@@ -172,19 +173,7 @@ def main(cfg: DictConfig) -> None:
             skips["preprocess_error"] += 1
             continue
 
-        # Aux feature vector (13 dims — centroid stays at aux_transform.
-        # CENTROID_COL == 8; the serving path branches on aux_dim so models
-        # trained on the legacy 9-dim layout keep working):
-        #   [teff, radius, logg, tmag, depth, duration, log_period,
-        #    pink_snr, centroid_snr, oe_depth_sigma, oe_timing_sigma,
-        #    secondary_sig, q_ratio]
-        # Stellar params come from the KOI catalog row for Kepler targets and
-        # from a TIC lookup for TESS targets. pink_snr (Kunimoto 2025 §2.1)
-        # replaces the catalogue transit SNR: computed from the light curve,
-        # it exists for every target at train AND serve time, closing the
-        # non-TOI NaN->imputed-median mismatch. The vetting features come
-        # from the same diagnostics the API serves as cautions.
-        log_period = np.log(float(period)) if float(period) > 0 else np.nan
+        # Aux feature vector — layout in features/aux.py, shared with serving.
         depth_val = float(row["depth"]) if pd.notna(row.get("depth")) else np.nan
         dur_val = float(row["duration"]) if pd.notna(row.get("duration")) else np.nan
         # Kepler and K2 carry stellar params in the catalogue row (KOI / k2pandc);
@@ -214,20 +203,22 @@ def main(cfg: DictConfig) -> None:
             float(period), float(duration), stellar_radius=stellar[1], stellar_logg=stellar[2]
         )
         aux.append(
-            [
-                *stellar,
-                depth_val,
-                dur_val,
-                log_period,
-                pn.snr if pn is not None else np.nan,
-                centroid_snr,
-                oe.depth_diff_sigma if oe is not None else np.nan,
-                oe.timing_diff_sigma
-                if oe is not None and oe.timing_diff_sigma is not None
-                else np.nan,
-                sec.secondary_significance if sec is not None else np.nan,
-                dc.q_ratio if dc is not None and dc.q_ratio is not None else np.nan,
-            ]
+            build_aux_row(
+                TRAINING_AUX_DIM,
+                teff=stellar[0],
+                radius=stellar[1],
+                logg=stellar[2],
+                tmag=stellar[3],
+                depth=depth_val,
+                duration=dur_val,
+                period=period,
+                centroid_snr=centroid_snr,
+                pink_snr=pn.snr if pn is not None else None,
+                oe_depth_sigma=oe.depth_diff_sigma if oe is not None else None,
+                oe_timing_sigma=oe.timing_diff_sigma if oe is not None else None,
+                secondary_sig=sec.secondary_significance if sec is not None else None,
+                q_ratio=dc.q_ratio if dc is not None else None,
+            )
         )
         g_views.append(views.global_view)
         l_views.append(views.local_view)

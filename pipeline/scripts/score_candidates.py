@@ -1,16 +1,11 @@
-"""Bulk-score TOI / Kepler planet candidates with the branch-3 5-fold ensemble.
+"""Bulk-score held-out planet candidates with the promoted 5-fold ensemble.
 
-For each row in ``data/labels/candidates.parquet``:
-  - Download/load FITS (TESS via SPOC, Kepler via Kepler author).
-  - Clean + flatten (with transit mask using the known ephemeris).
-  - Build dual-view (global, local).
-  - Extract centroid_snr from the raw FITS.
-  - Assemble the 9-dim aux vector exactly as preprocess_only.py does.
-  - For each of 5 fold-models: apply the fold's aux pipeline, run ``n_mc`` MC-
-    Dropout passes, calibrate each sample with the fold's TemperatureScaler.
-  - Aggregate: ensemble mean, ensemble std, p10/p90, fold-mean disagreement,
-    within-fold dropout disagreement.
-  - Write to ``results/candidates_scored.parquet`` (resumable, atomic).
+Scores every row of ``data/labels/candidates.parquet`` through the same
+preprocessing and aux layout the API serves (``features/aux.py``), in whatever
+width the registered bundle was trained on, and reports a richer uncertainty
+breakdown than a single /score call: ensemble mean/std, p10/p90, between-fold
+disagreement and within-fold MC-Dropout spread. Output is
+``results/candidates_scored.parquet`` (resumable, atomic).
 
 Usage:
     # Full pool (both missions, all 6,200):
@@ -29,7 +24,6 @@ Usage:
 from __future__ import annotations
 
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -42,9 +36,16 @@ from omegaconf import DictConfig
 from tqdm.auto import tqdm
 
 from exoplanet_hunter.data.download import LightCurveDownloader
+from exoplanet_hunter.features.aux import build_aux_row
 from exoplanet_hunter.features.centroid import extract_centroid_offset
+from exoplanet_hunter.features.noise import pink_noise_snr
 from exoplanet_hunter.models.uncertainty import mc_dropout_predict
-from exoplanet_hunter.preprocess import clean_lightcurve, flatten_and_build_views
+from exoplanet_hunter.preprocess import build_views, clean_lightcurve, flatten_lightcurve
+from exoplanet_hunter.scoring.diagnostics import (
+    odd_even_depths,
+    significant_secondary,
+    unphysical_duration,
+)
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
 
 log = get_logger(__name__)
@@ -83,38 +84,58 @@ def _load_fold_bundles(cv_dir: Path, n_folds: int = 5) -> list[dict]:
 
 
 def _aux_vector(
-    row: dict, raw_lc, period: float, t0: float, duration: float, mission: str
+    row: dict,
+    raw_lc,
+    flat_time: np.ndarray,
+    flat_flux: np.ndarray,
+    period: float,
+    t0: float,
+    duration: float,
+    mission: str,
+    aux_dim: int,
 ) -> tuple[np.ndarray, float]:
-    """9-dim aux vector matching preprocess_only.py exactly.
+    """Aux vector in the served bundle's layout — see features/aux.py.
 
-    Layout: [teff, radius, logg, tmag, depth, duration, log_period, snr, centroid_snr]
-    SNR is NaN for TESS (matches training); populated from catalog for Kepler.
-    Returns (aux_vector, centroid_snr) so the caller can record centroid_snr.
+    Stellar params come from the candidate row for every mission (an EPIC id
+    is not a TIC id). Returns (aux_vector, centroid_snr) so the caller can
+    record centroid_snr.
     """
-    log_period = float(np.log(period)) if period > 0 else np.nan
     try:
         centroid_snr = float(extract_centroid_offset(raw_lc, period, t0, duration))
     except Exception as exc:
         log.debug("centroid extract failed tic=%s: %s", row.get("tic_id"), exc)
         centroid_snr = float("nan")
 
-    def _f(v):
-        return float(v) if pd.notna(v) else float("nan")
+    extra: dict[str, object]
+    if aux_dim >= 13:
+        pn = pink_noise_snr(flat_time, flat_flux, period, t0, duration)
+        oe = odd_even_depths(flat_time, flat_flux, period, t0, duration)
+        sec = significant_secondary(flat_time, flat_flux, period, t0, duration)
+        dc = unphysical_duration(
+            period, duration, stellar_radius=row.get("radius"), stellar_logg=row.get("logg")
+        )
+        extra = {
+            "pink_snr": pn.snr if pn is not None else None,
+            "oe_depth_sigma": oe.depth_diff_sigma if oe is not None else None,
+            "oe_timing_sigma": oe.timing_diff_sigma if oe is not None else None,
+            "secondary_sig": sec.secondary_significance if sec is not None else None,
+            "q_ratio": dc.q_ratio if dc is not None else None,
+        }
+    else:
+        # Matches training: catalogue SNR exists for Kepler, not for TESS.
+        extra = {"catalogue_snr": row.get("snr") if mission == "Kepler" else None}
 
-    snr_val = _f(row.get("snr")) if mission == "Kepler" else float("nan")
-    aux = np.array(
-        [
-            _f(row.get("teff")),
-            _f(row.get("radius")),
-            _f(row.get("logg")),
-            _f(row.get("tmag")),
-            _f(row.get("depth")),
-            float(duration),
-            log_period,
-            snr_val,
-            centroid_snr,
-        ],
-        dtype=np.float32,
+    aux = build_aux_row(
+        aux_dim,
+        teff=row.get("teff"),
+        radius=row.get("radius"),
+        logg=row.get("logg"),
+        tmag=row.get("tmag"),
+        depth=row.get("depth"),
+        duration=duration,
+        period=period,
+        centroid_snr=centroid_snr,
+        **extra,  # type: ignore[arg-type]
     )
     return aux, centroid_snr
 
@@ -155,17 +176,38 @@ def _score_one(
 
     try:
         cleaned = clean_lightcurve(raw, sigma_clip=float(cfg.preprocess.cleaning.sigma_clip))
-        views = flatten_and_build_views(
+        flat = flatten_lightcurve(
             cleaned,
+            window_length=int(cfg.preprocess.flatten.window_length),
+            polyorder=int(cfg.preprocess.flatten.polyorder),
             period=period,
             t0=t0,
             duration=duration,
-            preprocess_cfg=cfg.preprocess,
+        )
+        views = build_views(
+            flat,
+            period=period,
+            t0=t0,
+            duration=duration,
+            global_bins=int(cfg.preprocess.views.global_bins),
+            local_bins=int(cfg.preprocess.views.local_bins),
+            local_durations=float(cfg.preprocess.views.local_durations),
         )
     except Exception as exc:
         return {**base, "status": "preprocess_fail", "reason": str(exc)}
 
-    aux_raw, centroid_snr = _aux_vector(row, raw, period, t0, duration, mission)
+    aux_dim = next((f["aux_dim"] for f in folds if f["aux_dim"]), 9)
+    aux_raw, centroid_snr = _aux_vector(
+        row,
+        raw,
+        np.asarray(flat.time.value, dtype=float),
+        np.asarray(flat.flux.value, dtype=float),
+        period,
+        t0,
+        duration,
+        mission,
+        aux_dim,
+    )
 
     inputs_static = {
         "global_view": views.global_view[None, :, None].astype(np.float32),
@@ -262,20 +304,6 @@ def main(cfg: DictConfig) -> None:
     # ----- model bundles ----------------------------------------------------
     folds = _load_fold_bundles(cv_dir, n_folds=5)
     log.info("[score-candidates] loaded %d fold bundles", len(folds))
-
-    # This script assembles the legacy 9-dim aux vector; a model trained on
-    # the 13-dim vetting-aux layout (build_dataset.py) needs the vetting
-    # diagnostics + pink-noise SNR wired in here first. Abort up front rather
-    # than emitting 6,000 sklearn dimension errors.
-    bundle_dims = {f["aux_dim"] for f in folds if f["aux_dim"] is not None}
-    if bundle_dims - {8, 9}:
-        log.error(
-            "[score-candidates] bundle aux_dim=%s but this script builds the "
-            "legacy 9-dim aux vector — update _aux_vector for the vetting-aux "
-            "layout (or pass cv_dir=models/cv/<legacy-run>).",
-            sorted(bundle_dims),
-        )
-        sys.exit(1)
 
     # ----- downloaders ------------------------------------------------------
     # TESS PCs cache to data/raw/ (alongside training cache, distinct IDs).
