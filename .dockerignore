@@ -22,6 +22,10 @@ frontend/dist/
 frontend/node_modules/
 .dvc/cache/
 .dvc/tmp/
+# Live R2 credentials. The Dockerfile only COPYs .dvc/config, so this never
+# reached an image layer — but the build context is uploaded wholesale to the
+# remote builder, so keep it out of the tarball too.
+.dvc/config.local
 __pycache__/
 *.egg-info/
 .pytest_cache/
