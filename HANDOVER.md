@@ -624,7 +624,7 @@ gates PASS on the live artefacts, 195 tests green, tree clean.
 | S/N | 3 | 5 | 7 | 10 | 15 | 20 | 30 | 50 |
 |---|---|---|---|---|---|---|---|---|
 | raw | 0.26 | 0.29 | 0.34 | 0.48 | 0.63 | 0.74 | 0.86 | 0.95 |
-| baseline-corrected | 0.00 | 0.04 | 0.10 | 0.30 | 0.49 | 0.81 | 0.81 | 0.94 |
+| baseline-corrected | 0.00 | 0.04 | 0.10 | 0.30 | 0.49 | 0.64 | 0.81 | 0.94 |
 
 **Headline: 50% completeness at S/N ≈ 15, 90% at S/N ≈ 44** (corrected). The raw
 curve says S/N 10.6 — quote the corrected one.
