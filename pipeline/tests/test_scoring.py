@@ -483,3 +483,25 @@ def test_catalogue_ephemeris_rejects_dirty_and_missing(tmp_path):
     assert scorer._catalogue_ephemeris(2) is None  # negative period
     assert scorer._catalogue_ephemeris(3) is None  # dropped by dropna
     assert scorer._catalogue_ephemeris(999) is None  # absent
+
+
+def test_apply_injection_dims_only_in_transit_and_preserves_metadata():
+    """The injection hook must edit flux in place in the served path's own units."""
+    import astropy.units as u
+    import lightkurve as lk
+
+    from exoplanet_hunter.scoring.service import InjectionSpec, _apply_injection
+
+    time = np.arange(0.0, 10.0, 0.01)
+    lc = lk.LightCurve(time=time, flux=u.Quantity(np.full(time.size, 5000.0), u.electron / u.s))
+    spec = InjectionSpec(period_days=2.0, t0_btjd=0.5, duration_hours=2.4, depth=0.01)
+
+    out = _apply_injection(lc, spec)
+
+    phase = np.abs(np.mod(time - 0.5 + 1.0, 2.0) - 1.0)
+    in_tr = phase < 0.05  # 2.4 h == 0.1 d
+    assert np.allclose(out.flux.value[in_tr], 4950.0)  # 1% deep
+    assert np.allclose(out.flux.value[~in_tr], 5000.0)
+    assert out.flux.unit == lc.flux.unit  # units survive
+    assert np.array_equal(out.time.value, lc.time.value)
+    assert np.allclose(lc.flux.value, 5000.0)  # original untouched

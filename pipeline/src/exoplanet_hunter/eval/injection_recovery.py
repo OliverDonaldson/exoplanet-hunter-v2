@@ -56,6 +56,47 @@ def transit_snr(depth_ppm: float, cdpp_ppm: float, n_transits: int) -> float | N
     return float(depth_ppm / cdpp_ppm * np.sqrt(n_transits))
 
 
+def noise_ppm(time: np.ndarray, flux: np.ndarray, duration: float) -> float | None:
+    """Robust scatter of duration-length bins, in ppm — the CDPP analogue.
+
+    CDPP is defined on the transit timescale (Christiansen 2012), so bin the
+    flattened flux to ``duration`` and take a MAD-based sigma of the bin means.
+    Computed here rather than via lightkurve so the units are unambiguous.
+    """
+    t = np.asarray(time, dtype=float)
+    f = np.asarray(flux, dtype=float)
+    good = np.isfinite(t) & np.isfinite(f)
+    if duration <= 0 or good.sum() < 2:
+        return None
+    t, f = t[good], f[good]
+    bin_idx = np.floor((t - t.min()) / duration).astype(int)
+    order = np.argsort(bin_idx, kind="stable")
+    bin_idx, f = bin_idx[order], f[order]
+    edges = np.flatnonzero(np.diff(bin_idx)) + 1
+    means = np.array([chunk.mean() for chunk in np.split(f, edges) if len(chunk)])
+    if len(means) < 2:
+        return None
+    median = float(np.median(means))
+    if not np.isfinite(median) or median == 0:
+        return None
+    mad = float(np.median(np.abs(means - median)))
+    return 1.4826 * mad / abs(median) * 1e6
+
+
+def count_transits(time: np.ndarray, period: float, t0: float, duration: float) -> int:
+    """Distinct transit epochs with at least one in-transit cadence."""
+    t = np.asarray(time, dtype=float)
+    t = t[np.isfinite(t)]
+    if period <= 0 or duration <= 0 or t.size == 0:
+        return 0
+    phase = np.abs(np.mod(t - t0 + 0.5 * period, period) - 0.5 * period)
+    in_transit = phase < 0.5 * duration
+    if not in_transit.any():
+        return 0
+    epochs = np.round((t[in_transit] - t0) / period).astype(int)
+    return int(np.unique(epochs).size)
+
+
 @dataclass(frozen=True)
 class RecoveryResult:
     """One injection outcome — the record the runner accumulates."""

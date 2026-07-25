@@ -23,6 +23,7 @@ import pandas as pd
 
 from exoplanet_hunter.data.download import LightCurveDownloader
 from exoplanet_hunter.data.stellar import fetch_stellar_params
+from exoplanet_hunter.eval.injection_recovery import inject_box_transit
 from exoplanet_hunter.features.centroid import centroid_phase_track, extract_centroid_offset
 from exoplanet_hunter.features.noise import pink_noise_snr
 from exoplanet_hunter.preprocess import (
@@ -59,6 +60,37 @@ MAX_SEARCH_CADENCES = 20_000
 
 class NoLightCurveError(LookupError):
     """The target has no SPOC light curve on MAST (or the fetch failed)."""
+
+
+@dataclass(frozen=True)
+class InjectionSpec:
+    """A synthetic transit to multiply into the raw flux before scoring.
+
+    Injecting here — ahead of cleaning — rather than in a parallel copy of the
+    pipeline is what makes an injection-recovery completeness number a
+    statement about the *served* path.
+    """
+
+    period_days: float
+    t0_btjd: float
+    duration_hours: float
+    depth: float  # fractional, e.g. 0.001 == 1000 ppm
+
+
+def _apply_injection(lc: Any, spec: InjectionSpec) -> Any:
+    import astropy.units as u
+
+    injected = inject_box_transit(
+        np.asarray(lc.time.value, dtype=float),
+        np.asarray(lc.flux.value, dtype=float),
+        period=spec.period_days,
+        t0=spec.t0_btjd,
+        duration=spec.duration_hours / 24.0,
+        depth=spec.depth,
+    )
+    out = lc.copy()
+    out.flux = u.Quantity(injected, lc.flux.unit)
+    return out
 
 
 @dataclass(frozen=True)
@@ -269,6 +301,7 @@ class TargetScorer:
         force_download: bool = False,
         force_bls: bool = False,
         include_periodogram: bool = False,
+        inject: InjectionSpec | None = None,
     ) -> ScoreOutcome:
         import lightkurve as lk
 
@@ -276,6 +309,8 @@ class TargetScorer:
         if not res.success or res.path is None:
             raise NoLightCurveError(f"no SPOC light curve for TIC {tic_id} ({res.reason})")
         raw = lk.read(str(res.path))
+        if inject is not None:
+            raw = _apply_injection(raw, inject)
         cleaned = clean_lightcurve(raw, sigma_clip=self.preprocess.sigma_clip)
 
         catalogue = None if force_bls else self._catalogue_ephemeris(tic_id)
