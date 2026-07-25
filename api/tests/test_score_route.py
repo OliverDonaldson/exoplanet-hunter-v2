@@ -120,6 +120,20 @@ def test_score_rejects_non_finite_ephemeris(monkeypatch, query):
     assert client.get(f"/score/12345?{query}").status_code == 422
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "period_days=8900&duration_hours=378.5",  # catalogue maxima
+        "period_days=35.64&t0_btjd=22124370",  # CTOI with a malformed BJD epoch
+        "period_days=3.12&t0_btjd=2401427",  # CTOI epoch that predates BTJD
+    ],
+)
+def test_score_accepts_worst_real_catalogue_ephemeris(monkeypatch, query):
+    """The bounds reject `inf`, not real rows — three CTOIs carry junk epochs."""
+    monkeypatch.setattr(score_module, "get_scorer", lambda: _StubScorer())
+    assert client.get(f"/score/12345?{query}").status_code == 200
+
+
 def test_score_503_detail_carries_no_server_path(tmp_path, monkeypatch):
     def raiser():
         raise FileNotFoundError(f"{tmp_path}/models/registry.json")

@@ -58,14 +58,19 @@ _CACHE_MAX = 128
 
 # TIC IDs are positive and the catalogue's largest is ~2.05e9; this leaves an
 # order of magnitude of headroom while keeping an unbounded path segment from
-# reaching MAST and the download manifest. The float bounds are likewise far
-# above any real value (catalogue maxima: 8900 d period, 378 h duration) —
-# they exist to reject `inf`, which passes a bare `gt=0` and poisons the
-# phase-fold arithmetic.
+# reaching MAST and the download manifest.
+#
+# The float bounds exist only to reject `inf`, which passes a bare `gt=0` and
+# leaves every cadence non-finite in the phase fold. They are not a data-quality
+# filter, so they sit above the worst value the catalogue can produce, not above
+# the plausible one: period tops out at 8900 d and duration at 378 h, but three
+# CTOIs carry malformed epochs (BJD 2.46e7, and one from 1867) that the console
+# forwards as ~2.2e7 BTJD. Bounding t0 any tighter would 422 rows that score
+# today.
 _MAX_TIC_ID = 10_000_000_000
 _MAX_PERIOD_DAYS = 100_000.0
 _MAX_DURATION_HOURS = 100_000.0
-_MAX_ABS_BTJD = 1_000_000.0
+_MAX_ABS_BTJD = 100_000_000.0
 
 # Absolute POSIX paths, but not the path part of a URL (lookbehind rejects a
 # preceding word char or slash) — MAST URLs in a failure reason are public and
