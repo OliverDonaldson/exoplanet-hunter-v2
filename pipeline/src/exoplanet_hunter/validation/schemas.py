@@ -25,8 +25,16 @@ from exoplanet_hunter.datasets.views_io import ViewArrays
 DISPOSITIONS = ["CP", "KP", "PC", "FP", "FA", "APC"]
 
 #: Kepler KOI vocabulary (koi_disposition) — the label catalogue is
-#: multi-mission, so its disposition domain is the union of both.
+#: multi-mission, so its disposition domain is the union of all three.
 KOI_DISPOSITIONS = ["CONFIRMED", "FALSE POSITIVE", "CANDIDATE"]
+
+#: K2 (k2pandc) vocabulary: the KOI strings plus REFUTED, a published planet
+#: since retracted. Mirrors data.catalog.K2_DISPOSITION_LABELS.
+K2_DISPOSITIONS = ["CONFIRMED", "FALSE POSITIVE", "CANDIDATE", "REFUTED"]
+
+#: Missions the label catalogue may carry. `tic_id` holds the mission's native
+#: target id — TIC, KIC, or EPIC — so it is only unique per mission.
+MISSIONS = ["TESS", "Kepler", "K2"]
 
 label_catalogue_schema = pa.DataFrameSchema(
     name="label_catalogue",
@@ -36,10 +44,12 @@ label_catalogue_schema = pa.DataFrameSchema(
         "t0": pa.Column(float, nullable=True),
         "duration": pa.Column(float, pa.Check.gt(0), nullable=True),
         "depth": pa.Column(float, pa.Check.ge(0), nullable=True),
-        "disposition": pa.Column(str, pa.Check.isin(DISPOSITIONS + KOI_DISPOSITIONS)),
+        "disposition": pa.Column(
+            str, pa.Check.isin(sorted({*DISPOSITIONS, *KOI_DISPOSITIONS, *K2_DISPOSITIONS}))
+        ),
         # 1 = confirmed, 0 = false positive, -1 = held-out candidate (PC).
         "label": pa.Column(int, pa.Check.isin([-1, 0, 1])),
-        "mission": pa.Column(str, pa.Check.isin(["TESS", "Kepler"])),
+        "mission": pa.Column(str, pa.Check.isin(MISSIONS)),
     },
     checks=[
         # KIC and TIC numbering overlap, so uniqueness is per mission.

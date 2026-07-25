@@ -1,6 +1,10 @@
 """Tests for the validation gates: schemas, leakage guard, promotion."""
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -11,6 +15,7 @@ from exoplanet_hunter.datasets import ViewArrays
 from exoplanet_hunter.validation import (
     assert_refresh_safe,
     candidate_catalogue_schema,
+    check_catalogue_shrink,
     check_views,
     diff_label_catalogues,
     evaluate_promotion,
@@ -24,7 +29,8 @@ from exoplanet_hunter.validation import (
 # ------------------------------------------------------------------ schemas --
 
 
-def good_labels(n: int = 6) -> pd.DataFrame:
+def good_labels(n: int = 7) -> pd.DataFrame:
+    """A well-formed slice of the real catalogue: TESS, Kepler and K2 rows."""
     return pd.DataFrame(
         {
             "tic_id": np.arange(1, n + 1),
@@ -32,9 +38,9 @@ def good_labels(n: int = 6) -> pd.DataFrame:
             "t0": np.full(n, 2458326.0),
             "duration": np.full(n, 0.1),
             "depth": np.full(n, 500.0),
-            "disposition": ["CP", "KP", "FP", "FA", "PC", "CP"][:n],
-            "label": [1, 1, 0, 0, -1, 1][:n],
-            "mission": ["TESS"] * (n - 1) + ["Kepler"],
+            "disposition": ["CP", "KP", "FP", "FA", "PC", "CONFIRMED", "REFUTED"][:n],
+            "label": [1, 1, 0, 0, -1, 1, 0][:n],
+            "mission": ["TESS", "TESS", "TESS", "TESS", "TESS", "Kepler", "K2"][:n],
         }
     )
 
@@ -67,6 +73,41 @@ def test_label_schema_accepts_koi_vocabulary():
     df = good_labels()
     df.loc[5, ["disposition", "label", "mission"]] = ["CONFIRMED", 1, "Kepler"]
     df.loc[4, ["disposition", "label", "mission"]] = ["FALSE POSITIVE", 0, "Kepler"]
+    label_catalogue_schema.validate(df, lazy=True)
+
+
+def test_label_schema_accepts_k2_vocabulary():
+    """Regression (2026-07-25): the Step-2c K2 build (7ed5603) failed the gate
+    because "K2" was never added to the mission domain, and k2pandc's REFUTED
+    was missing from the disposition domain."""
+    df = good_labels()
+    for disposition, label in (
+        ("CONFIRMED", 1),
+        ("FALSE POSITIVE", 0),
+        ("REFUTED", 0),
+        ("CANDIDATE", -1),
+    ):
+        df.loc[6, ["disposition", "label", "mission"]] = [disposition, label, "K2"]
+        label_catalogue_schema.validate(df, lazy=True)
+
+
+def test_label_schema_rejects_unknown_mission():
+    df = good_labels()
+    df.loc[6, "mission"] = "CHEOPS"
+    with pytest.raises(pandera.errors.SchemaErrors):
+        label_catalogue_schema.validate(df, lazy=True)
+
+
+def test_label_schema_rejects_zero_duration_but_allows_unknown():
+    """Regression (2026-07-25): two K2 rows carried k2pandc's `pl_trandur = 0`
+    placeholder. A zero-length transit is unphysical, so the ingest maps it to
+    NaN ("unknown") and the gate keeps rejecting a literal 0."""
+    df = good_labels()
+    df.loc[6, "duration"] = 0.0
+    with pytest.raises(pandera.errors.SchemaErrors):
+        label_catalogue_schema.validate(df, lazy=True)
+
+    df.loc[6, "duration"] = np.nan
     label_catalogue_schema.validate(df, lazy=True)
 
 
@@ -176,6 +217,157 @@ def test_assert_refresh_safe_rejects_disjoint_catalogues():
     new["tic_id"] += 1000
     with pytest.raises(ValueError, match="no targets"):
         assert_refresh_safe(old, new)
+
+
+# ------------------------------------------------------------------- shrink --
+
+
+def labels_by_mission(**counts: int) -> pd.DataFrame:
+    missions = [m for mission, k in counts.items() for m in [mission] * k]
+    n = len(missions)
+    return pd.DataFrame(
+        {
+            "tic_id": np.arange(1, n + 1),
+            "period": np.full(n, 3.0),
+            "t0": np.full(n, 2458326.0),
+            "duration": np.full(n, 0.1),
+            "depth": np.full(n, 500.0),
+            "disposition": ["CP", "FP"] * (n // 2) + ["CP"] * (n % 2),
+            "label": [1, 0] * (n // 2) + [1] * (n % 2),
+            "mission": missions,
+        }
+    )
+
+
+def test_shrink_guard_passes_on_growth():
+    old = labels_by_mission(TESS=100, Kepler=100)
+    new = labels_by_mission(TESS=120, Kepler=100, K2=30)
+    assert check_catalogue_shrink(old, new) == []
+
+
+def test_shrink_guard_tolerates_reduction_inside_threshold():
+    old = labels_by_mission(TESS=100, Kepler=100)
+    new = labels_by_mission(TESS=95, Kepler=95)
+    assert check_catalogue_shrink(old, new) == []
+
+
+def test_shrink_guard_catches_the_weekly_refresh_regression():
+    """Regression (2026-07-25): the refresh rewrote the data-of-record from
+    5,686 rows across three missions down to 1,000 TESS-only rows and all four
+    existing gates reported PASS."""
+    old = labels_by_mission(TESS=2656, Kepler=2500, K2=530)
+    new = labels_by_mission(TESS=1000)
+
+    problems = check_catalogue_shrink(old, new)
+    assert any("5686 -> 1000" in p for p in problems)
+    assert any("Kepler" in p and "K2" in p for p in problems)
+
+
+def test_shrink_guard_flags_lost_mission_at_stable_row_count():
+    old = labels_by_mission(TESS=100, K2=50)
+    new = labels_by_mission(TESS=150)
+
+    problems = check_catalogue_shrink(old, new)
+    assert len(problems) == 1
+    assert "K2 (50 rows)" in problems[0]
+
+
+def test_shrink_guard_threshold_is_configurable():
+    """The Step 2b DR25 certification retired ~21% of bare Kepler FPs."""
+    old = labels_by_mission(TESS=100, Kepler=100)
+    new = labels_by_mission(TESS=100, Kepler=58)
+
+    assert check_catalogue_shrink(old, new) != []
+    assert check_catalogue_shrink(old, new, max_shrink_frac=0.30) == []
+
+
+def test_shrink_guard_skips_empty_previous_catalogue():
+    assert check_catalogue_shrink(labels_by_mission(), labels_by_mission(TESS=10)) == []
+
+
+# ------------------------------------------------------------- shrink gate --
+
+VALIDATE_DATA = Path(__file__).resolve().parents[1] / "scripts" / "validate_data.py"
+
+
+def run_validate_data(tmp_path, *extra: str) -> tuple[int, str]:
+    """Run validate_data.py with the other artefacts pointed at absent paths.
+
+    Returns the exit code and the whitespace-normalised gate report (rich wraps
+    the handler output at the console width).
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VALIDATE_DATA),
+            "--labels",
+            str(tmp_path / "labels.parquet"),
+            "--candidates",
+            str(tmp_path / "absent.parquet"),
+            "--views",
+            str(tmp_path / "absent.npz"),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "COLUMNS": "200"},
+    )
+    return result.returncode, " ".join(result.stdout.split())
+
+
+def shrink_gate(tmp_path, old: pd.DataFrame, new: pd.DataFrame, *extra: str) -> tuple[int, str]:
+    previous = tmp_path / "labels.previous.parquet"
+    old.to_parquet(previous)
+    new.to_parquet(tmp_path / "labels.parquet")
+    return run_validate_data(tmp_path, "--previous-labels", str(previous), *extra)
+
+
+def test_shrink_gate_fails_the_run(tmp_path):
+    code, report = shrink_gate(
+        tmp_path,
+        labels_by_mission(TESS=2656, Kepler=2500, K2=530),
+        labels_by_mission(TESS=1000),
+    )
+    assert code == 1
+    assert "label-shrink FAIL" in report
+    assert "--allow-shrink" in report
+
+
+def test_shrink_gate_passes_a_healthy_refresh(tmp_path):
+    code, report = shrink_gate(
+        tmp_path, labels_by_mission(TESS=100, Kepler=100), labels_by_mission(TESS=110, Kepler=100)
+    )
+    assert code == 0
+    assert "label-shrink PASS" in report
+
+
+def test_shrink_gate_override_allows_intentional_reduction(tmp_path):
+    code, report = shrink_gate(
+        tmp_path,
+        labels_by_mission(TESS=100, Kepler=100),
+        labels_by_mission(TESS=100, Kepler=58),
+        "--allow-shrink",
+    )
+    assert code == 0
+    assert "shrink allowed" in report
+    assert "label-shrink PASS" in report
+
+
+def test_shrink_gate_honours_the_threshold_flag(tmp_path):
+    args = (
+        tmp_path,
+        labels_by_mission(TESS=100, Kepler=100),
+        labels_by_mission(TESS=100, Kepler=58),
+    )
+    assert shrink_gate(*args)[0] == 1
+    assert shrink_gate(*args, "--max-shrink-frac", "0.30")[0] == 0
+
+
+def test_shrink_gate_absent_without_previous_labels(tmp_path):
+    labels_by_mission(TESS=10, Kepler=10).to_parquet(tmp_path / "labels.parquet")
+    code, report = run_validate_data(tmp_path)
+    assert code == 0
+    assert "label-shrink" not in report
 
 
 # ---------------------------------------------------------------- promotion --

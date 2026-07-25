@@ -155,6 +155,64 @@ def test_query_k2_parses_epic_prefers_default_and_maps_labels(monkeypatch):
     assert "default_flag" not in df.columns
 
 
+def test_query_k2_maps_zero_duration_to_nan(monkeypatch):
+    """Regression (2026-07-25): k2pandc's `pl_trandur = 0` placeholder reached
+    labels.parquet as a zero-length transit and failed the label-catalogue gate."""
+
+    def fake_tap(adql, *a, **k):
+        return pd.DataFrame(
+            {
+                "epic_hostname": ["EPIC 100", "EPIC 200"],
+                "name": ["EPIC 100.01", "EPIC 200.01"],
+                "disposition": ["FALSE POSITIVE", "CONFIRMED"],
+                "default_flag": [1, 1],
+                "period": [1.6, 3.0],
+                "t0": [10.0, 11.0],
+                "depth": [None, 0.02],
+                "duration": [0.0, 0.1],
+                "teff": [5000, 4000],
+                "radius": [1.0, 0.8],
+                "logg": [4.5, 4.6],
+                "tmag": [12, 13],
+            }
+        )
+
+    monkeypatch.setattr(catalog_mod, "_tap_query", fake_tap)
+    df = _query_k2().set_index("tic_id")
+    assert pd.isna(df.loc[100, "duration"])  # placeholder -> unknown, row retained
+    assert df.loc[200, "duration"] == 0.1
+
+
+def test_query_k2_guards_period_but_not_epoch(monkeypatch):
+    """`period` shares duration's gt(0) check; `t0` has no positivity constraint."""
+
+    def fake_tap(adql, *a, **k):
+        return pd.DataFrame(
+            {
+                "epic_hostname": ["EPIC 100", "EPIC 200"],
+                "name": ["EPIC 100.01", "EPIC 200.01"],
+                "disposition": ["CONFIRMED", "CONFIRMED"],
+                "default_flag": [1, 1],
+                "period": [0.0, 3.0],
+                "t0": [0.0, -1614.0],
+                "depth": [0.02, 0.02],
+                "duration": [0.1, 0.1],
+                "teff": [5000, 4000],
+                "radius": [1.0, 0.8],
+                "logg": [4.5, 4.6],
+                "tmag": [12, 13],
+            }
+        )
+
+    monkeypatch.setattr(catalog_mod, "_tap_query", fake_tap)
+    df = _query_k2().set_index("tic_id")
+    assert pd.isna(df.loc[100, "period"])  # placeholder -> unknown
+    assert df.loc[200, "period"] == 3.0
+    # A zero or negative epoch is a real BTJD date, not a placeholder.
+    assert df.loc[100, "t0"] == 0.0
+    assert df.loc[200, "t0"] == -1614.0
+
+
 def test_build_includes_k2_when_requested(monkeypatch, tmp_path):
     _wire_sources(monkeypatch, certified={"K2.01"})
     monkeypatch.setattr(

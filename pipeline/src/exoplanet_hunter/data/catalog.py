@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -337,6 +338,13 @@ def _query_k2() -> pd.DataFrame:
     df = df.dropna(subset=["label"])
     df["label"] = df["label"].astype(int)
     df["mission"] = "K2"
+    # k2pandc publishes pl_trandur = 0 for "unknown", not a zero-length transit.
+    # `period` sits behind the same is-not-null ADQL filter and the same gt(0)
+    # schema check, so guard it identically. `t0` is deliberately left alone —
+    # an epoch has no positivity constraint (live K2 rows reach -1614 BTJD), so
+    # treating 0 as a placeholder would discard a valid row.
+    df.loc[df["duration"] <= 0, "duration"] = np.nan
+    df.loc[df["period"] <= 0, "period"] = np.nan
     # EPIC id from "EPIC 211390903" -> 211390903, stored in tic_id like the KIC.
     df["tic_id"] = (
         df["epic_hostname"]
