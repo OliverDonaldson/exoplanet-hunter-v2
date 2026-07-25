@@ -582,3 +582,39 @@ and writes `docs/figures/completeness.png` + `results/injection_recovery.parquet
 **Still open in step 3:** (b) the FPP/NFPP shortlist run
 (`validate_candidates.py --insecure-trilegal`). Optional review gaps unchanged
 (ephemeris-match test, statistical-bootstrap FA).
+
+## Validation gates repaired (2026-07-25)
+
+Commits `c5cdc37`..`bea9818`. Two follow-ups from the refresh-bug arc, both
+found by pointing the gates at the restored data-of-record.
+
+**The label-catalogue gate had been red since the K2 build (7ed5603).** The
+mission domain in `validation/schemas.py` was still `["TESS", "Kepler"]`, so
+all 530 K2 rows failed `validate_data.py --strict` — the exact invocation the
+refresh DAG runs. It went unnoticed because the only green run since was
+today's cron, which had *already* clobbered the catalogue to TESS-only rows:
+the data regression masked the schema failure. Restoring the K2 build is what
+exposed it. Also admitted `REFUTED` to the disposition domain — the ingest can
+emit it today via `K2_DISPOSITION_LABELS`, so the next refresh pulling one
+would have failed for the same reason.
+
+**k2pandc publishes `0` as its "unknown" placeholder**, and the ADQL
+`is not null` filter passes it straight through. Two live rows (EPIC
+202059377, 203485624) reached labels.parquet as zero-length transits. Fixed in
+the ingest rather than by relaxing the check — a literal zero-length transit
+should stay a hard failure. `period` now carries the same guard (same filter,
+same `gt(0)` check); **`t0` deliberately does not** — an epoch has no
+positivity constraint and live K2 rows reach −1614 BTJD, so a 0 there is a
+date, not a placeholder. `depth` needs no guard: it is `ge(0)`, and k2pandc
+uses null for unknown depth (159 K2 rows).
+
+**Shrink guard** (`validation/shrink.py`, gate `label-shrink`): fails when the
+catalogue loses more than `--max-shrink-frac` (default 10%) of its rows, or
+when any mission present in the previous catalogue drops to zero — the mission
+check unconditional, since losing one of three missions can hide inside the
+fraction. `--allow-shrink` overrides and logs what it allowed (Step 2b's DR25
+certification legitimately retired ~21% of bare Kepler FPs).
+
+Data-of-record repaired in place to match the ingest fix and pushed to R2;
+counts unchanged (5,686 = 2,656/2,500/530, 2,901 pos / 2,785 neg). All five
+gates PASS on the live artefacts, 195 tests green, tree clean.
