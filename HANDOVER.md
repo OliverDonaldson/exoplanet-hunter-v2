@@ -618,3 +618,48 @@ certification legitimately retired ~21% of bare Kepler FPs).
 Data-of-record repaired in place to match the ingest fix and pushed to R2;
 counts unchanged (5,686 = 2,656/2,500/530, 2,901 pos / 2,785 neg). All five
 gates PASS on the live artefacts, 195 tests green, tree clean.
+
+### Injection-recovery result (2026-07-25, run ca906040, 990 injections / 40 hosts)
+
+| S/N | 3 | 5 | 7 | 10 | 15 | 20 | 30 | 50 |
+|---|---|---|---|---|---|---|---|---|
+| raw | 0.26 | 0.29 | 0.34 | 0.48 | 0.63 | 0.74 | 0.86 | 0.95 |
+| baseline-corrected | 0.00 | 0.04 | 0.10 | 0.30 | 0.49 | 0.81 | 0.81 | 0.94 |
+
+**Headline: 50% completeness at S/N ≈ 15, 90% at S/N ≈ 44** (corrected). The raw
+curve says S/N 10.6 — quote the corrected one.
+
+**The raw curve is contaminated and the control arm proves it.** With *no*
+injection at all, 26.4% of host×period cells still pass threshold: 46.7% for
+planet hosts vs 12.3% for false-positive hosts. Hosts come from the labelled
+catalogue, so half carry a real transit; folded at the wrong period it still
+leaves transit-like structure, and the stellar aux describes the host either
+way. The model is partly scoring the host, not the injection.
+
+The control rate (29/110) came out bit-identical to the S/N=3 rate (29/110).
+Checked, and it is coincidence, not a wiring bug: all 110 paired probabilities
+differ (mean |Δ| 0.112) and 16 verdicts flip between the two arms — they
+happen to flip symmetrically. Curiosity worth noting: at S/N 3 the mean Δprob
+is **negative** (−0.031) — a transit too weak to detect makes the model
+slightly *less* confident, presumably by perturbing pink_snr / odd-even
+without adding convincing transit shape.
+
+Completeness is genuinely period-dependent, so it is not one curve: at S/N 10,
+P=3 d recovers 58% against P=7 d's 37% (more transits, better-sampled fold).
+
+Reproduce (resumable; the control arm alone is ~120 scores on an existing run):
+
+```bash
+caffeinate -dis /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python \
+  pipeline/scripts/injection_recovery.py --hosts 40 \
+  2>&1 | tee -a outputs/injection-recovery.log
+```
+
+`--host-label 0` restricts the pool to false-positive hosts (12.3% baseline
+instead of 26.4%) if you want a cleaner run rather than a corrected one.
+
+**Env note:** the run was launched from a shell with the *V1* env
+(`exoplanet-hunter`) active. It was still correct — the absolute interpreter
+path bypasses activation entirely, verified: `exoplanet_hunter` resolved to
+`/Users/ollie/Project/v2/pipeline/src/`, PYTHONPATH unset. This is exactly why
+the commands use the full path rather than relying on `conda activate`.
