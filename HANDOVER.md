@@ -395,3 +395,92 @@ and since-confirmed as "remaining." All shipped before this arc:
    with the probability bar. (b) The reliability diagram Ollie finds
    confusing — rethink or replace with a plain "is it well-calibrated?"
    readout. (c) Cold-start expectation-setting, empty/error states, mobile.
+
+## Step-2 data-expansion + source-review sprint (2026-07-24)
+
+Ran the whole archive-expansion data pass (2a–2d), turned a user-supplied source
+review into shipped vetting code, and built a statistical-validation layer.
+Commits `8a8a2d5`..`efb4d73` on `v2` == GitHub `main`. **Serving is UNCHANGED —
+`ca906040` (9-dim) still live on Fly; nothing deployed.**
+
+**STEP 2d RETRAIN — REJECTED by the gate (run `856872ad`, 13-dim aux + K2).**
+The payoff run of the whole data pass did NOT beat the incumbent: CV ROC-AUC
+**0.95768** ± 0.0072 vs ca906040 **0.95813** ± 0.0057 (Δ −0.00046, lost on the
+primary metric), Brier 0.07881 (a hair better), ECE 0.02818 (a hair worse), on
+**5,380 examples** (K2 landed: +562 over the 4,818 TESS+Kepler set). Registry
+unchanged; `856872ad` has no `.dvc` (rejected runs aren't published). Same null
+as the 2026-07-23 13-dim rejection: the expanded data + vetting aux yield a model
+statistically indistinguishable from (marginally under) the incumbent. **K2 did
+not move the CV headline** — plausibly K2 is harder (patchy stellar params,
+reduced-pointing systematics) and/or the model is at a task ceiling; in-
+distribution CV also can't reward K2's cross-mission generalization. The gate
+worked as designed.
+
+**Everything shipped (all in the build; none beat the incumbent on CV, but all
+correct + serving-safe):**
+- **2a POE observables (`ce5b669`)** — insolation + habitable-zone in
+  features/followup.py through the pinned contract + console columns; literature-
+  validated (TOI-715 b S=1.53 vs pub 1.56). *I regenerated candidates.parquet
+  locally but did NOT dvc-push — the live console won't show the columns until
+  `ingest_exofop` + `dvc push` (or the weekly refresh).*
+- **2b cleaner Kepler negatives (`0b3ea30`)** — fpwg/koifpp are RETIRED from the
+  archive (TAP + legacy both gone); reconstructed via DR25 koi_score
+  (`_query_certified_fp`: FALSE-POSITIVE with koi_score < 0.5, ~79% certify).
+- **2c K2 integration (`7ed5603`)** — `_query_k2` against k2pandc, EPIC-keyed,
+  mission="K2". GOTCHA: default_flag=1 omits the ephemeris for RV-confirmed
+  planets → require period+epoch+duration, prefer default → 1,364 EPIC stars
+  (315 CP / 215 FP / 834 cand). Depth percent (÷100, verified). download.py K2
+  cfg (lightkurve path); build_dataset/preprocess_only group K2 with Kepler
+  (EPIC ≠ TIC — never the TESS stellar fetch). full.yaml K2 uncapped.
+- **Log-transform aux (`8a8a2d5`)** — signed-log pink_snr + secondary_sig before
+  StandardScaler (linear probe +0.036 AUC on pink_snr; MLP within noise, so it
+  didn't flip the gate). `_log1p_centroid` untouched (live model pickles it).
+- **Source review** (Kepler DV Twicken 2018 + Vetting-Detection-Efficiency
+  Coughlin 2015 + SDET Morgan 2019 + TRICERATOPS Giacalone 2021 — PDFs in
+  ~/Downloads): our methods match the references. Shipped: **T_p secondary
+  thermal arm (`04443b0`)** (DV Eq 3 — reflected OR thermal excuses a shallow
+  secondary, rescues hot Jupiters); **TRICERATOPS FPP/NFPP validation layer
+  (`3f640da` +fixes)** — optional offline shortlist-time layer, `pip install -e
+  'pipeline[validation]'`. **NFPP VERIFIED** against the paper (WASP-156b NFPP
+  0.00 exact — the nearby-EB discrimination our CNN lacks). Hard-won: pytransit
+  import shims (`485623c`), TRILEGAL SSL bypass (`8009ef8`, its cert is
+  unverifiable), SPOC-aperture vs 5x5 (`c6f8c81`). **FPP verdict: stop chasing
+  exact reproduction** — for bright/isolated targets the aperture barely moves it
+  and the WASP-156b gap (0.75 vs 0.33) is raw-SAP LC prep, not the aperture; use
+  NFPP as the headline, FPP as directional. **Injection-recovery core (`efb4d73`)**
+  — eval/injection_recovery.py tested core (inject_box_transit / transit_snr /
+  completeness_curve); runner deferred to the served model.
+
+## Final steps — the path to done (in order)
+
+1. **Resolve the 2d rejection + reconcile data (immediate).** Read the fold
+   tables above; decide keep-vs-revert the Step-2 data pipeline (**lean KEEP** —
+   changes are correct, serving unaffected via the aux_dim branch). The
+   `data/*.dvc` pointers have sat staged across the rejected runs — reconcile:
+   on-disk data is now the K2-inclusive 13-dim build; either commit the pointer
+   bumps (data-of-record = K2 build, model still ca906040) or `git restore` them.
+2. **Propagate 2a to production.** `ingest_exofop` + `dvc push` so the live
+   console shows insolation/HZ; regenerate the data_provenance figures (K2 = a
+   third ecliptic sky band).
+3. **Build the validation runners against the served model.** (a) the
+   injection-recovery runner on eval/injection_recovery (drive real LCs through
+   preprocess + 13-dim aux + ensemble → completeness curve — the defensible
+   sensitivity number CV-AUC can't give); (b) an FPP/NFPP shortlist run
+   (`validate_candidates.py --insecure-trilegal`). Optional review gaps here:
+   ephemeris-match test, statistical-bootstrap FA (DV §3.5).
+4. **Step 3 — since-confirmed holdout eval.** Data-gated: needs a few weekly
+   Saturday refreshes to accumulate flips, then run eval_since_confirmed.py.
+5. **Step 4 — tidy sweep.** score_candidates.py still builds legacy 9-dim aux
+   (rework to share the 13-dim path before the next shortlist run); stale
+   docstrings.
+6. **FINAL — UI/UX redesign (the locked last step; do NOT do it in passing).**
+   Mission Control aesthetic, **manus** north star (source ZIP `~/Downloads/
+   Exoplanet Hunter UI Webpage Design for Vetting Console.zip`; Tailwind v4 +
+   shadcn + recharts; teal #4DFFD2 / amber #F5A623 / bg #050608; Space Grotesk/
+   Inter/JetBrains Mono). Landing mockup:
+   https://claude.ai/code/artifact/c81f29d4-a6cb-46b8-bb1d-c2a038991701. Decisions:
+   adopt Tailwind+shadcn (lift manus near-directly), three.js/R3F hero-only, no
+   anime.js. Open feedback: redesign the radar bootloader ("scanning a planet",
+   full sweep), study manus transitions, drop the two lens-flare glints, make
+   Upload first-class (small backend: FITS→preprocess→score; RA/Dec→MAST cone-
+   search→TIC→score).
