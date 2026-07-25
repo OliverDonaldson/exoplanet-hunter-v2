@@ -542,3 +542,43 @@ ad-hoc code.
 
 **Not done here:** the commits are local — `git push v2origin v2:main` is
 outstanding. Serving needs no change.
+
+## Step 3(a) — injection-recovery runner (2026-07-25)
+
+Commit `d08f574`. `pipeline/scripts/injection_recovery.py` — the completeness
+measurement CV ROC-AUC cannot give.
+
+**Design decision worth keeping:** the runner does *not* rebuild the pipeline.
+`TargetScorer.score()` takes an optional `inject=InjectionSpec(...)` that
+multiplies a box transit into the raw flux right after `lk.read`, before
+cleaning — so preprocess, the aux layout (whatever `aux_dim` the registry
+serves) and the ensemble are the shipped ones. Any parallel implementation
+would drift exactly the way `score_candidates.py` did.
+
+**Each injection targets a transit S/N; the depth is solved per host**
+(`depth_for_snr`). A fixed depth grid is useless here — measured host CDPP
+spans 22–175 ppm across the cache, so a 500 ppm transit is S/N 99 on a quiet,
+heavily-observed target and S/N 6 on a noisy one, and every injection piles
+into one or two bins. Targeting S/N samples the curve where it turns over.
+
+New in the core: `noise_ppm` (CDPP on the transit timescale — bin the
+flattened flux to the duration, MAD-sigma of the bin means; computed here
+rather than via lightkurve so the units are unambiguous) and `count_transits`.
+
+Smoke run (3 hosts × P=5 d × S/N 3/7/15/50, run ca906040, threshold 0.486):
+0/3 recovered at S/N 3, 3/3 at S/N ≥ 7 — a turnover between 3 and 7, on far
+too few hosts to quote. The real run is the command below; it is resumable
+(checkpoint parquet per injection, keyed on tic_id+period+snr_target).
+
+```bash
+caffeinate -dis /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python \
+  pipeline/scripts/injection_recovery.py --hosts 40 \
+  2>&1 | tee outputs/injection-recovery.log
+```
+
+~960 injections, expect ~30 min. Done when it logs "completeness by S/N bin"
+and writes `docs/figures/completeness.png` + `results/injection_recovery.parquet`.
+
+**Still open in step 3:** (b) the FPP/NFPP shortlist run
+(`validate_candidates.py --insecure-trilegal`). Optional review gaps unchanged
+(ephemeris-match test, statistical-bootstrap FA).
