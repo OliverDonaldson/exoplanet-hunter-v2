@@ -1,6 +1,6 @@
 outs:
-- md5: ff99c3bb71c1ceaa2dd52b4deeea608f.dir
-  size: 5150819
+- md5: 0e15b696440f9ebf06c134e4b6ef1ca0.dir
+  size: 5151685
   nfiles: 2
   hash: md5
   path: exofop
