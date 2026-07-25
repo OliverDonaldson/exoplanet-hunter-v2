@@ -694,6 +694,17 @@ leaves *every* cadence non-finite, so the phase fold has zero usable points.
 `tic_id` was likewise unbounded — `/score/-1` and a 20-digit id both reached
 MAST and the manifest.
 
+**But the bounds as first written would have broken live traffic.** Neither
+audit checked them against the catalogue. Period (max 8900 d) and duration (max
+378 h) sit comfortably inside, but `t0` at ±1e6 would have 422'd three rows the
+console can send today: three CTOIs carry malformed epochs — two at BJD 2.46e7,
+one dated 1867 — which the console's own BJD→BTJD conversion
+(`VettingPanel.tsx:217`) forwards as ~2.2e7 BTJD. They score today. Raised to
+1e8 (`8bd4118`), still rejecting `inf` and `1e400`, with all three pinned as
+tests. **The bounds are there to reject non-finite input, not to filter data
+quality** — the moment they encode a plausible range they start rejecting real
+rows.
+
 **The cache race is real but needs help to show.** A plain contended loop finds
 nothing, because CPython's 5 ms switch interval lets a short check-then-act
 finish before preemption. At `sys.setswitchinterval(1e-6)` and 320k iterations
