@@ -13,8 +13,8 @@
 make refresh                                            # full refresh, trains if warranted
 python orchestration/flows/refresh_pipeline.py --no-train      # refresh + gates only
 
-# The expansion run (feat/data-scaling): full TESS pool + Kepler, 9-dim aux
-export KEPLER_RAW_DIR=/Users/ollie/Project/data/raw_kepler     # reuse V1's cache
+# Expansion run: full TESS pool + Kepler + K2, 13-dim aux. The Kepler FITS
+# cache lives in data/raw_kepler; KEPLER_RAW_DIR only overrides that location.
 python orchestration/flows/refresh_pipeline.py --force-train --data-config full
 ```
 
@@ -30,10 +30,6 @@ another terminal. Scheduling is a one-liner once a work pool exists
   new labelled targets (confirmed + false positives), or an explicit
   `--force-train` expansion run. Label flips never count: the leakage
   guard quarantines them into the since-confirmed holdout.
-  *Known caveat:* while the catalogue build subsamples (500+500), pool
-  drift re-deals the seeded sample and inflates the "new targets" count —
-  the trigger is conservative in the wrong direction until
-  `feat/data-scaling` drops the subsampling and makes it exact.
 * **Where training runs**: locally by default; set `BURST_CMD` to dispatch
   the same step to a rented GPU (provision → run the train container
   against R2-synced shards → tear down). The flow doesn't care which.

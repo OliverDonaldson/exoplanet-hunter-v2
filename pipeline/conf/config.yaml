@@ -33,11 +33,8 @@ cv_dir: null           # null = the promoted run in models/registry.json
 out_path: results/candidates_scored.parquet
 save_every: 25
 
-# CLI-only fields read by scripts/discovery_shortlist.py and render_vetting.py.
-prob_min: 0.8           # min prob_mean for shortlist
-followup_max: null      # max community follow-ups (null = no cap)
+# CLI-only fields read by scripts/render_vetting.py.
 top_k: 30               # how many candidates to print/render
-show_discrepancies: false  # also print model-vs-ExoFOP disagreements
 prob_threshold: 0.85    # render_vetting.py: min prob to render
 prob_max: null          # render_vetting.py: max prob to render (null = no ceiling)
 ascending: false        # render_vetting.py: sort ascending (true = render lowest first)
