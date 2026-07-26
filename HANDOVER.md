@@ -868,3 +868,49 @@ looking wrong, because "download error" is a plausible thing to see.
 State for the next attempt: **3,509 targets cached and ready to score**, 743
 cached as permanent "no pipeline data", **433 left to attempt**. Nothing has
 been scored yet — `results/candidates_scored.parquet` still does not exist.
+
+## Step 3(b) stage 1 complete — the shortlist, and a bias in it (2026-07-26)
+
+`results/candidates_scored.parquet`: 4,685 TESS PC rows, **3,919 scored ok**,
+744 `no_fits` (the genuine "no pipeline data" set), 22 `preprocess_fail`.
+37.5 min for the scoring loop. The stdout fix held for the whole run — the
+closed-file count stayed at its historical 1,352 from first row to last, and
+only 2 download errors were logged, against 1,352 in the two broken runs.
+
+Score distribution over the 3,919: median **0.646**, p90 0.828, p99 0.905,
+max **0.9555**. 3,247 ≥ 0.5, 557 ≥ 0.8, **50 ≥ 0.9**, 2 ≥ 0.95. The high median
+is expected — every row is already a TFOPWG "PC", so this is a pre-vetted
+population, not a blind sample. Note the ceiling: nothing scores above 0.956,
+which is Platt saturation on this population, not a model that is ever certain.
+
+**The top of the shortlist is biased toward long-baseline targets, and the
+mechanism is not what it looks like.** Candidates with P > 400 d are 1.5% of
+the scored set but **6 of the top 20**, with a median of 0.831 and 14.0% at
+≥ 0.9 against ≤ 2.4% in every other period band. The obvious reading —
+single-transit events with unconstrained catalogue periods — is mostly wrong:
+four of those six have 2,200–2,635 d baselines (continuous-viewing-zone
+targets) covering 3.6–5.2 transits. Only 2 of the top 20 are effectively
+single-transit, and just 66 of 3,919 overall.
+
+Measured across all 3,919, against their actual light curves:
+
+| correlation with prob_mean | Spearman |
+|---|---|
+| observation baseline (span) | **+0.211** |
+| catalogue period | +0.205 |
+| **number of transits observed** | **−0.003** |
+
+**The score tracks how long the target was observed, not how many transits
+were captured.** n_transits has *zero* relationship with the score. That is
+the same effect the injection-recovery control arm found from the other
+direction — 26.4% of hosts pass threshold with no injection at all — and it is
+now measured on real candidates as well as synthetic ones: the model is
+substantially reading host and observation quality rather than transit
+repetition. Worth treating as the headline model-behaviour finding to date,
+alongside the TESS-vs-Kepler 0.906/0.989 gap.
+
+Practical effect on stage 2: don't filter the shortlist hard, the long-period
+entries are mostly well-observed CVZ targets. Do drop the 2 single-transit
+ones (TOI 2009.01 / TIC 243187830, 1.72 baselines-per-period; TOI 5725.01 /
+TIC 1042432, 1.02) — TRICERATOPS FPP on a period the light curve does not
+constrain is minutes per target for little return.
