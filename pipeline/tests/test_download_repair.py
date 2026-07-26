@@ -245,3 +245,50 @@ def test_parallel_download_leaves_stdout_usable(tmp_path, monkeypatch):
     assert not sys.stdout.closed
     # The decorator is put back afterwards.
     assert hasattr(FakeSearchResult.download_all, "__wrapped__")
+
+
+def test_staging_dir_removed_after_successful_stitch(tmp_path, monkeypatch):
+    """Staged per-sector products are debris once stitched (71 GB of it, once).
+
+    Staging must be per-target so parallel workers can't delete each other's
+    in-flight files, and each target's dir must be gone after its stitch.
+    """
+    from pathlib import Path
+
+    from exoplanet_hunter.data.download import LightCurveDownloader
+
+    staged: list[Path] = []
+
+    def fake_fetch(self, target_id, dl_dir):
+        # Simulate lightkurve/astroquery staging a per-sector product.
+        dl_dir.mkdir(parents=True, exist_ok=True)
+        (dl_dir / f"kplr{target_id}-q01_llc.fits").write_bytes(b"sector bytes")
+        staged.append(dl_dir)
+
+        class _LC:
+            def __len__(self):
+                return 100
+
+            def to_fits(self, path, overwrite=True):
+                Path(path).write_bytes(b"stitched")
+
+        class _Coll:
+            def __len__(self):
+                return 1
+
+            def stitch(self):
+                return _LC()
+
+        return _Coll()
+
+    monkeypatch.setattr(LightCurveDownloader, "_fetch_kepler_via_direct_archive", fake_fetch)
+
+    dl = LightCurveDownloader(tmp_path, author="Kepler", cadence=None)
+    results = dl.download_many([111, 222], missions=["Kepler"] * 2, workers=2)
+
+    assert all(r.success for r in results)
+    assert [p.name for p in sorted(staged)] == ["kic_111", "kic_222"]  # per-target dirs
+    for p in staged:
+        assert not p.exists(), f"staging dir {p} should be removed after stitch"
+    assert (tmp_path / ".lightkurve").exists()  # the shared root is not touched
+    assert (tmp_path / "kic_111.fits").read_bytes() == b"stitched"

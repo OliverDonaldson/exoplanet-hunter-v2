@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sys
 import threading
 import time
@@ -319,7 +320,16 @@ class LightCurveDownloader:
                         reason=entry.get("reason", "previously failed"),
                     )
 
-        dl_dir = self._target_path(target_id, mission).parent / ".lightkurve"
+        # Per-target staging dir, removed after a successful stitch. It must be
+        # per-target: download_many runs several workers against one cache dir,
+        # so cleaning a shared staging root would delete other targets'
+        # in-flight files. Before the cleanup existed, staging had accumulated
+        # 71 GB of stitched-and-forgotten products.
+        dl_dir = (
+            self._target_path(target_id, mission).parent
+            / ".lightkurve"
+            / f"{mcfg['prefix']}_{target_id}"
+        )
 
         # --- Try direct archive first (Kepler only) ---
         # archive.stsci.edu serves the same Kepler LLC FITS files lightkurve
@@ -404,6 +414,11 @@ class LightCurveDownloader:
             stitched.to_fits(target_path, overwrite=True)
         except Exception as exc:
             return self._record_failure(target_id, mission, f"fits write error: {exc}")
+
+        # The staged per-sector products have no purpose once stitched. On
+        # failure the dir is kept: a truncated file is what the corrupt-evict
+        # retry needs to find.
+        shutil.rmtree(dl_dir, ignore_errors=True)
 
         result = DownloadResult(
             target_id=target_id,
