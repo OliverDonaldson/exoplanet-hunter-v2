@@ -1,6 +1,6 @@
 """The .npz interchange format for processed views.
 
-`build_dataset.py` / `preprocess_only.py` write a single views.npz:
+`build_dataset.py` writes a single views.npz:
 
     global_views   (N, 2001) float32
     local_views    (N, 201)  float32

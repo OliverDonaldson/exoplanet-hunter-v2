@@ -35,7 +35,7 @@ improvements) — the battle-tested science core only:
 | training/calibration: temperature scaling (upgraded to Platt scaling post-audit) | registries/paths tied to V1 disk layout |
 | eval: metrics, six-panel vetting figure | all preprocessed data artefacts (fresh data only) |
 | data: catalogue TAP builder, downloader, stellar params | |
-| scripts: build_dataset, preprocess_only, score_target/candidates, render_vetting | |
+| scripts: build_dataset, score_candidates, render_vetting | |
 
 **No data artefacts were ported.** The first V2 milestone regenerates the
 catalogue and views from NASA sources so the new pipeline is validated

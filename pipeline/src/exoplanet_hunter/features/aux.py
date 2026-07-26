@@ -26,7 +26,8 @@ CENTROID_COL = 8
 #: Width of the vector the current training build emits.
 TRAINING_AUX_DIM = 13
 
-#: The pre-vetting-features layout preprocess_only still emits.
+#: The 9-dim layout of promoted runs that predate the vetting features
+#: (the live ca906040 serves it; the aux_dim branch keeps them loadable).
 LEGACY_AUX_DIM = 9
 
 AUX_NAMES_13 = (

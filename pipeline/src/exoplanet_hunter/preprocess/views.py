@@ -127,8 +127,8 @@ def flatten_and_build_views(
 ) -> Views:
     """Mask-flatten a cleaned light curve at a known ephemeris, then bin into views.
 
-    The shared inference-time preprocessing tail used by both the single-target
-    scorer (`scripts/score_target.py`) and the bulk scorer
+    The shared inference-time preprocessing tail used by both the API's
+    `TargetScorer` and the bulk scorer
     (`scripts/score_candidates.py`): the transit is masked out of the
     Savitzky-Golay fit so the spline cannot absorb the dip, then the
     masked-flat curve is phase-folded into (global, local) views. Keeping this

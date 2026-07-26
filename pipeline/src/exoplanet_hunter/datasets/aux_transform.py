@@ -2,7 +2,7 @@
 
 The pipeline (median impute → log the heavy-tailed columns → standardise) is
 fitted per fold on training rows and persisted in the calibration bundle —
-that is the serving contract `score_target` relies on. Training, however,
+that is the serving contract `TargetScorer` relies on. Training, however,
 streams examples through tf.data where a pickled sklearn object can't run,
 so `tf_aux_transform` replays the *fitted constants* (medians, means, stds)
 as tensor ops. `aux_constants_from_pipeline` is the only bridge between the

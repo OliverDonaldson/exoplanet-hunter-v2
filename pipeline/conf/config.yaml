@@ -14,19 +14,9 @@ defaults:
 project_name: exoplanet-hunter
 seed: 42
 
-# CLI-only fields read by scripts/score_target.py. Declared here (rather than
-# appended with `+key=val`) so the script's documented invocation works:
-#   python scripts/score_target.py tic_id=150428135
-tic_id: null
-model_type: cnn      # "cnn" | "rf"
-force_download: false
-period: null         # if null, BLS searches for one
-t0: null
-duration_h: null
-n_mc: 50             # MC-Dropout forward passes
-
 # CLI-only fields read by scripts/score_candidates.py. Defaults score the full
 # pool with the currently promoted ensemble.
+n_mc: 50               # MC-Dropout forward passes
 max_candidates: null   # truncate to first N (sanity check)
 limit_mission: null    # "TESS" | "Kepler" | null (both)
 cv_dir: null           # null = the promoted run in models/registry.json
