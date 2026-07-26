@@ -173,3 +173,38 @@ def test_validate_target_raises_helpful_error_without_dep(monkeypatch):
             flux=np.ones(50),
             flux_err=1e-4,
         )
+
+
+def test_calc_depths_receives_a_fraction_not_ppm(monkeypatch):
+    """TRICERATOPS' calc_depths docstring says ppm but its arithmetic wants a
+    fraction: it computes tdepth/fluxratio per star then zeroes anything > 1.
+    Fed ppm, every star zeroes and only the 12 target-side scenarios remain
+    with no evidence computed — uniform 1/12 each, so FPP is exactly
+    1 - 3/12 = 0.75 and NFPP falls to the hardcoded 0.0 branch, identically
+    for every target. That is what a whole 20-target shortlist returned.
+    """
+    monkeypatch.setattr(sv, "_load_target_cls", lambda: _FakeTarget)
+    dt, norm, sigma = sv.prepare_lightcurve(*_boxed_transit(), period=3.0, t0=1.0, duration=0.1)
+    captured: dict = {}
+
+    class _Capturing(_FakeTarget):
+        def calc_depths(self, tdepth, all_ap_pixels=None):
+            captured["tdepth"] = tdepth
+            super().calc_depths(tdepth, all_ap_pixels)
+
+    monkeypatch.setattr(sv, "_load_target_cls", lambda: _Capturing)
+    sv.validate_target(
+        tic_id=12345,
+        sectors=np.array([1, 2]),
+        period_days=3.0,
+        depth_ppm=602.0,
+        phase_time=dt,
+        flux=norm,
+        flux_err=sigma,
+        snr=25.0,
+        n_draws=1000,
+        use_pipeline_aperture=False,
+    )
+    assert captured["tdepth"] == pytest.approx(602.0e-6)
+    # The degenerate regime is anything that cannot survive the > 1 cut.
+    assert captured["tdepth"] <= 1.0

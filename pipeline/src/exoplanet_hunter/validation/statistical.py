@@ -342,7 +342,12 @@ def validate_target(
                 "default (FPP will read looser/higher)",
                 tic_id,
             )
-    tgt.calc_depths(tdepth=float(depth_ppm), all_ap_pixels=apertures)
+    # calc_depths' docstring says ppm, but its arithmetic needs a fraction:
+    # it computes tdepth/fluxratio per star and then zeroes anything > 1. Fed
+    # ppm, every star zeroes, leaving 12 scenarios with no evidence computed —
+    # a uniform 1/12 each, so FPP is exactly 1-3/12 = 0.75 and NFPP falls to
+    # the hardcoded 0.0 branch, for every target.
+    tgt.calc_depths(tdepth=float(depth_ppm) / 1e6, all_ap_pixels=apertures)
     tgt.calc_probs(
         time=np.asarray(phase_time, dtype=float),
         flux_0=np.asarray(flux, dtype=float),
