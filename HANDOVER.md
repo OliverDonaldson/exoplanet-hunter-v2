@@ -972,6 +972,20 @@ made refresh_pipeline's "gates are the same code CI runs" false. Both jobs now
 run the real scripts against synthetic fixtures the generator validates with
 the gates' own schemas; the promotion job asserts both directions.
 
+**Verified end-to-end on a real target.** TIC 451645081 (TOI 783.01, S/N 84.5,
+1,372 nearby stars), depth fix + vendored fork, n_draws=200k:
+
+| | before | after |
+|---|---|---|
+| FPP | 0.75 (constant), then NaN | **0.0258** |
+| NFPP | 0.0 (hardcoded branch) | **0.00059** (genuinely summed) |
+| best_scenario | *(blank)* | **TP** |
+| classification | `likely_fp` | **`likely_planet`** |
+
+The verdict **inverted**. The invalid run was not merely imprecise — it called
+a likely planet a likely false positive, and would have done so for anything
+the shortlist put in front of it.
+
 ### Next: Stage 1 — ExoMiner-grade inputs
 
 Rerun the FPP/NFPP top 20 on the vendored fork first — that closes step 3(b)
