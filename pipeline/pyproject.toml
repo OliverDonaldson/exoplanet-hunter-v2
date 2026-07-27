@@ -52,6 +52,14 @@ orchestration = [
 # Statistical validation of shortlist candidates (Giacalone 2021). Heavy and
 # network-bound (TIC queries, pixel cutouts, TRILEGAL) — kept out of the core
 # and serving image; installed only where the shortlist is vetted.
+#
+# Install the VENDORED fork, not PyPI — the FPP/NFPP numbers this project
+# publishes depend on its numerical fixes, and stock 1.0.20 satisfies this
+# same constraint while silently returning different (sometimes constant)
+# values:
+#     pip install -e pipeline/vendor/triceratops --no-deps
+# See pipeline/vendor/triceratops/README.md. test_vendor_triceratops.py fails
+# if the environment resolves a stock install instead.
 validation = [
     "triceratops>=1.0",
 ]
@@ -79,6 +87,9 @@ exoplanet_hunter = ["py.typed"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests", "scripts"]
+# Third-party source kept verbatim so upstream diffs stay readable; our own
+# patches are documented in its README rather than reformatted to our style.
+extend-exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = [

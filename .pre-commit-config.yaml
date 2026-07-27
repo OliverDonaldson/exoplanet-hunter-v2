@@ -1,3 +1,8 @@
+# Vendored third-party source is kept byte-for-byte as upstream ships it, so
+# `diff` against a new release shows only our documented patches. Formatting
+# hooks must not touch it.
+exclude: ^pipeline/vendor/
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.11
