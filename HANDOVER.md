@@ -914,3 +914,83 @@ entries are mostly well-observed CVZ targets. Do drop the 2 single-transit
 ones (TOI 2009.01 / TIC 243187830, 1.72 baselines-per-period; TOI 5725.01 /
 TIC 1042432, 1.02) — TRICERATOPS FPP on a period the light curve does not
 constrain is minutes per target for little return.
+
+## Stage 0 of the ExoMiner rebuild (2026-07-26)
+
+Commits `edd3715`..`ffe974e`. **Serving still `ca906040` (9-dim) on Fly —
+untouched, nothing deployed.** 231 tests green, tree clean.
+
+Direction set by Ollie after reviewing NASA's ExoMiner: rebuild the backend
+heavily inspired by ExoMiner++, reorganise the repo in its style, UI redesign
+stays the locked final step. Full analysis and staging in
+[docs/roadmap.md](docs/roadmap.md); what the model eats today, and what it
+does not, in [docs/features.md](docs/features.md).
+
+**The stage-2 shortlist result was not a result.** All 20 targets returned
+FPP=0.75 and NFPP=0.0 — identical to twelve decimal places across S/N 3.1–84.5
+and 17–1,372 nearby stars. TRICERATOPS' `calc_depths` docstring says ppm but
+its arithmetic needs a **fraction** (it computes `tdepth/fluxratio` and zeroes
+anything > 1), so ppm zeroed every star, leaving 12 target-side scenarios with
+no evidence computed: a uniform 1/12 each, FPP = 1 − 3/12 = 0.75 exactly, NFPP
+from a hardcoded branch. Proved on TIC 77175217 — ppm gives 0 of 51 stars
+surviving, the fraction gives the target at the right depth. Fixed in
+`edd3715`. **`results/candidates_validated.csv` from 2026-07-26 is invalid in
+every row** and must be regenerated.
+
+**Ollie supplied a patched TRICERATOPS fork; it is now vendored** at
+`pipeline/vendor/triceratops` (MIT, `1.0.20+exohunter.1`). It fixes the NaN the
+depth fix exposed next — stock normalisation is `exp(lnZ)/Σexp(lnZ)`, which is
+0/0 once the evidences underflow — plus a `log10` background prior added to
+natural-log likelihoods (biasing FPP *low*, toward validating planets),
+swapped collision masks in the parallel EB paths, and a per-pixel `dblquad`
+PSF integral replaced by its exact `ndtr` form. A version pin cannot express
+this: stock 1.0.20 satisfies `triceratops>=1.0` and silently returns different
+numbers, so `test_vendor_triceratops.py` fails if the env resolves a stock
+install. NC-05 is ours — the fork shipped only NumPy shims, so the package
+could not import standalone.
+
+**71 GB of staging deleted** (`data/raw/.lightkurve`; 0 of 9,953 manifest paths
+pointed into it — pure post-stitch debris) and the cause fixed: staging is now
+per-target and removed after its own stitch. It has to be per-target because
+`download_many` runs several workers against one cache dir.
+
+**Two landmines deleted.** `preprocess_only.py` wrote 9-dim aux into the same
+`views.npz` `build_dataset.py` writes at 13, and was the last script bypassing
+`build_labels_from_cfg` — its hand-rolled request had no K2 fields, so running
+the *documented recovery script* silently dropped all 530 K2 rows.
+`score_target.py` was the last hand-rolled aux implementation, capped at 9
+dims. Both fully superseded; single-target scoring is the API or `TargetScorer`.
+
+**The four remaining audit items are closed.** `promotion_gate --models-dir`
+resolved the registry's relative path against the caller's cwd; `make
+data-push/pull` shelled out to a bare `dvc` (the launchd failure class — and a
+`command -v` probe here resolved to a path that does not exist, so every target
+that runs project code now goes through `$(PYTHON)`); the flow's `train()` ran
+without a data group so MLflow named a full build `cnn-cv-default`; and
+`ci.yml`'s promised `catalogue-gate`/`promotion-gate` jobs never existed, which
+made refresh_pipeline's "gates are the same code CI runs" false. Both jobs now
+run the real scripts against synthetic fixtures the generator validates with
+the gates' own schemas; the promotion job asserts both directions.
+
+### Next: Stage 1 — ExoMiner-grade inputs
+
+Rerun the FPP/NFPP top 20 on the vendored fork first — that closes step 3(b)
+with numbers that mean something:
+
+```bash
+caffeinate -dis /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python \
+  pipeline/scripts/validate_candidates.py \
+  --candidates data/labels/candidates.parquet \
+  --shortlist results/candidates_scored.parquet \
+  --top 20 --out results/candidates_validated.csv --insecure-trilegal \
+  2>&1 | tee outputs/validate-candidates.log
+```
+
+Skip TOI 2009.01 (TIC 243187830) and TOI 5725.01 (TIC 1042432) — effectively
+single-transit, so FPP on an unconstrained period buys little. Read NFPP as the
+headline and FPP as directional.
+
+Then Stage 1 proper: the new view set (301/31 with variance channels, odd/even,
+secondary, centroid, trend, unfolded per-transit, momentum dump, periodogram
+pair), TESS DV XML ingest for difference images and DV scalars, Gaia RUWE, and
+the FFI fallback for part of the 744 `no_fits`.
