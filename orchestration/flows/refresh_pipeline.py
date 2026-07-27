@@ -132,14 +132,20 @@ def preprocess_and_shard(data_config: str) -> None:
 
 
 @task
-def train() -> None:
-    """Local training, or the GPU burst when $BURST_CMD is set."""
+def train(data_config: str) -> None:
+    """Local training, or the GPU burst when $BURST_CMD is set.
+
+    The trainer reads shards already on disk, so the data group changes
+    nothing about *what* trains — but the MLflow run is named
+    cnn-cv-<data.name>, and without the override a full build was recorded
+    as "cnn-cv-default".
+    """
     burst = os.environ.get("BURST_CMD")
     if burst:
         get_run_logger().info("dispatching to GPU burst: %s", burst)
         _run(shlex.split(burst))
     else:
-        _run([PYTHON, "-m", "exoplanet_hunter.training.train"])
+        _run([PYTHON, "-m", "exoplanet_hunter.training.train", f"data={data_config}"])
 
 
 @task
@@ -206,7 +212,7 @@ def refresh_pipeline(
 
     if decide_training(previous, min_new_labelled, force_train):
         preprocess_and_shard(data_config)
-        train()
+        train(data_config)
         promoted = promotion_gate()
         registry = json.loads((REPO_ROOT / "models" / "registry.json").read_text())
         _notify(

@@ -104,7 +104,13 @@ def load_incumbent_summary(models_dir: Path) -> dict[str, Any] | None:
     registry = load_registry(models_dir)
     if registry is None:
         return None
-    return json.loads(Path(registry["cv_summary"]).read_text())
+    # Registry paths are repo-root-relative ("models/cv/<run>/..."); resolve
+    # against models_dir's parent, not the caller's cwd, so
+    # `promotion_gate.py --models-dir` works from anywhere.
+    summary_path = Path(registry["cv_summary"])
+    if not summary_path.is_absolute():
+        summary_path = models_dir.parent / summary_path
+    return json.loads(summary_path.read_text())
 
 
 def publishable_cv_dirs(models_dir: Path) -> list[Path]:

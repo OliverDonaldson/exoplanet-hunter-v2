@@ -476,3 +476,25 @@ def test_publishable_cv_dirs_skips_partial_dirs(tmp_path):
 
 def test_publishable_cv_dirs_empty_without_cv_root(tmp_path):
     assert publishable_cv_dirs(tmp_path) == []
+
+
+def test_incumbent_summary_resolves_registry_path_from_any_cwd(tmp_path, monkeypatch):
+    """Registry paths are repo-root-relative; the gate must not resolve them
+    against the caller's cwd (`promotion_gate.py --models-dir` from elsewhere
+    read the wrong file or crashed)."""
+    root = tmp_path / "repo"
+    models_dir = root / "models"
+    cv_dir = models_dir / "cv" / "run123"
+    cv_dir.mkdir(parents=True)
+    (cv_dir / "cv_summary.json").write_text(json.dumps(summary(0.93, 0.09)))
+    (models_dir / "registry.json").write_text(
+        json.dumps({"run_id": "run123", "cv_summary": "models/cv/run123/cv_summary.json"})
+    )
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    incumbent = load_incumbent_summary(models_dir)
+    assert incumbent is not None
+    assert incumbent["summary"]["test_roc_auc"]["mean"] == 0.93

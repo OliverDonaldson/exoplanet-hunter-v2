@@ -45,6 +45,54 @@ jobs:
         working-directory: frontend
         run: npm install && npm run build
 
-  # feat/validation-gates adds two jobs here:
-  #   catalogue-gate: Pandera checks on the refreshed catalogue
-  #   promotion-gate: candidate model must beat current best CV score
+  # These run the same scripts the refresh DAG runs, so refresh_pipeline's
+  # "gates are the same code CI runs" is literally true. CI has no R2
+  # credentials and cannot pull the real artefacts; the fixtures are synthetic
+  # but validated by the gates' own schemas, so a schema or gate change that
+  # breaks the scripts fails here. This does not check production data — that
+  # is the DAG's job, on the real artefacts.
+  catalogue-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -e ./pipeline[dev]
+      - name: Build fixtures
+        run: python .github/scripts/make_gate_fixtures.py "$RUNNER_TEMP/fixtures"
+      - name: Validation gates (strict)
+        run: |
+          python pipeline/scripts/validate_data.py --strict \
+            --labels "$RUNNER_TEMP/fixtures/labels.parquet" \
+            --candidates "$RUNNER_TEMP/fixtures/candidates.parquet" \
+            --views "$RUNNER_TEMP/fixtures/views.npz" \
+            --previous-labels "$RUNNER_TEMP/fixtures/labels_previous.parquet"
+
+  promotion-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -e ./pipeline[dev]
+      - name: Build fixtures
+        run: python .github/scripts/make_gate_fixtures.py "$RUNNER_TEMP/fixtures"
+      - name: A better candidate is promoted
+        run: |
+          python pipeline/scripts/promotion_gate.py \
+            "$RUNNER_TEMP/fixtures/candidate_better.json" \
+            --models-dir "$RUNNER_TEMP/fixtures/models"
+      - name: A worse candidate is rejected
+        run: |
+          if python pipeline/scripts/promotion_gate.py \
+               "$RUNNER_TEMP/fixtures/candidate_worse.json" \
+               --models-dir "$RUNNER_TEMP/fixtures/models"; then
+            echo "::error::gate promoted a candidate that loses on ROC-AUC"
+            exit 1
+          fi
