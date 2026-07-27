@@ -47,3 +47,8 @@ optuna.db
 # Training-run outputs (plots, tier tables) — MLflow/DVC territory
 results/
 .claude/
+
+# TRICERATOPS writes <TIC>_TRILEGAL.csv into the cwd (vendor funcs.py:331).
+# Per-target star-count queries — regenerable, and one got committed by a
+# `git add -A` during a validation run.
+*_TRILEGAL.csv

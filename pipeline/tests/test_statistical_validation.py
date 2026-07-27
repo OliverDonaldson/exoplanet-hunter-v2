@@ -4,6 +4,8 @@ The heavy dependency + its network calls are never imported: the pure helpers
 are tested directly and the orchestration is tested against a fake target class.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -208,3 +210,155 @@ def test_calc_depths_receives_a_fraction_not_ppm(monkeypatch):
     assert captured["tdepth"] == pytest.approx(602.0e-6)
     # The degenerate regime is anything that cannot survive the > 1 cut.
     assert captured["tdepth"] <= 1.0
+
+
+# ------------------------------------------------------- degeneracy guards --
+
+
+def test_uniform_posterior_is_degenerate():
+    """A flat posterior means the evidence integral discriminated nothing.
+
+    TRICERATOPS initialises lnZ = zeros(N) and fills it per scenario; if
+    nothing fills it the evidences stay equal, normalise to uniform, and FPP
+    becomes the constant 1 - 3/N. That is arithmetic, not a measurement.
+    """
+    assert sv.is_degenerate_posterior({f"s{i}": 1 / 21 for i in range(21)})
+    assert sv.is_degenerate_posterior({"only": 1.0})  # nothing to compare
+    assert not sv.is_degenerate_posterior({"TP": 0.9, "EB": 0.07, "NEB": 0.03})
+
+
+def test_tic_441804533_signature_is_caught():
+    """The real failure: 21 uniform scenarios -> FPP 6/7, NFPP 2/7.
+
+    The vendored fork does NOT catch this — its FPP_degenerate flags -inf and
+    NaN evidences, but uniform *finite* evidences normalise cleanly and report
+    status "ok". Reported as likely_nearby_fp before this guard existed.
+    """
+    n = 21
+    probs = np.full(n, 1 / n)
+    fpp = 1 - (probs[0] + probs[3] + probs[9])
+    nfpp = probs[15:].sum()
+    assert fpp == pytest.approx(6 / 7)
+    assert nfpp == pytest.approx(2 / 7)
+    # Without the guard this is a confident-looking nearby-FP verdict.
+    assert sv.classify(fpp, nfpp) == sv.LIKELY_NEARBY_FP
+    assert sv.classify(fpp, nfpp, degenerate=True) == sv.DEGENERATE
+
+
+def test_classify_rejects_non_finite():
+    """FPP=NaN previously fell through every threshold to "inconclusive"."""
+    assert sv.classify(float("nan"), 0.0) == sv.DEGENERATE
+    assert sv.classify(0.01, float("nan")) == sv.DEGENERATE
+
+
+def test_validate_target_flags_degenerate_run(monkeypatch):
+    """End to end: a uniform posterior must not be reported as a disposition."""
+
+    class _UniformTarget(_FakeTarget):
+        def calc_probs(self, time, flux_0, flux_err_0, P_orb, **kwargs):
+            n = 21
+            self.probs = pd.DataFrame(
+                {"scenario": [f"S{i}" for i in range(n)], "prob": [1 / n] * n}
+            )
+            self.FPP = 1 - 3 / n
+            self.NFPP = (n - 15) / n
+            self.FPP_degenerate = False  # the fork does not catch this case
+
+    monkeypatch.setattr(sv, "_load_target_cls", lambda: _UniformTarget)
+    dt, norm, sigma = sv.prepare_lightcurve(*_boxed_transit(), period=3.0, t0=1.0, duration=0.1)
+    result = sv.validate_target(
+        tic_id=441804533,
+        sectors=np.array([1]),
+        period_days=3.0,
+        depth_ppm=1000.0,
+        phase_time=dt,
+        flux=norm,
+        flux_err=sigma,
+        snr=22.0,
+        n_draws=1000,
+        use_pipeline_aperture=False,
+    )
+    assert result.degenerate
+    assert result.classification == sv.DEGENERATE
+    assert "uniform posterior across 21 scenarios" in result.degenerate_reason
+
+
+def test_validate_target_honours_the_fork_flag(monkeypatch):
+    """The other half: -inf/NaN evidences, which the fork does flag."""
+
+    class _FlaggedTarget(_FakeTarget):
+        def calc_probs(self, time, flux_0, flux_err_0, P_orb, **kwargs):
+            self.probs = pd.DataFrame({"scenario": ["TP", "EB", "NEB"], "prob": [0.0, 0.0, 0.0]})
+            self.FPP = 1.0
+            self.NFPP = 0.0
+            self.FPP_degenerate = True
+
+    monkeypatch.setattr(sv, "_load_target_cls", lambda: _FlaggedTarget)
+    dt, norm, sigma = sv.prepare_lightcurve(*_boxed_transit(), period=3.0, t0=1.0, duration=0.1)
+    result = sv.validate_target(
+        tic_id=999,
+        sectors=np.array([1]),
+        period_days=3.0,
+        depth_ppm=1000.0,
+        phase_time=dt,
+        flux=norm,
+        flux_err=sigma,
+        snr=22.0,
+        n_draws=1000,
+        use_pipeline_aperture=False,
+    )
+    assert result.degenerate
+    assert result.classification == sv.DEGENERATE
+    assert "triceratops flagged" in result.degenerate_reason
+
+
+def test_healthy_posterior_is_not_flagged(monkeypatch):
+    """The guard must not fire on a real result (TIC 451645081's shape)."""
+    monkeypatch.setattr(sv, "_load_target_cls", lambda: _FakeTarget)
+    dt, norm, sigma = sv.prepare_lightcurve(*_boxed_transit(), period=3.0, t0=1.0, duration=0.1)
+    result = sv.validate_target(
+        tic_id=451645081,
+        sectors=np.array([1, 2]),
+        period_days=8.1,
+        depth_ppm=1000.0,
+        phase_time=dt,
+        flux=norm,
+        flux_err=sigma,
+        snr=84.5,
+        n_draws=1000,
+        use_pipeline_aperture=False,
+    )
+    assert not result.degenerate
+    assert result.degenerate_reason is None
+    assert result.classification != sv.DEGENERATE
+
+
+def test_per_target_timeout_abandons_and_continues():
+    """One pathological target must not stall the run.
+
+    A single target ran 10 h at 99% CPU producing nothing, and every target
+    behind it waited. SIGALRM fires between operations, so this cannot
+    interrupt one long C call — it escapes a Python-level loop, which is where
+    TRICERATOPS spends its time (a scenario loop).
+    """
+    import importlib.util
+    import time as _time
+
+    spec = importlib.util.spec_from_file_location(
+        "_vc", Path(__file__).resolve().parents[1] / "scripts" / "validate_candidates.py"
+    )
+    vc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vc)
+
+    with pytest.raises(vc.TargetTimeout), vc._time_limit(1):
+        deadline = _time.monotonic() + 10
+        while _time.monotonic() < deadline:
+            pass
+
+    # The alarm is cleared afterwards, so the next target gets a full budget.
+    with vc._time_limit(5):
+        _time.sleep(0.01)
+
+    # 0 disables the limit entirely.
+    with vc._time_limit(0):
+        _time.sleep(0.01)

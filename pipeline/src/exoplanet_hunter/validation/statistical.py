@@ -29,7 +29,7 @@ Caveats carried straight from the paper:
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -53,15 +53,48 @@ LIKELY_PLANET = "likely_planet"
 LIKELY_NEARBY_FP = "likely_nearby_fp"
 LIKELY_FP = "likely_fp"
 INCONCLUSIVE = "inconclusive"
+#: Not a disposition — the run produced no usable posterior. Distinct from
+#: INCONCLUSIVE, which is a real answer meaning "needs follow-up".
+DEGENERATE = "degenerate"
+
+#: Scenario posteriors this close to uniform mean the evidence integral did not
+#: discriminate between hypotheses at all. Tight because a genuine posterior is
+#: never this flat: TIC 441804533 came back at exactly 1/21 across 21 scenarios.
+_UNIFORM_POSTERIOR_RTOL = 1e-9
 
 
-def classify(fpp: float, nfpp: float) -> str:
+def is_degenerate_posterior(scenario_probs: Mapping[str, float]) -> bool:
+    """True when every scenario got the same probability.
+
+    TRICERATOPS initialises ``lnZ = np.zeros(N_scenarios)`` and fills it per
+    scenario. If nothing fills it — no star survives the depth cut, say — the
+    evidences stay equal and normalise to a uniform posterior, which then
+    yields a *constant* FPP of ``1 - 3/N`` and NFPP of ``(N-15)/N``. Those are
+    arithmetic, not measurements.
+
+    The vendored fork's ``FPP_degenerate`` does not cover this: it flags
+    all-``-inf`` and NaN/+inf evidences, but uniform *finite* evidences
+    normalise cleanly and report status "ok".
+    """
+    values = list(scenario_probs.values())
+    if len(values) < 2:
+        return True
+    return bool(np.allclose(values, values[0], rtol=_UNIFORM_POSTERIOR_RTOL, atol=0.0))
+
+
+def classify(fpp: float, nfpp: float, *, degenerate: bool = False) -> str:
     """Map an (FPP, NFPP) pair to a disposition (Giacalone 2021, §4).
 
     A high NFPP means a resolved neighbour is the likely source, so it takes
     precedence; otherwise a high FPP means a target-side false positive (e.g. an
     EB on the target). Only a low NFPP *and* low FPP validates a planet.
+
+    ``degenerate`` short-circuits everything: a failed computation must not be
+    dressed up as a verdict. TIC 441804533 returned FPP 6/7 and NFPP 2/7 from a
+    uniform posterior and was reported as ``likely_nearby_fp``.
     """
+    if degenerate or not (np.isfinite(fpp) and np.isfinite(nfpp)):
+        return DEGENERATE
     if nfpp > NFPP_NEARBY_FP:
         return LIKELY_NEARBY_FP
     if fpp >= FPP_LIKELY:
@@ -140,6 +173,10 @@ class StatisticalValidation:
     snr: float | None = None
     snr_reliable: bool | None = None
     contrast_curve_used: bool = False
+    #: The posterior carries no information — treat fpp/nfpp as absent, not as
+    #: an answer. See `is_degenerate_posterior` and the fork's FPP_degenerate.
+    degenerate: bool = False
+    degenerate_reason: str | None = None
 
 
 def _install_triceratops_compat_shims() -> None:
@@ -367,15 +404,38 @@ def validate_target(
     # on padding rows, so filter those out rather than report an empty label.
     named = {s: p for s, p in scenario_probs.items() if s.strip()}
     best_scenario = max(named, key=lambda s: named[s], default="")
+
+    # Two independent degeneracy checks, because neither covers the other.
+    # The fork flags -inf/NaN evidences; a uniform *finite* posterior
+    # normalises cleanly and reports "ok" while carrying no information.
+    reasons = []
+    if bool(getattr(tgt, "FPP_degenerate", False)):
+        reasons.append("triceratops flagged the evidences (-inf or NaN)")
+    if is_degenerate_posterior(scenario_probs):
+        reasons.append(f"uniform posterior across {len(scenario_probs)} scenarios")
+    if not np.isfinite(fpp) or not np.isfinite(nfpp):
+        reasons.append("non-finite FPP/NFPP")
+    if reasons:
+        log.warning(
+            "[validation] TIC %d: degenerate result (%s) — FPP=%.6g NFPP=%.6g are "
+            "arithmetic, not measurements",
+            int(tic_id),
+            "; ".join(reasons),
+            fpp,
+            nfpp,
+        )
+
     return StatisticalValidation(
         tic_id=int(tic_id),
         fpp=fpp,
         nfpp=nfpp,
-        classification=classify(fpp, nfpp),
+        classification=classify(fpp, nfpp, degenerate=bool(reasons)),
         best_scenario=best_scenario,
         scenario_probs=scenario_probs,
         n_nearby_stars=len(tgt.stars),
         snr=snr,
         snr_reliable=(snr >= SNR_RELIABLE_MIN) if snr is not None else None,
         contrast_curve_used=contrast_curve_file is not None,
+        degenerate=bool(reasons),
+        degenerate_reason="; ".join(reasons) or None,
     )

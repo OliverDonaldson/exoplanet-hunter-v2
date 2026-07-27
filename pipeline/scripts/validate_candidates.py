@@ -27,6 +27,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import signal
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -38,6 +41,37 @@ from exoplanet_hunter.validation.statistical import (
     prepare_lightcurve,
     validate_target,
 )
+
+
+class TargetTimeout(Exception):
+    """One target exceeded its wall-clock budget."""
+
+
+@contextlib.contextmanager
+def _time_limit(seconds: int) -> Iterator[None]:
+    """Abandon a target that overruns, instead of stalling the whole run.
+
+    Runtime is wildly uneven: most targets finish in minutes, but one sat at
+    99% CPU for ten hours and produced nothing, which from the terminal is
+    indistinguishable from having finished. SIGALRM fires between operations,
+    so a single long NumPy call still has to return first — good enough to
+    escape a scenario loop, not a hard kill.
+    """
+    if seconds <= 0:
+        yield
+        return
+
+    def _raise(signum, frame):
+        raise TargetTimeout(f"exceeded {seconds}s")
+
+    previous = signal.signal(signal.SIGALRM, _raise)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
 
 log = get_logger(__name__)
 
@@ -128,6 +162,8 @@ def _validate_row(
         "n_nearby_stars": result.n_nearby_stars,
         "snr": result.snr,
         "snr_reliable": result.snr_reliable,
+        "degenerate": result.degenerate,
+        "degenerate_reason": result.degenerate_reason,
     }
 
 
@@ -140,6 +176,15 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("results/candidates_validated.csv"))
     parser.add_argument("--n-draws", type=int, default=1_000_000)
     parser.add_argument("--search-radius", type=int, default=10)
+    parser.add_argument(
+        "--per-target-timeout",
+        type=int,
+        default=3600,
+        metavar="SECONDS",
+        help="Abandon a target after this long and move on (0 disables). "
+        "Most finish in minutes; one has run for 10 hours at full CPU without "
+        "producing anything, which stalls every target behind it.",
+    )
     parser.add_argument(
         "--insecure-trilegal",
         action="store_true",
@@ -162,31 +207,58 @@ def main() -> None:
     rows: list[dict] = []
     for i, (_, row) in enumerate(targets.iterrows(), 1):
         tic_id = int(row["tic_id"])
+        # Announce before starting: the only prior output was on completion, so
+        # a target that never finished looked identical to a finished run.
+        log.info("[validate] %d/%d TIC %d: starting", i, len(targets), tic_id)
+        started = time.monotonic()
         try:
-            out = _validate_row(
-                row,
-                args.mission,
-                args.n_draws,
-                args.search_radius,
-                not args.insecure_trilegal,
-                not args.no_pipeline_aperture,
-            )
+            with _time_limit(args.per_target_timeout):
+                out = _validate_row(
+                    row,
+                    args.mission,
+                    args.n_draws,
+                    args.search_radius,
+                    not args.insecure_trilegal,
+                    not args.no_pipeline_aperture,
+                )
             log.info(
-                "[validate] %d/%d TIC %d: FPP=%.3g NFPP=%.3g -> %s",
+                "[validate] %d/%d TIC %d: FPP=%.3g NFPP=%.3g -> %s  (%.1f min)%s",
                 i,
                 len(targets),
                 tic_id,
                 out["fpp"],
                 out["nfpp"],
                 out["classification"],
+                (time.monotonic() - started) / 60,
+                "  [DEGENERATE — not a verdict]" if out.get("degenerate") else "",
             )
+        except TargetTimeout as exc:
+            log.warning(
+                "[validate] %d/%d TIC %d ABANDONED after %.1f min (%s) — moving on",
+                i,
+                len(targets),
+                tic_id,
+                (time.monotonic() - started) / 60,
+                exc,
+            )
+            out = {"tic_id": tic_id, "classification": "timeout", "error": str(exc)}
         except Exception as exc:
             log.warning("[validate] TIC %d failed: %s", tic_id, exc)
             out = {"tic_id": tic_id, "classification": "error", "error": str(exc)}
         rows.append(out)
         pd.DataFrame(rows).to_csv(args.out, index=False)  # incremental, resumable-by-rerun
 
-    log.info("[validate] wrote %d results -> %s", len(rows), args.out)
+    usable = sum(
+        1
+        for r in rows
+        if r.get("classification") not in {"error", "timeout"} and not r.get("degenerate")
+    )
+    log.info(
+        "[validate] wrote %d results (%d usable) -> %s",
+        len(rows),
+        usable,
+        args.out,
+    )
 
 
 if __name__ == "__main__":
