@@ -186,6 +186,12 @@ def main() -> None:
         "producing anything, which stalls every target behind it.",
     )
     parser.add_argument(
+        "--skip-completed",
+        action="store_true",
+        help="Resume: keep rows already in --out and re-run only what is missing. "
+        "Rows that ended in error or timeout are retried, not kept.",
+    )
+    parser.add_argument(
         "--insecure-trilegal",
         action="store_true",
         help="Skip SSL verification for the public TRILEGAL star-count query "
@@ -204,9 +210,37 @@ def main() -> None:
     log.info("[validate] %d %s targets to validate", len(targets), args.mission)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Resume. The docstring claimed "resumable-by-rerun" but nothing skipped
+    # completed work, so an interrupted run redid everything: one restart cost
+    # ~3 h re-deriving ten targets that were already on disk. Rows that ended
+    # in `error` or `timeout` are NOT treated as done — those are usually a
+    # dropped MAST/TRILEGAL connection and deserve another attempt.
     rows: list[dict] = []
+    done: set[int] = set()
+    if args.skip_completed and args.out.exists():
+        prior = pd.read_csv(args.out)
+        rows = prior.to_dict("records")
+        unfinished = {"error", "timeout"}
+        done = {
+            int(r["tic_id"])
+            for r in rows
+            if str(r.get("classification")) not in unfinished and pd.notna(r.get("tic_id"))
+        }
+        log.info(
+            "[validate] resuming from %s: %d already done, %d earlier failure(s) to retry",
+            args.out,
+            len(done),
+            len(rows) - len(done),
+        )
+
     for i, (_, row) in enumerate(targets.iterrows(), 1):
         tic_id = int(row["tic_id"])
+        if tic_id in done:
+            log.info("[validate] %d/%d TIC %d: already done, skipping", i, len(targets), tic_id)
+            continue
+        # A retry supersedes its earlier failed row rather than duplicating it.
+        rows = [r for r in rows if int(r["tic_id"]) != tic_id]
         # Announce before starting: the only prior output was on completion, so
         # a target that never finished looked identical to a finished run.
         log.info("[validate] %d/%d TIC %d: starting", i, len(targets), tic_id)

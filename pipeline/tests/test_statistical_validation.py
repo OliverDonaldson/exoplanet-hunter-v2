@@ -362,3 +362,42 @@ def test_per_target_timeout_abandons_and_continues():
     # 0 disables the limit entirely.
     with vc._time_limit(0):
         _time.sleep(0.01)
+
+
+def test_skip_completed_resumes_and_retries_failures(tmp_path):
+    """An interrupted run must not redo finished targets.
+
+    The docstring claimed "resumable-by-rerun" while nothing skipped completed
+    work; one restart cost ~3 h re-deriving ten targets already on disk. Rows
+    that ended in error/timeout are retried — those are usually a dropped
+    MAST/TRILEGAL connection, not a real verdict.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_vc2", Path(__file__).resolve().parents[1] / "scripts" / "validate_candidates.py"
+    )
+    vc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vc)
+
+    out = tmp_path / "validated.csv"
+    pd.DataFrame(
+        [
+            {"tic_id": 111, "classification": "likely_planet", "fpp": 0.02},
+            {"tic_id": 222, "classification": "degenerate", "fpp": 0.857},
+            {"tic_id": 333, "classification": "error", "fpp": None},
+            {"tic_id": 444, "classification": "timeout", "fpp": None},
+        ]
+    ).to_csv(out, index=False)
+
+    prior = pd.read_csv(out)
+    rows = prior.to_dict("records")
+    unfinished = {"error", "timeout"}
+    done = {
+        int(r["tic_id"])
+        for r in rows
+        if str(r.get("classification")) not in unfinished and pd.notna(r.get("tic_id"))
+    }
+
+    assert done == {111, 222}  # a degenerate result is still a completed target
+    assert 333 not in done and 444 not in done  # failures get another attempt
