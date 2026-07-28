@@ -123,6 +123,30 @@ def _select(
     return df.head(top).reset_index(drop=True)
 
 
+def _trilegal_cached(cache_dir: Path | None, tic_id: int) -> str | None:
+    """Path to this target's saved TRILEGAL population, if we have one."""
+    if cache_dir is None:
+        return None
+    path = cache_dir / f"{tic_id}_TRILEGAL.csv"
+    return str(path) if path.exists() else None
+
+
+def _stash_trilegal(cache_dir: Path | None, tic_id: int) -> None:
+    """Move the population TRICERATOPS just wrote into the cache.
+
+    ``save_trilegal`` writes ``<TIC>_TRILEGAL.csv`` into the current directory
+    with no way to redirect it, so the files pile up in the repo root (one got
+    committed by accident). Moving them into the cache both tidies that up and
+    makes the next run reuse the population instead of re-querying.
+    """
+    if cache_dir is None:
+        return
+    dropped = Path(f"{tic_id}_TRILEGAL.csv")
+    if dropped.exists():
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        dropped.replace(cache_dir / dropped.name)
+
+
 def _validate_row(
     row: pd.Series,
     mission: str,
@@ -130,6 +154,7 @@ def _validate_row(
     search_radius: int,
     verify_ssl: bool,
     use_pipeline_aperture: bool,
+    trilegal_cache: Path | None = None,
 ) -> dict:
     tic_id = int(row["tic_id"])
     period, t0, duration = float(row["period"]), float(row["t0"]), float(row["duration"])
@@ -138,21 +163,34 @@ def _validate_row(
     phase_time, norm_flux, sigma = prepare_lightcurve(time, flux, period, t0, duration)
     baseline_days = float(time.max() - time.min())
     snr = estimate_snr(depth_ppm, cdpp, int(baseline_days // period))
-    result = validate_target(
-        tic_id=tic_id,
-        sectors=sectors,
-        period_days=period,
-        depth_ppm=depth_ppm,
-        phase_time=phase_time,
-        flux=norm_flux,
-        flux_err=sigma,
-        mission=mission,
-        n_draws=n_draws,
-        search_radius=search_radius,
-        snr=snr,
-        verify_ssl=verify_ssl,
-        use_pipeline_aperture=use_pipeline_aperture,
-    )
+    # TRILEGAL is a Monte Carlo galaxy simulation: each query returns a
+    # different background population, and its star count feeds the background
+    # prior directly. Two runs of the same target can therefore disagree on the
+    # BEB-vs-NEB balance — one flipped between likely_fp and likely_nearby_fp.
+    # Reusing a saved population makes the comparison honest and skips a slow,
+    # flaky query.
+    cached = _trilegal_cached(trilegal_cache, tic_id)
+    if cached:
+        log.info("[validate] TIC %d: reusing cached TRILEGAL population", tic_id)
+    try:
+        result = validate_target(
+            tic_id=tic_id,
+            sectors=sectors,
+            period_days=period,
+            depth_ppm=depth_ppm,
+            phase_time=phase_time,
+            flux=norm_flux,
+            flux_err=sigma,
+            mission=mission,
+            n_draws=n_draws,
+            search_radius=search_radius,
+            snr=snr,
+            trilegal_fname=cached,
+            verify_ssl=verify_ssl,
+            use_pipeline_aperture=use_pipeline_aperture,
+        )
+    finally:
+        _stash_trilegal(trilegal_cache, tic_id)
     return {
         "tic_id": tic_id,
         "fpp": result.fpp,
@@ -192,6 +230,22 @@ def main() -> None:
         "Rows that ended in error or timeout are retried, not kept.",
     )
     parser.add_argument(
+        "--trilegal-cache",
+        type=Path,
+        default=Path("data/trilegal"),
+        help="Directory of saved TRILEGAL background populations, one per target. "
+        "TRILEGAL is a Monte Carlo galaxy simulation, so re-querying gives a "
+        "different population and a different background prior — caching makes "
+        "runs reproducible and comparable. Pass an empty string to disable.",
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=2,
+        help="Retries per target for transient failures (MAST/TRILEGAL timeouts), "
+        "with 60s-per-attempt backoff. Timeouts are not retried.",
+    )
+    parser.add_argument(
         "--insecure-trilegal",
         action="store_true",
         help="Skip SSL verification for the public TRILEGAL star-count query "
@@ -204,6 +258,10 @@ def main() -> None:
         "aperture (FPP will read looser/higher).",
     )
     args = parser.parse_args()
+    if args.trilegal_cache and str(args.trilegal_cache):
+        args.trilegal_cache.mkdir(parents=True, exist_ok=True)
+    else:
+        args.trilegal_cache = None
 
     candidates = pd.read_parquet(args.candidates)
     targets = _select(candidates, args.shortlist, args.top, args.mission)
@@ -246,15 +304,37 @@ def main() -> None:
         log.info("[validate] %d/%d TIC %d: starting", i, len(targets), tic_id)
         started = time.monotonic()
         try:
-            with _time_limit(args.per_target_timeout):
-                out = _validate_row(
-                    row,
-                    args.mission,
-                    args.n_draws,
-                    args.search_radius,
-                    not args.insecure_trilegal,
-                    not args.no_pipeline_aperture,
-                )
+            # MAST goes slow in patches: a whole back half of one run was lost
+            # to astroquery's own 600 s limit. Those are worth another go —
+            # a target that failed at 23:00 succeeded on the next attempt.
+            for attempt in range(1, args.retries + 2):
+                try:
+                    with _time_limit(args.per_target_timeout):
+                        out = _validate_row(
+                            row,
+                            args.mission,
+                            args.n_draws,
+                            args.search_radius,
+                            not args.insecure_trilegal,
+                            not args.no_pipeline_aperture,
+                            args.trilegal_cache,
+                        )
+                    break
+                except TargetTimeout:
+                    raise  # a compute blowup will just blow up again
+                except Exception as exc:
+                    if attempt > args.retries:
+                        raise
+                    backoff = 60 * attempt
+                    log.warning(
+                        "[validate] TIC %d attempt %d/%d failed (%s) — retrying in %ds",
+                        tic_id,
+                        attempt,
+                        args.retries + 1,
+                        exc,
+                        backoff,
+                    )
+                    time.sleep(backoff)
             log.info(
                 "[validate] %d/%d TIC %d: FPP=%.3g NFPP=%.3g -> %s  (%.1f min)%s",
                 i,

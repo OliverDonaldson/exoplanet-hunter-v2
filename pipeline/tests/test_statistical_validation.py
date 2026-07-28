@@ -401,3 +401,41 @@ def test_skip_completed_resumes_and_retries_failures(tmp_path):
 
     assert done == {111, 222}  # a degenerate result is still a completed target
     assert 333 not in done and 444 not in done  # failures get another attempt
+
+
+def test_trilegal_cache_roundtrip(tmp_path, monkeypatch):
+    """TRILEGAL is a Monte Carlo galaxy sim — re-querying changes the answer.
+
+    Its star count feeds the background prior directly, so two runs of the same
+    target disagreed on the BEB-vs-NEB balance (one flipped between likely_fp
+    and likely_nearby_fp). Caching the population per target makes runs
+    reproducible. TRICERATOPS writes <TIC>_TRILEGAL.csv into the cwd with no
+    way to redirect it, so the file has to be moved after the fact.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_vc3", Path(__file__).resolve().parents[1] / "scripts" / "validate_candidates.py"
+    )
+    vc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vc)
+
+    cache = tmp_path / "cache"
+    monkeypatch.chdir(tmp_path)
+
+    # Nothing cached yet.
+    assert vc._trilegal_cached(cache, 12345) is None
+    assert vc._trilegal_cached(None, 12345) is None  # caching disabled
+
+    # TRICERATOPS drops the population in the cwd; we stash it.
+    Path("12345_TRILEGAL.csv").write_text("simulated,stars\n1,2\n")
+    vc._stash_trilegal(cache, 12345)
+    assert not Path("12345_TRILEGAL.csv").exists()  # cwd left clean
+    assert (cache / "12345_TRILEGAL.csv").exists()
+
+    # Next run finds and reuses it.
+    assert vc._trilegal_cached(cache, 12345) == str(cache / "12345_TRILEGAL.csv")
+
+    # A no-op when the target never wrote one, and when caching is off.
+    vc._stash_trilegal(cache, 999)
+    vc._stash_trilegal(None, 12345)
