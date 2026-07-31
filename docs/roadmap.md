@@ -44,9 +44,45 @@ fixed (gate cwd, `dvc` resolution, MLflow run naming, the CI gate jobs
 Emit 301/31 views with variance channels, odd/even, weak-secondary, centroid,
 flux-trend, unfolded [20,31] + transit counts, momentum dump, and the
 periodogram pair. Ingest TESS DV XML for difference images, DV diagnostics and
-RUWE; per-branch presence masking (Kepler has DV, K2 does not). Add the
-TESS-SPOC FFI fallback to recover part of the 744 `no_fits` candidates. Extend
-the validation gates to the new schema.
+RUWE. Add the TESS-SPOC FFI fallback. Extend the validation gates to the new
+schema.
+
+*No model change in this stage, deliberately.* Changing inputs and
+architecture together makes any outcome uninterpretable — the 13-dim null was
+only diagnosable because the aux vector was the sole variable. The data build
+is also the expensive, network-bound half (hours of MAST), while training
+reads shards from disk, so the ordering pays the slow step once and then
+iterates cheaply. And `cnn_dualview.py` declares exactly three Input layers
+(`global_view`, `local_view`, `aux_features`) — it *cannot* consume an
+unfolded [20,31] tensor or a 33x33xN image stack. Consuming them is Stage 2.
+
+Nothing reaches the promotion gate here either: that gate compares trained
+runs' CV summaries, and this stage produces data, not a model. Stage 1 is
+gated by the *five Pandera gates* instead, which is why extending them is a
+deliverable rather than a nicety — the new artefacts are exactly where silent
+corruption would hide, and this project has already been bitten three times by
+data that was wrong but plausible (the 500/500 catalogue clobber, the
+9-dim-into-13-dim write, the ppm-vs-fraction depth). `ca906040` keeps serving
+untouched throughout.
+
+### Stage 1 — three things that will bite
+
+**Shard size.** TFRecords are 47 MB today (`views.npz` 36 MB, 5,380 examples x
+[2001 + 201 + 13]). Unfolded views and 33x33xN image stacks could plausibly
+push that **20-50x**, which changes what fits in memory and how tf.data should
+be configured (`.cache()` on a 2 GB artefact is not the same decision as on
+47 MB). Measure after the first few hundred targets, not after the full build.
+
+**Per-branch presence masking is not optional.** Kepler has DV products, K2 has
+none, TESS FFI differs again. Without an explicit presence/quality mask per
+branch, a missing branch poisons every row of that mission — the same class of
+silent, plausible-looking corruption as the 9-dim-into-13-dim write.
+ExoMiner's difference-image quality attention is the pattern to copy.
+
+**The FFI fallback has upside beyond the model.** `TESS-SPOC` HLSP could
+recover a real fraction of the **744 `no_fits`** candidates — targets
+currently invisible to the entire pipeline, not merely poorly scored. That is
+the one Stage 1 item whose value does not depend on Stage 2 succeeding.
 
 **Stage 2 — the model, incrementally, each sub-step gated.**
 (a) per-diagnostic branches + scoped scalars + variance channels + joint local
