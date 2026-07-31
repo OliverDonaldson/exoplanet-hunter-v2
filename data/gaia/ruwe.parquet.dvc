@@ -1,0 +1,5 @@
+outs:
+- md5: e19c4d2442a0cc1fb94846a1f5e40779
+  size: 312982
+  hash: md5
+  path: ruwe.parquet

@@ -1,2 +1,3 @@
 /views.npz
 /tfrecords
+/dv_scalars.parquet

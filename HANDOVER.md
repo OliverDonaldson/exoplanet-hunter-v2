@@ -1135,9 +1135,16 @@ committed: one push per stage.
 ### The DV archive
 
 `data/raw_dv/` — **5,766 targets fetched, 1,438 with no DV products, 0
-outstanding failures, 3.5 GB** over 7,199 TESS TICs. Coverage **80.0%**, within
-a point of the 81.5% measured on a 200-target sample beforehand. 5.3 h wall
-clock. Zero filename-parse warnings across the whole corpus.
+outstanding failures, 3.6 GB** over **7,204** TESS TICs. Coverage **80.0%**,
+within a point of the 81.5% measured on a 200-target sample beforehand. 5.3 h
+wall clock. Zero filename-parse warnings across the whole corpus.
+
+The target set is 7,204 rather than the 7,199 sized on 2026-07-31 because **the
+scheduled refresh ran at 09:00 on 2026-08-01, during the DV pull**, growing the
+label catalogue 5,686 -> 5,703 rows (+17 TESS). The sweep re-run afterwards
+picked the new targets up, so the archive is complete against the current
+catalogue, and all six gates — including `label-shrink` and `refresh-leakage`
+against `labels.previous.parquet` — pass.
 
 Audit of 341 reports from 300 random targets: **0 parse failures**, every XML's
 `ticId` matches its directory, 100% carry at least one difference image (1,613
@@ -1221,3 +1228,31 @@ TESS-SPOC FFI fallback for the 744 `no_fits` candidates; wiring the new view set
 into `build_dataset.py` and a shard schema (measure shard size after a few
 hundred targets, and revisit `.cache()`); momentum-dump, periodogram-pair and
 centroid branches; extending the views gate to the new artefact.
+
+### DV scalars table and Gaia RUWE (2026-08-01, later)
+
+**`data/processed/dv_scalars.parquet`** — 3.6 GB of XML reduced to **1.9 MB**,
+6,484 rows over 5,766 targets, **0 parse failures**. Built by
+`scripts/build_dv_table.py`, which needs no network. Difference-image *pixels*
+stay in the XML until stage 2 fixes a stamp size; this is the scalar half.
+
+The column that matters is **`dv_usable`**: 92.9% true, **452 rows (7.0%) false
+because the best-matching TCE is a different signal** than our catalogue row,
+and 8 unverifiable (no catalogue period). Mask on it. Training the DV branch on
+those 452 would attach another transit's bootstrap FAP, ghost statistic and
+transit counts to our candidate, and nothing downstream would flag it.
+
+**`data/gaia/ruwe.parquet`** — 7,177 of 7,204 targets (99.6% have a Gaia
+counterpart), **7,071 with RUWE (98.5%)**. Median **1.028**; **16.5% (1,166
+targets) above the 1.4** unresolved-binary cut, which is a large enough slice to
+matter as a feature rather than a footnote.
+
+Two hops, because the catalogues do not line up: TIC v8 carries a Gaia **DR2**
+source id, and `ruwe` is a **DR3** column, so it routes through
+`gaiadr3.dr2_neighbourhood`. That table is many-to-many — **7.0% of our targets
+(499) have more than one DR3 candidate**, i.e. DR3 resolved a blend DR2 saw as
+one source. `_best_match` keeps the nearest and records `n_dr3_candidates`;
+taking an arbitrary row would have attached a *neighbour's* RUWE to the target,
+and a neighbour's RUWE is a perfectly plausible number.
+
+Both artefacts are DVC-tracked (pointers in git, bytes need `dvc push`).

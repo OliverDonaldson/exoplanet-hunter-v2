@@ -1,0 +1,5 @@
+outs:
+- md5: 3dd4e3952df794108fe1a4b7ef82d4cd
+  size: 1971633
+  hash: md5
+  path: dv_scalars.parquet
