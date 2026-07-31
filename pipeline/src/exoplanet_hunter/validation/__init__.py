@@ -21,6 +21,7 @@ from exoplanet_hunter.validation.promotion import (
 )
 from exoplanet_hunter.validation.schemas import (
     candidate_catalogue_schema,
+    check_dv_archive,
     check_views,
     label_catalogue_schema,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "assert_refresh_safe",
     "candidate_catalogue_schema",
     "check_catalogue_shrink",
+    "check_dv_archive",
     "check_views",
     "diff_label_catalogues",
     "evaluate_promotion",

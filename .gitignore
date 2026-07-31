@@ -22,6 +22,7 @@ frontend/dist/
 # .gitignore files), R2 carries the bytes.
 data/raw/
 data/raw_kepler/
+data/raw_dv/
 data/interim/
 models/cv/*
 !models/cv/*.dvc

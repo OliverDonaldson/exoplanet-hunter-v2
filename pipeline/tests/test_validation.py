@@ -16,6 +16,7 @@ from exoplanet_hunter.validation import (
     assert_refresh_safe,
     candidate_catalogue_schema,
     check_catalogue_shrink,
+    check_dv_archive,
     check_views,
     diff_label_catalogues,
     evaluate_promotion,
@@ -189,6 +190,68 @@ def test_check_views_flags_dead_aux_column():
     assert any("aux_features" in p for p in check_views(views))
 
 
+# ----------------------------------------------------------------- DV archive --
+
+
+def make_dv_archive(tmp_path: Path, tics: list[int], *, without_dv: tuple[int, ...] = ()) -> Path:
+    cache = tmp_path / "raw_dv"
+    cache.mkdir()
+    manifest: dict[str, dict] = {}
+    for tic in tics:
+        if tic in without_dv:
+            manifest[str(tic)] = {"success": False, "n_available": 0, "reason": "no DV products"}
+            continue
+        path = cache / f"tic_{tic}" / f"tess-s0001-s0009-{tic:016d}-00001_dvr.xml"
+        path.parent.mkdir()
+        path.write_text("<xml/>")
+        manifest[str(tic)] = {"success": True, "n_available": 1, "paths": [str(path)]}
+    (cache / "manifest.json").write_text(json.dumps(manifest))
+    return cache
+
+
+def test_dv_gate_accepts_an_archive_where_some_targets_have_none(tmp_path):
+    # ~19% genuinely have no DV products; that is the archive being honest.
+    tics = list(range(1, 11))
+    cache = make_dv_archive(tmp_path, tics, without_dv=(9, 10))
+    assert check_dv_archive(cache, tics) == []
+
+
+def test_dv_gate_catches_an_interrupted_fetch(tmp_path):
+    # The headline check: targets never queried are indistinguishable from
+    # targets with no DV products unless the manifest is complete, so an
+    # interrupted fetch would silently mask out real data for everything after
+    # the interruption.
+    tics = list(range(1, 11))
+    cache = make_dv_archive(tmp_path, tics[:6])
+    problems = check_dv_archive(cache, tics)
+    assert any("never queried" in p for p in problems)
+
+
+def test_dv_gate_catches_a_broken_query_via_the_coverage_floor(tmp_path):
+    tics = list(range(1, 11))
+    cache = make_dv_archive(tmp_path, tics, without_dv=tuple(tics[2:]))
+    assert any("suspect the query" in p for p in check_dv_archive(cache, tics))
+
+
+def test_dv_gate_catches_truncated_and_vanished_files(tmp_path):
+    tics = [1, 2]
+    cache = make_dv_archive(tmp_path, tics)
+    next(cache.glob("tic_1/*.xml")).write_text("")
+    next(cache.glob("tic_2/*.xml")).unlink()
+    problems = check_dv_archive(cache, tics)
+    assert any("is empty" in p for p in problems)
+    assert any("missing" in p for p in problems)
+
+
+def test_dv_gate_reports_an_absent_or_unreadable_manifest(tmp_path):
+    absent = tmp_path / "nothing"
+    assert check_dv_archive(absent) == [f"no manifest at {absent / 'manifest.json'}"]
+    cache = tmp_path / "raw_dv"
+    cache.mkdir()
+    (cache / "manifest.json").write_text("{oops")
+    assert any("not readable JSON" in p for p in check_dv_archive(cache))
+
+
 # ------------------------------------------------------------------ leakage --
 
 
@@ -293,6 +356,12 @@ VALIDATE_DATA = Path(__file__).resolve().parents[1] / "scripts" / "validate_data
 def run_validate_data(tmp_path, *extra: str) -> tuple[int, str]:
     """Run validate_data.py with the other artefacts pointed at absent paths.
 
+    Every non-label path must be named explicitly. A gate left on its default
+    resolves against the subprocess's cwd — the repo root under pytest — so it
+    would silently start validating the real artefact the moment one exists,
+    which is how the DV gate broke four shrink tests the day `data/raw_dv` was
+    first fetched.
+
     Returns the exit code and the whitespace-normalised gate report (rich wraps
     the handler output at the console width).
     """
@@ -306,6 +375,8 @@ def run_validate_data(tmp_path, *extra: str) -> tuple[int, str]:
             str(tmp_path / "absent.parquet"),
             "--views",
             str(tmp_path / "absent.npz"),
+            "--dv",
+            str(tmp_path / "absent_dv"),
             *extra,
         ],
         capture_output=True,

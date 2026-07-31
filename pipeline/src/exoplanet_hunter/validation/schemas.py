@@ -1,13 +1,15 @@
 """Pandera schemas + array checks: the data half of the validation gates.
 
-Three artefacts get validated before anything trains or serves:
+Four artefacts get validated before anything trains or serves:
 
   * the **label catalogue** (`data/labels/labels.parquet`) that training
     consumes — column types, disposition/label domains, ephemeris sanity;
   * the **candidate catalogue** (`data/catalogue/candidates.parquet`) that
     the API serves — the browse-table contract;
   * the **processed views** (views.npz / shard sets) — no all-NaN folds,
-    label domain, shape consistency.
+    label domain, shape consistency;
+  * the **DV archive** (`data/raw_dv/`) — presence-mask integrity, so that
+    "never queried" can never be read as "this target has no DV products".
 
 Schemas are deliberately strict on domains and lenient on physical values
 that ExoFOP legitimately leaves blank (nullable=True): the gate's job is to
@@ -15,6 +17,10 @@ catch *structural* corruption from a refresh, not to second-guess astronomy.
 """
 
 from __future__ import annotations
+
+import json
+from collections.abc import Iterable
+from pathlib import Path
 
 import numpy as np
 import pandera.pandas as pa
@@ -143,5 +149,71 @@ def check_views(views: ViewArrays, *, max_nan_frac: float = 0.5) -> list[str]:
         elif np.isnan(aux).all(axis=0).any():
             dead = np.where(np.isnan(aux).all(axis=0))[0].tolist()
             problems.append(f"aux_features: columns {dead} are all-NaN")
+
+    return problems
+
+
+def check_dv_archive(
+    cache_dir: Path,
+    expected_tics: Iterable[int] | None = None,
+    *,
+    min_coverage: float = 0.60,
+    sample: int = 20,
+) -> list[str]:
+    """Structural checks on a fetched DV archive; returns problems (empty = pass).
+
+    The headline check is **presence-mask integrity**. 18.5% of TESS targets
+    genuinely have no DV products, and the difference-image branch masks them
+    out. A target that was never queried looks identical to one that was
+    queried and has none — so an interrupted fetch would silently mask out real
+    data for every target after the interruption. Only the manifest can tell
+    those apart, which is why it records both outcomes explicitly.
+    """
+    problems: list[str] = []
+    manifest_path = Path(cache_dir) / "manifest.json"
+    if not manifest_path.exists():
+        return [f"no manifest at {manifest_path}"]
+    try:
+        manifest: dict[str, dict] = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError as exc:
+        return [f"manifest is not readable JSON: {exc}"]
+    if not manifest:
+        return ["manifest is empty"]
+
+    if expected_tics is not None:
+        expected = {int(t) for t in expected_tics}
+        unasked = expected - {int(k) for k in manifest}
+        if unasked:
+            problems.append(
+                f"{len(unasked)} expected targets absent from the manifest "
+                f"(e.g. {sorted(unasked)[:5]}) — never queried, not 'no DV'"
+            )
+
+    fetched = {t: e for t, e in manifest.items() if e.get("success")}
+    coverage = len(fetched) / len(manifest)
+    if coverage < min_coverage:
+        problems.append(
+            f"only {coverage:.1%} of queried targets have DV products "
+            f"(floor {min_coverage:.0%}) — suspect the query, not the archive"
+        )
+
+    missing = [t for t, e in fetched.items() if not e.get("paths")]
+    if missing:
+        problems.append(f"{len(missing)} targets marked fetched with no paths (e.g. {missing[:5]})")
+
+    # Sample rather than stat every file: the point is to catch a systematic
+    # truncation, and a full pass over 7,199 targets would make the gate slow
+    # enough that people skip it.
+    checked = 0
+    for tic, entry in list(fetched.items())[:sample]:
+        for raw in entry.get("paths", []):
+            path = Path(raw)
+            checked += 1
+            if not path.exists():
+                problems.append(f"TIC {tic}: {path.name} recorded but missing")
+            elif path.stat().st_size == 0:
+                problems.append(f"TIC {tic}: {path.name} is empty")
+    if fetched and checked == 0:
+        problems.append("no DV files to check despite successful entries")
 
     return problems

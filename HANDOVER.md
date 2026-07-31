@@ -1027,12 +1027,10 @@ for the top 20 candidates by model score, at `n_draws=1e6` (recorded per row).
 | degenerate (no result) | 2 |
 | timeout / error | 4 |
 
-**TOI 5112.01 (TIC 337385330) is formally validated** — FPP **0.0136** against
-the 0.015 threshold, NFPP **2.1e-63** against 1e-3, at S/N 31.3 (above the
-S/N 15 floor where FPP becomes unreliable). Two caveats that must travel with
-that number: the FPP is **marginal** — a 10% shift crosses the line — and it
-rests on a single TRILEGAL draw. Re-run it two or three times before the
-result goes anywhere public.
+**TOI 5112.01 (TIC 337385330) reached FPP 0.0136** against the 0.015 threshold,
+NFPP **2.1e-63** against 1e-3, at S/N 31.3 (above the S/N 15 floor where FPP
+becomes unreliable) — on a single TRILEGAL draw. **The re-run on 2026-08-01
+withdrew the validation; see below.**
 
 **Four `NEBx2P`/`BEBx2P` verdicts are the validation layer earning its keep.**
 A neighbouring or background eclipsing binary at twice the period is invisible
@@ -1088,3 +1086,138 @@ Every one of these produced *confident-looking wrong numbers*, not crashes.
 **Outstanding:** the four unfinished targets are being retried at 200k draws
 into the same file. TIC 1042432 will probably fail again — its TRILEGAL query
 returns something unparseable for those coordinates, which fewer draws cannot fix.
+
+## TOI 5112.01 is not validated — the FPP straddles the threshold (2026-08-01)
+
+The 200k-draw retry of the four unfinished targets **resolved none of them**:
+451645081, 234345288 and 300710077 still time out at the 3600 s cap with no
+`n_draws` recorded, and 1042432 still fails on its TRILEGAL query. The file
+stands at 20 rows, **14 usable**. Fewer draws was the wrong lever.
+
+Three fresh runs at `n_draws=1e6` with `--trilegal-cache ""`, so TRILEGAL was
+the only variable (`best_scenario`, `n_nearby_stars=156` and `snr=31.29` are
+identical across all four draws, which is what makes this a clean experiment):
+
+| draw | TRILEGAL stars | FPP | NFPP | verdict |
+|---|---:|---:|---:|---|
+| original | *(cached)* | 0.0136 | 2.1e-63 | validated_planet |
+| rerun 1 | 384 | **0.0125** | 8.0e-64 | validated_planet |
+| rerun 2 | 394 | **0.0175** | 1.0e-63 | likely_planet |
+| rerun 3 | 370 | **0.0170** | 1.5e-63 | likely_planet |
+
+**Two of three fresh draws land above the 0.015 threshold**, and the mean
+(0.0157) is above it too. Spread is 0.0125-0.0175, std 0.0028 — **18% of the
+mean**, against the 10% the earlier note guessed would be enough to cross. The
+threshold sits in the middle of the sampling distribution, so which side a
+single run reports is close to a coin flip. Artefact:
+`results/toi5112_stability.csv`.
+
+**A 6% swing in TRILEGAL star count (370-394) moved FPP by 18%**, so the
+background prior is the dominant term here, not the light curve.
+
+**NFPP is rock solid** — 8e-64 to 2e-63 across every draw, ~60 orders of
+magnitude below its 1e-3 threshold. That is the expected split: TRILEGAL
+simulates the *background* population and feeds `lnprior_background`, so it
+moves BEB scenarios and leaves NEB alone. The nearby-false-positive case
+against TOI 5112.01 is genuinely closed; the total FPP is not.
+
+**Read it as a strong candidate, not a validated planet.** Anything public
+needs either many draws averaged into a distribution rather than a point
+estimate, or an independent line of evidence. One TRILEGAL draw is not a
+verdict — the same lesson as `13b0183`, one threshold further in.
+
+## Stage 1 — DV ingest landed, view set foundations built (2026-08-01)
+
+**Serving still `ca906040` (9-dim) on Fly — untouched, nothing deployed.** 286
+tests green (was 240), ruff and mypy clean on the new modules. Not yet
+committed: one push per stage.
+
+### The DV archive
+
+`data/raw_dv/` — **5,766 targets fetched, 1,438 with no DV products, 0
+outstanding failures, 3.5 GB** over 7,199 TESS TICs. Coverage **80.0%**, within
+a point of the 81.5% measured on a 200-target sample beforehand. 5.3 h wall
+clock. Zero filename-parse warnings across the whole corpus.
+
+Audit of 341 reports from 300 random targets: **0 parse failures**, every XML's
+`ticId` matches its directory, 100% carry at least one difference image (1,613
+in the sample, median 2 per report, max 43). MES, bootstrap significance, ghost
+core statistic and difference-image quality are present in 100%; stellar mass
+is derivable from density and radius in 100%.
+
+### Three things that change Stage 2
+
+**Difference-image stamps are 11, 13, 15 or 17 px — not a fixed 33x33.** That
+is Kepler's size. The extent is the target's aperture, and the pixel list is
+sparse with absolute `ccdRow`/`ccdColumn`. Stage 2 must re-grid to a fixed
+stamp; the parser deliberately returns the sparse arrays and a bounding box
+rather than inventing a shape.
+
+**~9% of targets' DV diagnostics belong to a different signal.** Over 240
+labelled targets with a TCE: 90.4% match the catalogue period to within 1%,
+0.4% within 1-10%, and **9.2% are off by 10% or more**. About 5% are clean
+harmonics (2.9% double, 1.7% half, 0.4% triple); the rest are unrelated
+long-period TCEs SPOC found instead — ratios of 18x, 24x, 46x, 94x. A report
+holds one `planetResults` per TCE, so taking the first would attach the wrong
+transit's diagnostics to our row and nothing downstream would notice.
+`parse_dv_xml` matches on the catalogue period and returns
+`period_mismatch_frac`; **that field must gate the DV branch presence mask, not
+just emit a log line.**
+
+**DV's own transit counts confirm the completeness thesis.** Median
+observed/expected ratio is **0.29**, and only **12%** of reports caught every
+transit their ephemeris predicts over the baseline. Two targets with identical
+folded views can differ by a factor of three in how much real transit evidence
+they contain — invisible in a fold, which is the point of the unfolded branch.
+
+### Sizing corrections to the roadmap
+
+- **Sector scope was already on disk.** Not the download manifest — that stores
+  `n_sectors` as a count only, and the stitched FITS keeps just the last
+  sector's header. It is the `sectors` column of
+  `data/catalogue/candidates.parquet`: 7,195 of 7,199 covered, zero queries.
+- **14-56 GB was ~5x too high.** DV XML is ~0.34 MB, not 2-8 MB — that figure
+  was the DVR *PDF* (18-21 MB) and DVT *FITS* (11-22 MB). Actual: 3.5 GB.
+- **Batching matters more than sector scoping.** `query_criteria` accepts a
+  list of `target_name`s; 40 per round trip is 0.29 s/target against 1.8 s.
+
+25,429 products were skipped by the selection policy (widest multi-sector run
+per target) and are recorded in the manifest with size and URI, so widening to
+every run is a download-only pass with no second availability sweep.
+
+### Code
+
+- `data/dv.py` — batched availability query, resumable fetch, manifest mirroring
+  `LightCurveDownloader` (atomic writes, permanent failures cached, transient
+  ones never pinned). 82 transient failures on the first pass were correctly
+  left uncached and swept by a re-run.
+- `data/dv_xml.py` — the parser. Three bugs found by checking a real file
+  rather than trusting plausible output: `sectorsObserved` is indexed *directly*
+  by sector (position 0 unused; an off-by-one mislabelled every difference image
+  by a sector, caught by cross-checking against `differenceImageResults/@sector`);
+  `weakSecondary` hangs off `planetCandidate`, so looking under `planetResults`
+  returned None for every target; and `-1.0` sentinels now become None instead
+  of entering aggregates as measurements.
+- `preprocess/viewset.py` — 301/31 views as `[flux, scatter, present]`, plus
+  odd/even, secondary, trend and the unfolded `[20,31]` branch with
+  observed/expected counts. **The comparison views share the primary's depth
+  scale.** Normalising each by its own depth sent odd, even, secondary and every
+  unfolded transit to exactly -1.000 — which looks entirely reasonable and
+  deletes the three diagnostics they exist to provide. On TIC 337385330 the fix
+  gives odd -1.135 vs even -0.714, secondary -0.257, per-transit depths from
+  -0.58 to -1.43.
+- `preprocess/fold.py` — `bin_profile` returns median, MAD scatter and count in
+  one sort-and-split pass, replacing an O(bins x points) per-bin mask. The
+  median path is pinned against the original implementation as an oracle,
+  because `fold_and_bin` feeds live serving.
+- `validation/schemas.py` — `check_dv_archive` as a sixth gate. Its headline
+  check is presence-mask integrity: a target never queried is indistinguishable
+  from one queried with no DV products, so an interrupted fetch would silently
+  mask out real data for everything after the interruption.
+
+### Still open in Stage 1
+
+TESS-SPOC FFI fallback for the 744 `no_fits` candidates; wiring the new view set
+into `build_dataset.py` and a shard schema (measure shard size after a few
+hundred targets, and revisit `.cache()`); momentum-dump, periodogram-pair and
+centroid branches; extending the views gate to the new artefact.

@@ -29,6 +29,7 @@ from exoplanet_hunter.validation import (
     assert_refresh_safe,
     candidate_catalogue_schema,
     check_catalogue_shrink,
+    check_dv_archive,
     check_views,
     label_catalogue_schema,
 )
@@ -56,6 +57,7 @@ def main() -> None:
         "--candidates", type=Path, default=Path("data/catalogue/candidates.parquet")
     )
     parser.add_argument("--views", type=Path, default=Path("data/processed/views.npz"))
+    parser.add_argument("--dv", type=Path, default=Path("data/raw_dv"))
     parser.add_argument(
         "--previous-labels",
         type=Path,
@@ -115,6 +117,27 @@ def main() -> None:
         results.append(False)
     else:
         log.info("[gate] %-22s SKIP (%s not built yet)", "views", args.views)
+
+    if args.dv.exists():
+
+        def _dv_gate() -> None:
+            # Expected set = the TESS targets the pipeline knows about, so an
+            # interrupted fetch is caught as "never queried" rather than
+            # silently masked out as "this target has no DV products".
+            expected = None
+            if args.labels.exists():
+                labels = pd.read_parquet(args.labels)
+                expected = labels[labels["mission"] == "TESS"]["tic_id"].astype(int).tolist()
+            problems = check_dv_archive(args.dv, expected)
+            if problems:
+                raise ValueError("; ".join(problems))
+
+        results.append(_gate("dv-archive", _dv_gate))
+    elif args.strict:
+        log.error("[gate] %-22s FAIL: %s missing", "dv-archive", args.dv)
+        results.append(False)
+    else:
+        log.info("[gate] %-22s SKIP (%s not built yet)", "dv-archive", args.dv)
 
     if args.previous_labels is not None:
 

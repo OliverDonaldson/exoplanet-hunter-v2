@@ -79,19 +79,19 @@ branch, a missing branch poisons every row of that mission — the same class of
 silent, plausible-looking corruption as the 9-dim-into-13-dim write.
 ExoMiner's difference-image quality attention is the pattern to copy.
 
-**The DV download is the biggest single fetch in the project's history.**
-Sized 2026-07-31: **7,199 unique TESS TICs** need DV products (2,656 labelled
-+ 4,685 candidates, deduplicated). At 2-8 MB per DV XML that is **14-56 GB**
-and many hours. It fits (161 GB free) but three things matter before starting:
-scope the *sectors* actually needed per target — the download manifest already
-knows which each target was observed in, and that is plausibly the difference
-between 14 GB and 56 GB; query MAST for real availability first, since an
-unknown fraction of these TICs have no DV products at all; and **do not run it
-while another MAST job is going** — network contention with the validation
-runs is what tripped astroquery's 600 s limit and cost a whole back-half.
-Write the fetch resumable and manifest-tracked from the start, with a progress
-line per target: every long job in this project has been interrupted at least
-once.
+**~~The DV download is the biggest single fetch in the project's history.~~**
+*(Done 2026-08-01 — and it was not. Actual: **3.5 GB**, 5.3 h, 7,199 targets.)*
+
+The 2026-07-31 estimate of 14-56 GB was ~5x high: a DV XML is **~0.34 MB**, and
+2-8 MB was the DVR *PDF* (18-21 MB) and DVT *FITS* (11-22 MB). Availability came
+in at **80.0%**, so ~1,440 targets have no DV products and need the presence
+mask. Sector scope turned out to be on disk already — in the `sectors` column of
+`data/catalogue/candidates.parquet` (7,195 of 7,199), not the download manifest,
+which records `n_sectors` as a count only. What actually mattered for runtime was
+**batching**: `query_criteria` takes a list of `target_name`s, and 40 per round
+trip is 0.29 s/target against 1.8 s. The rule that held: **do not run it while
+another MAST job is going**, and write it resumable and manifest-tracked from
+the start — 82 transient failures on the first pass were swept by a re-run.
 
 **The FFI fallback has upside beyond the model.** `TESS-SPOC` HLSP could
 recover a real fraction of the **744 `no_fits`** candidates — targets

@@ -3,16 +3,80 @@
 Once a (period, t0) is known (or estimated by BLS/TLS), we phase-fold the
 light curve so all transits overlay on top of each other. This amplifies the
 transit signal and makes it visible to a human and a model.
+
+`bin_profile` is the primitive: it returns the per-bin **median, scatter and
+count** in one pass. The scatter is the paired variance channel ExoMiner feeds
+alongside each view — at 301 bins over a multi-sector light curve a bin holds
+tens of cadences, and how much they disagree separates a real transit from a
+bin that happened to average low. `fold_and_bin` is the median-only wrapper the
+existing 2001/201 views use.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
     import lightkurve as lk
+
+
+@dataclass(frozen=True)
+class BinnedProfile:
+    """Per-bin median, scatter and occupancy over a phase window."""
+
+    centers: np.ndarray
+    median: np.ndarray
+    #: Median absolute deviation, scaled to a Gaussian sigma. NaN in bins with
+    #: fewer than two points — one cadence has no scatter, and reporting 0
+    #: there would read as "perfectly consistent" rather than "unmeasured".
+    scatter: np.ndarray
+    count: np.ndarray
+
+
+def bin_profile(
+    phase: np.ndarray,
+    flux: np.ndarray,
+    n_bins: int,
+    phase_min: float = -0.5,
+    phase_max: float = 0.5,
+) -> BinnedProfile:
+    """Bin (phase, flux) into `n_bins` over [phase_min, phase_max].
+
+    Empty bins stay NaN rather than being interpolated: `np.interp` would
+    manufacture smooth signal across data gaps, making a transit that falls
+    inside a gap invisible. Callers decide how to fill.
+    """
+    phase = np.asarray(phase, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    keep = (phase >= phase_min) & (phase <= phase_max) & np.isfinite(flux)
+    phase, flux = phase[keep], flux[keep]
+
+    edges = np.linspace(phase_min, phase_max, n_bins + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    median = np.full(n_bins, np.nan)
+    scatter = np.full(n_bins, np.nan)
+    count = np.zeros(n_bins, dtype=np.int32)
+    if phase.size == 0:
+        return BinnedProfile(centers, median, scatter, count)
+
+    idx = np.clip(np.digitize(phase, edges) - 1, 0, n_bins - 1)
+    # Sort once and split, rather than masking the whole array per bin: the old
+    # per-bin mask was O(n_bins * n_points), which at 2001 bins over a
+    # multi-sector curve is tens of millions of comparisons per view.
+    order = np.argsort(idx, kind="stable")
+    idx_sorted, flux_sorted = idx[order], flux[order]
+    boundaries = np.searchsorted(idx_sorted, np.arange(n_bins + 1))
+    for b in range(n_bins):
+        chunk = flux_sorted[boundaries[b] : boundaries[b + 1]]
+        count[b] = chunk.size
+        if chunk.size:
+            median[b] = np.median(chunk)
+        if chunk.size > 1:
+            scatter[b] = 1.4826 * np.median(np.abs(chunk - median[b]))
+    return BinnedProfile(centers, median, scatter, count)
 
 
 def fold_and_bin(
@@ -30,32 +94,24 @@ def fold_and_bin(
     bin_centers : phase values [phase_min, phase_max] of bin centres.
     binned_flux : median flux in each bin (NaN if empty).
     """
+    profile = fold_to_profile(lc, period, t0, n_bins, phase_min, phase_max)
+    return profile.centers, profile.median
+
+
+def fold_to_profile(
+    lc: lk.LightCurve,
+    period: float,
+    t0: float,
+    n_bins: int,
+    phase_min: float = -0.5,
+    phase_max: float = 0.5,
+) -> BinnedProfile:
+    """Phase-fold a light curve and bin it into a `BinnedProfile`."""
     folded = lc.fold(period=period, epoch_time=t0)
-    phase = np.asarray(folded.time.value, dtype=float)
-    flux = np.asarray(folded.flux.value, dtype=float)
-
-    # Restrict to the requested phase window and drop NaNs.
-    mask = (phase >= phase_min) & (phase <= phase_max) & np.isfinite(flux)
-    phase = phase[mask]
-    flux = flux[mask]
-
-    edges = np.linspace(phase_min, phase_max, n_bins + 1)
-    centers = 0.5 * (edges[:-1] + edges[1:])
-
-    # np.digitize is 1-indexed; convert to 0-indexed.
-    idx = np.digitize(phase, edges) - 1
-    idx = np.clip(idx, 0, n_bins - 1)
-
-    binned = np.full(n_bins, np.nan, dtype=float)
-    for b in range(n_bins):
-        sel = flux[idx == b]
-        if sel.size > 0:
-            binned[b] = np.median(sel)
-
-    # Leave empty bins as NaN rather than interpolating.
-    # np.interp would manufacture smooth signal across data gaps,
-    # making a transit that falls inside a gap invisible.  The
-    # downstream _normalise() fills NaN → 0 (baseline), which is
-    # the correct inductive bias for a missing observation.
-
-    return centers, binned
+    return bin_profile(
+        np.asarray(folded.time.value, dtype=float),
+        np.asarray(folded.flux.value, dtype=float),
+        n_bins,
+        phase_min,
+        phase_max,
+    )
