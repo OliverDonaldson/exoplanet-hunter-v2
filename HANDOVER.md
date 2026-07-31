@@ -1008,3 +1008,83 @@ Then Stage 1 proper: the new view set (301/31 with variance channels, odd/even,
 secondary, centroid, trend, unfolded per-transit, momentum dump, periodogram
 pair), TESS DV XML ingest for difference images and DV scalars, Gaia RUWE, and
 the FFI fallback for part of the 744 `no_fits`.
+
+## Step 3(b) closed — the validated shortlist (2026-07-31)
+
+Commits `edd3715`..`1e45493`. **Serving still `ca906040` (9-dim) on Fly —
+untouched throughout.** 240 tests green.
+
+`results/candidates_validated_final.csv` is the artefact: TRICERATOPS FPP/NFPP
+for the top 20 candidates by model score, at `n_draws=1e6` (recorded per row).
+
+| verdict | n |
+|---|---:|
+| validated_planet | 1 |
+| likely_planet | 6 |
+| inconclusive | 3 |
+| likely_nearby_fp | 3 |
+| likely_fp | 1 |
+| degenerate (no result) | 2 |
+| timeout / error | 4 |
+
+**TOI 5112.01 (TIC 337385330) is formally validated** — FPP **0.0136** against
+the 0.015 threshold, NFPP **2.1e-63** against 1e-3, at S/N 31.3 (above the
+S/N 15 floor where FPP becomes unreliable). Two caveats that must travel with
+that number: the FPP is **marginal** — a 10% shift crosses the line — and it
+rests on a single TRILEGAL draw. Re-run it two or three times before the
+result goes anywhere public.
+
+**Four `NEBx2P`/`BEBx2P` verdicts are the validation layer earning its keep.**
+A neighbouring or background eclipsing binary at twice the period is invisible
+to a light-curve-only CNN; all four scored above 0.918 in the model.
+
+### The four bugs that had to be fixed to get here
+
+Every one of these produced *confident-looking wrong numbers*, not crashes.
+
+1. **`calc_depths` takes a fraction, not ppm** (`edd3715`). Its docstring says
+   ppm; its arithmetic computes `tdepth/fluxratio` and zeroes anything > 1.
+   Fed ppm, every star zeroed, leaving 12 scenarios with no evidence computed —
+   uniform 1/12, so FPP was **exactly 1 − 3/12 = 0.75 for all 20 targets**.
+   The whole first shortlist was that constant.
+2. **Stock TRICERATOPS is numerically unsound here** — vendored fork at
+   `pipeline/vendor/triceratops` (`b5f71c6`). `exp(lnZ)/Σexp(lnZ)` is 0/0 once
+   the evidences underflow, which is the NaN FPP the depth fix exposed next.
+   Also fixes a `log10` background prior added to natural-log likelihoods
+   (biasing FPP **low**, toward validating planets) and swapped collision masks
+   in the parallel EB paths. A version pin cannot express this: stock 1.0.20
+   satisfies `triceratops>=1.0` and returns different numbers, so
+   `test_vendor_triceratops.py` fails if the env resolves a stock install.
+3. **A uniform posterior is not a verdict** (`e7ed3a8`). TIC 441804533 returned
+   FPP 6/7, NFPP 2/7 — 21 scenarios at exactly 1/21 — and was reported
+   `likely_nearby_fp`. The fork's own `FPP_degenerate` does **not** catch this:
+   it flags -inf/NaN evidences, but a uniform *finite* posterior normalises
+   cleanly and reports "ok". Both checks now run, plus a non-finite guard.
+   Two of the 20 are `degenerate`, both because the TIC lacks stellar mass,
+   radius, Teff and parallax — a catalogue gap, not a numerical one.
+4. **TRILEGAL is stochastic and we re-queried it every run** (`13b0183`). It is
+   a Monte Carlo galaxy simulation; its star count feeds `lnprior_background`
+   directly. Two runs of TIC 468983280 disagreed — `BEBx2P` with NFPP 2.4e-10
+   versus `NEBx2P` with NFPP 0.9995, flipping the verdict — on identical code.
+   `--trilegal-cache` (default `data/trilegal/`) pins one population per target.
+   It also cut per-target runtime from 15–22 min to 1–6 min: that query was
+   most of the wall time.
+
+### Operational lessons
+
+- **Three targets are intractable at `n_draws=1e6`** — TIC 451645081, 234345288
+  and 300710077 each burned a 2 h cap, and 451645081 once ran 10+ h. Raising
+  the cap does not help. They need `--n-draws 200000`; `n_draws` is recorded
+  per row so reduced precision is visible rather than silently pooled.
+- **`--skip-completed` exists now** because the docstring claimed
+  "resumable-by-rerun" while nothing skipped completed work; one interruption
+  cost ~3 h redoing ten finished targets. `error`/`timeout` rows are retried,
+  `degenerate` counts as done.
+- **Use absolute paths.** Run from the wrong directory and both Python and
+  `tee` fail to stderr, so the run silently does not happen and leaves no trace.
+- The rich log handler eats `[validate]` as markup — grep `TIC [0-9]+`, and note
+  failures read `TIC 123 failed:` with no colon after the number.
+
+**Outstanding:** the four unfinished targets are being retried at 200k draws
+into the same file. TIC 1042432 will probably fail again — its TRILEGAL query
+returns something unparseable for those coordinates, which fewer draws cannot fix.
