@@ -193,6 +193,10 @@ def _validate_row(
         _stash_trilegal(trilegal_cache, tic_id)
     return {
         "tic_id": tic_id,
+        # Recorded per row: a few targets are intractable at 1e6 draws and have
+        # to be run at fewer, so precision must travel with the number rather
+        # than being a property of the file.
+        "n_draws": int(n_draws),
         "fpp": result.fpp,
         "nfpp": result.nfpp,
         "classification": result.classification,
