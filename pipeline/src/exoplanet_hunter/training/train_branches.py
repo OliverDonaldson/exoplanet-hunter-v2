@@ -13,7 +13,7 @@ incumbent is `promotion_gate.py`'s job.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +29,7 @@ from exoplanet_hunter.datasets.viewset_pipeline import (
 )
 from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_index, load_metadata
 from exoplanet_hunter.eval.metrics import classification_metrics
+from exoplanet_hunter.eval.observation_bias import measure_observation_bias
 from exoplanet_hunter.models.cnn_branches import build_cnn_branches
 from exoplanet_hunter.training.calibration import PlattScaler, expected_calibration_error
 from exoplanet_hunter.utils.logging import get_logger
@@ -76,8 +77,8 @@ def run_fold(
     test_idx: np.ndarray,
     config: CVConfig,
     model_cfg: object,
-) -> dict:
-    """Train one fold and return its metrics."""
+) -> tuple[dict, pd.DataFrame]:
+    """Train one fold; return its metrics and its test-row predictions."""
     shards = list_shards(shard_dir)
     tic_ids = index["tic_id"].to_numpy()
     table = make_split_table(tic_ids, _split_codes(len(index), train_idx, val_idx, test_idx))
@@ -130,6 +131,17 @@ def run_fold(
     calibrated = calibrator.predict(test_scores)
 
     metrics = classification_metrics(test_labels, calibrated)
+    # Test rows in stream order, which is index order — the observation-bias
+    # measurement needs a score per row, and without it stage 2(b)'s success
+    # criterion cannot be evaluated at all.
+    predictions = index.iloc[np.sort(test_idx)].copy()
+    predictions["score"] = calibrated
+    # The stream yields test rows in ascending index position, so they line up
+    # with sorted(test_idx). Asserted rather than assumed: a silent
+    # misalignment would attach every score to the wrong target and still
+    # produce a plausible AUC.
+    if not np.array_equal(predictions["label"].to_numpy(), test_labels.astype(int)):
+        raise RuntimeError("test predictions are not aligned with the index rows")
     return {
         "test_roc_auc": metrics.roc_auc,
         "test_pr_auc": metrics.pr_auc,
@@ -137,7 +149,7 @@ def run_fold(
         "test_brier": metrics.brier,
         "test_ece": float(expected_calibration_error(test_labels, calibrated)),
         "n_test": len(test_labels),
-    }
+    }, predictions
 
 
 def run_cv(
@@ -159,13 +171,14 @@ def run_cv(
         n_splits=config.n_splits, shuffle=True, random_state=config.seed
     )
     rows: list[dict] = []
+    predictions: list[pd.DataFrame] = []
     positions = np.arange(len(y))
     for fold, (trainval, test_idx) in enumerate(splitter.split(positions, y, groups)):
         inner = GroupShuffleSplit(
             n_splits=1, test_size=config.val_frac, random_state=config.seed * 1000 + fold
         )
         tr_rel, va_rel = next(inner.split(trainval, y[trainval], groups[trainval]))
-        metrics = run_fold(
+        metrics, fold_predictions = run_fold(
             shard_dir,
             index,
             metadata,
@@ -177,6 +190,8 @@ def run_cv(
         )
         metrics["fold"] = fold
         rows.append(metrics)
+        fold_predictions["fold"] = fold
+        predictions.append(fold_predictions)
         log.info(
             "[train-branches] fold %d  AUC %.4f  Brier %.4f  ECE %.4f  (n=%d)",
             fold,
@@ -196,6 +211,20 @@ def run_cv(
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {"folds": rows, "summary": summary}
     (out_dir / "cv_summary.json").write_text(json.dumps(payload, indent=2))
+
+    # Every row is tested exactly once across folds, so this is a full
+    # out-of-fold prediction set — what the observation-bias metric reads.
+    all_predictions = pd.concat(predictions, ignore_index=True)
+    all_predictions.to_parquet(out_dir / "predictions.parquet", index=False)
+    bias = measure_observation_bias(all_predictions["score"].to_numpy(), all_predictions)
+    (out_dir / "observation_bias.json").write_text(json.dumps(asdict(bias), indent=2))
+    log.info(
+        "[train-branches] observation bias: transit %+.3f  baseline %+.3f  "
+        "completeness %+.3f  (was -0.003 / +0.211 on the incumbent)",
+        bias.transit_sensitivity,
+        bias.baseline_sensitivity,
+        bias.completeness_sensitivity,
+    )
     log.info(
         "[train-branches] ROC-AUC %.4f ± %.4f  Brier %.4f ± %.4f  ECE %.4f ± %.4f -> %s",
         summary["test_roc_auc"]["mean"],
