@@ -25,6 +25,9 @@ def _make_view_set(n: int = 6, *, seed: int = 0) -> ViewSetArrays:
             "label": [1, 0] * (n // 2),
             "observed_transit_count": rng.integers(1, 20, n),
             "expected_transit_count": rng.integers(20, 40, n),
+            # The real scalars carry it and the observation-bias metric derives
+            # baseline_days from it, so a fixture without it is not the schema.
+            "period": rng.uniform(0.5, 50.0, n),
             "transit_completeness": rng.random(n),
             "secondary_phase": rng.random(n) - 0.5,
             "ruwe": rng.normal(1.0, 0.2, n),

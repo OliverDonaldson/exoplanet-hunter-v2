@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from exoplanet_hunter.eval.observation_bias import ObservationBias, measure_observation_bias
+from exoplanet_hunter.eval.observation_bias import (
+    ObservationBias,
+    baseline_days,
+    measure_observation_bias,
+)
 
 
 def make_index(n: int = 200, *, seed: int = 0) -> pd.DataFrame:
@@ -18,17 +22,48 @@ def make_index(n: int = 200, *, seed: int = 0) -> pd.DataFrame:
             "observed_transit_count": observed,
             "expected_transit_count": expected,
             "transit_completeness": observed / expected,
+            "period": rng.uniform(0.5, 50.0, n),
         }
     )
 
 
 def test_a_model_scoring_the_baseline_is_caught():
-    # The measured 2026-07-26 failure: +0.211 with baseline, -0.003 with transit
-    # count. A score that is just the baseline must show exactly that shape.
+    # A score that is just the observation baseline must read as high baseline
+    # sensitivity and near-zero transit sensitivity.
     index = make_index()
-    bias = measure_observation_bias(index["expected_transit_count"].to_numpy(dtype=float), index)
+    bias = measure_observation_bias(baseline_days(index), index)
     assert bias.baseline_sensitivity > 0.9
     assert abs(bias.transit_sensitivity) < 0.3
+
+
+def test_baseline_defaults_to_days_not_the_transit_count():
+    # The covariate this module reverted to once: expected_transit_count is
+    # baseline / period, which is a different quantity and reported -0.068 where
+    # days reported +0.239 on the same predictions. They must not be confusable,
+    # and days must be what a caller gets without asking.
+    index = make_index()
+    scores = baseline_days(index)
+    days = measure_observation_bias(scores, index)
+    count = measure_observation_bias(scores, index, baseline_column="expected_transit_count")
+    assert days.baseline_sensitivity > 0.9
+    assert count.baseline_sensitivity < days.baseline_sensitivity - 0.2
+
+
+def test_baseline_days_reconstructs_the_epoch_span():
+    index = pd.DataFrame(
+        {
+            "observed_transit_count": [1, 5],
+            "expected_transit_count": [1, 10],
+            "period": [3.0, 2.5],
+        }
+    )
+    # One predicted transit spans nothing; ten at 2.5 d span nine gaps.
+    assert list(baseline_days(index)) == [0.0, 22.5]
+
+
+def test_baseline_days_refuses_to_guess_without_a_period():
+    with pytest.raises(KeyError, match="period"):
+        baseline_days(make_index().drop(columns=["period"]))
 
 
 def test_a_model_scoring_transit_count_reads_the_other_way():

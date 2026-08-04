@@ -1417,3 +1417,104 @@ call for Ollie.
 That needs the branch model scored over the 4,685 candidates, which needs
 candidate views built — the same `build_viewset.py` run against
 `candidates.parquet` rather than `labels.parquet`.
+
+## The candidate-population recomputation — criterion retired (2026-08-05, later)
+
+**Serving still `ca906040` — untouched. Nothing promoted.** New artefacts:
+`results/candidate_observation_bias.json`, `pipeline/scripts/candidate_bias.py`.
+
+### The number, and Ollie's rule applied
+
+Incumbent scores over the candidate population, baseline as a span in **days**:
+
+| | |
+|---|---:|
+| candidate baseline correlation | **+0.208** (n=3,908) |
+| the same, controlling for period | +0.187 |
+| label correlation, all-mission | +0.278 |
+| **label correlation, TESS** | **+0.387** |
+
+Every scored candidate is TESS — `candidates_scored.parquet` is TESS-only, and
+the 698 Kepler candidates in the view set were never scored by the incumbent —
+so **+0.387 is the comparison that matters**, not the all-mission +0.278.
+Comparing a TESS-only measurement against an all-mission reference would have
+been the third population mismatch in this sequence.
+
++0.208 against +0.387 is *at or below* the label structure, by a wide margin.
+The pre-committed rule's second branch fires: **the "baseline to zero" criterion
+is retired**, 2(b) runs on AUC and calibration, and observation selection moves
+to stage 3, written up there as a real problem architecture cannot fix.
+
+### Which figure carried the error — it was not the one we expected
+
+The instruction was to identify the original figures rather than assume they
+shared the module's covariate bug. Both covariates were computed on the same
+rows:
+
+```
+baseline_days            +0.2075   <- the roadmap's "+0.211"
+expected_transit_count   -0.0025   <- the roadmap's "-0.003"
+observed_transit_count   -0.0476
+```
+
+**The +0.211 was correct all along.** It reproduces to within 0.003 with
+baseline in days, so the suspicion recorded above — that it might carry the same
+proxy error — is disproven.
+
+**The −0.003 is the one that was wrong.** It was measured against
+`expected_transit_count`, the transits the ephemeris *predicts*. The roadmap
+describes it as "how many transits were caught", and against transits actually
+captured the figure is **−0.048**. The qualitative claim survives (the score
+still barely tracks captured transits); the number in the roadmap was measuring
+a different quantity.
+
+`expected_transit_count` is baseline / period. The original analysis used it as
+a *transit count*; `eval/observation_bias.py` later used it as a *baseline
+proxy*. Two contradictory roles for one column, erring in opposite directions,
+which is why neither looked wrong on its own.
+
+### The covariate fix had never reached the code
+
+`observation_bias.py` still defaulted `baseline_column="expected_transit_count"`
+with a docstring endorsing it, and `train_branches.py` called it with no
+override. **The committed `models/cv/branches-20260805/observation_bias.json`
+therefore holds the uncorrected numbers** (`baseline_sensitivity: -0.068`); the
++0.239 in the section above was computed ad hoc in a session and never written
+down as code. The next CV run would have produced another confident wrong number.
+
+`baseline_days` is now a named, derived, tested covariate:
+`(expected_transit_count - 1) * period`, which is the epoch span, quantised to
+whole periods and floored at zero when only one transit is predicted.
+`test_baseline_defaults_to_days_not_the_transit_count` pins the default so it
+cannot revert silently.
+
+### Two checks that were worth running
+
+**The reconstruction is sound.** `rho(baseline_days, n_sectors_observed)` =
+**+0.642** over 3,642 targets, against a DV-sourced sector count that shares no
+arithmetic with our ephemeris. Not higher because the two measure different
+things: span counts the multi-year gaps between sectors, sector count does not.
+
+**It is not a period artefact.** `rho(baseline_days, period)` is only +0.142, and
+the partial correlation controlling for period is **+0.187** against a raw
++0.208. It also survives inside every period band (+0.146 <3 d, +0.169 3–10 d,
++0.254 10–30 d, +0.062 >30 d, the last on n=160). This matches the labelled-set
+behaviour.
+
+Also worth recording: `rho(prob, n_sectors_observed)` = +0.222, partialling to
++0.184 — statistically indistinguishable from the baseline effect. Span and data
+volume cannot be separated on this population, so "more time to accumulate
+follow-up" and "more data to detect with" remain confounded. A stage 3
+intervention should not assume it is only the former.
+
+### Stage 2(b)'s criterion, split rather than deleted
+
+Its two halves were never the same kind of measurement, and only one was
+label-confounded:
+
+- **The 26.4% control-arm host-pass rate is now the criterion.** It is measured
+  on real hosts with *no injection*, so no label structure enters it. It stands
+  unchanged and must fall.
+- **The baseline correlation is a reported diagnostic, not a gate.**
+- **The transit-count correlation is reported, not gated** — its zero point is
+  −0.048, and the labels sit at −0.073, so there is no defensible target.

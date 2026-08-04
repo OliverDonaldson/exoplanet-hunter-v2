@@ -220,7 +220,8 @@ def run_cv(
     (out_dir / "observation_bias.json").write_text(json.dumps(asdict(bias), indent=2))
     log.info(
         "[train-branches] observation bias: transit %+.3f  baseline %+.3f  "
-        "completeness %+.3f  (was -0.003 / +0.211 on the incumbent)",
+        "completeness %+.3f  (labelled set: incumbent -0.087 / +0.238, "
+        "label itself -0.073 / +0.278)",
         bias.transit_sensitivity,
         bias.baseline_sensitivity,
         bias.completeness_sensitivity,

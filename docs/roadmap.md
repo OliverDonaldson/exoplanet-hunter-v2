@@ -12,10 +12,18 @@ Its branches target pathologies we have *measured*, not guessed:
 
 | our measurement | what it means | ExoMiner's answer |
 |---|---|---|
-| corr(prob, baseline) **+0.211**, corr(prob, transit count) **−0.003** | the score tracks how long a target was observed, not how many transits were caught | unfolded per-transit branch + observed/expected transit-count scalars |
+| corr(prob, transit count) **−0.048** | the score does not track how many transits were actually caught | unfolded per-transit branch + observed/expected transit-count scalars |
 | **26.4%** of hosts pass threshold with no injection at all (46.7% planet hosts vs 12.3% FP hosts) | the model partly scores the host, not the transit | per-diagnostic branches with branch-scoped scalars, so transit evidence is explicit |
 | 13-dim vetting-aux retrain: ΔAUC **−1.3e-5** | scalar summaries of diagnostics add nothing over the views | feed the odd/even, secondary and centroid **views** |
 | TESS **0.906** vs Kepler **0.989** AUC | the headroom is on the mission we serve | momentum dump, transit-masked periodogram, per-sector difference-image quality |
+
+**The baseline correlation is no longer on this list.** It was, at +0.211, read as
+the model scoring observation time rather than transit evidence. Measured
+properly it is label structure, not a model pathology — see *Observation
+baseline* under stage 3. The transit-count row above is also restated: the
+original **−0.003** was measured against `expected_transit_count`, the transits
+the ephemeris *predicts*; against the transits actually *captured* it is
+**−0.048**. The conclusion survives the correction, the number does not.
 
 ## What we take, and what we do not
 
@@ -71,15 +79,67 @@ past all seven gates, in HANDOVER.md (2026-08-05).
 
 **Stage 2 — the model, incrementally, each sub-step gated.**
 (a) per-diagnostic branches + scoped scalars + variance channels + joint local
-conv; (b) unfolded-flux branch — success is specific: corr(prob, n_transits)
-must leave zero *and* the 26.4% control-arm host-pass rate must fall;
-(c) trend + periodogram branches; (d) difference-image branch with quality
-attention. Optuna re-tune on the winner. Every sub-step passes the promotion
-gate on CV AUC/Brier/ECE, the TESS slice, and injection-recovery completeness.
+conv; (b) unfolded-flux branch; (c) trend + periodogram branches;
+(d) difference-image branch with quality attention. Optuna re-tune on the
+winner. Every sub-step passes the promotion gate on CV AUC/Brier/ECE, the TESS
+slice, and injection-recovery completeness.
+
+**Stage 2(b)'s success criterion, re-specified 2026-08-05.** It read
+*"corr(prob, n_transits) must leave zero and the 26.4% control-arm host-pass
+rate must fall"*, with a companion requirement that the baseline correlation
+fall from +0.211. That criterion is now split, because its two halves are not
+the same kind of measurement:
+
+- **The control-arm host-pass rate is the criterion.** It is measured on real
+  hosts with *no injection*, so a pass means the model scored the star rather
+  than a transit. No label structure enters it and nothing about the catalogue
+  can explain it away. **26.4% must fall.**
+- **The baseline correlation is retired as a gate** and kept only as a reported
+  diagnostic. Driving it to zero would move the model away from its own labels
+  — see stage 3.
+- **The transit-count correlation is reported, not gated.** Its zero point is
+  **−0.048** against transits captured, not the −0.003 that was measured against
+  transits predicted; and the labels themselves sit at −0.073, so there is no
+  defensible target value to demand.
+
+The clean test of the unfolded branch is **injection-recovery on matched hosts
+with observation baseline held constant**, which removes the label confound
+entirely. Build that harness when 2(b) is run.
 
 **Stage 3 — labels and negatives.** EB-catalogue and brown-dwarf negatives,
 the ephemeris-match test, and scrambled/inverted synthetic negatives built with
-our existing injection machinery.
+our existing injection machinery. Plus the observation-selection problem below,
+which arrived here from stage 2.
+
+### Observation baseline — a real problem architecture cannot fix
+
+Measured 2026-08-05, baseline as a span in **days**:
+
+| population | corr(score, baseline) |
+|---|---:|
+| incumbent, 3,908 scored candidates | **+0.208** (+0.187 controlling period) |
+| incumbent, labelled CV set | +0.238 |
+| stage 2(a) branches, labelled CV set | +0.239 |
+| **the ground-truth label itself** | **+0.278**, and **+0.387** on TESS alone |
+
+Every model sits *below* the labels. The correlation survives inside every TESS
+period band and is not a period artefact. TESS confirmed planets have a median
+baseline of **1,495 d against 430 d** for false positives.
+
+The mechanism is confirmation bias in the catalogue: a target observed across
+many sectors accumulates the follow-up that promotes it to confirmed, while a
+briefly-observed one stays a candidate or is retired. The model learned it
+because in the training labels it is true.
+
+**This is not "the correlation turned out to be fine".** It is a genuine defect
+with the wrong owner. For the deployment use — ranking candidates for follow-up
+— baseline dependence actively defeats the purpose, because it promotes targets
+that already received attention over under-observed ones that may deserve it.
+What changed is only *what can fix it*: no architecture can, because the signal
+is in the labels. The levers are **propensity-score weighting on observation
+baseline**, **baseline-stratified negative sampling**, and **synthetic negatives**
+that break the correlation by construction. All three are label-distribution
+interventions, and all three belong here.
 
 **Stage 4 — serving parity and explainability.** `TargetScorer` computes every
 branch live; `/score` returns per-branch contributions via branch-occlusion.
@@ -122,8 +182,8 @@ What is missing is survey scale, which is a different engineering problem:
 over all 2-minute data — that is where TOIs come from — so re-detecting what it
 has already detected is unlikely to add anything. More importantly, the
 measured weaknesses are all on the vetting side (the 26.4% control-arm host
-pass rate; probability tracking observation baseline at +0.21 but transit count
-at −0.003), and stages 1–2 have a falsifiable test for fixing them. Switching
+pass rate; probability tracking transits captured at −0.048), and stages 1–3
+have a falsifiable test for fixing them. Switching
 to a harder, more crowded problem mid-solve would abandon a well-posed one.
 
 **The niche worth remembering.** BLS assumes a repeating box, so it is weakest
