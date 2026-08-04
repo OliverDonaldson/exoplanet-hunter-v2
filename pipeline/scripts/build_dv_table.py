@@ -2,16 +2,12 @@
 
     python pipeline/scripts/build_dv_table.py --out data/processed/dv_scalars.parquet
 
-No network — reads `data/raw_dv/` off disk. Turns 3.6 GB of XML into a few MB
-of scalars, which is what training actually consumes; the difference-image
-pixels stay in the XML until stage 2 decides on a fixed stamp size.
+No network. Difference-image pixels stay in the XML until stage 2 fixes a stamp
+size; this is the scalar half.
 
-`period_mismatch_frac` is the column that matters most. A DV report holds one
-`planetResults` per TCE, and ~9% of targets' best-matching TCE is a different
-signal than our catalogue row — mostly harmonics (2x, 0.5x), sometimes an
-unrelated long-period detection. Rows above `--max-mismatch` are marked
-`dv_usable = False` so the DV branch can mask them rather than train on
-another transit's diagnostics.
+`dv_usable` is the column that matters: a report holds one `planetResults` per
+TCE, and rows whose best-matching TCE is further than `--max-mismatch` from the
+catalogue period describe a different signal and must be masked out.
 """
 
 from __future__ import annotations
@@ -100,8 +96,7 @@ def main() -> None:
 
     manifest = json.loads((dv_dir / "manifest.json").read_text())
     periods = _periods(args.root)
-    # The per-target period-mismatch warning is expected for ~9% of targets and
-    # is recorded per row; logging it 500 times would bury everything else.
+    # Expected for ~9% of targets and recorded per row; do not flood the log.
     logging.getLogger("exoplanet_hunter.data.dv_xml").setLevel(logging.ERROR)
 
     rows: list[dict] = []

@@ -1,20 +1,12 @@
-"""Gaia DR3 RUWE for TESS targets.
+"""Gaia DR3 RUWE — the unresolved-binary flag the DV report does not carry.
 
-RUWE (renormalised unit weight error) is the astrometric-excess-noise proxy
-that flags unresolved binaries: a single star sits near 1.0, and >1.4 is the
-usual "this is probably two stars" cut. It is the one ExoMiner input the DV
-report does not carry, so it needs its own fetch.
+Two hops, because the catalogues do not line up: TIC v8 gives a Gaia **DR2**
+source id, and `ruwe` is a **DR3** column, so it routes through
+`gaiadr3.dr2_neighbourhood`.
 
-Two hops, because the catalogues do not line up:
-
-  TIC -> Gaia **DR2** source id   (TIC v8 is built on DR2; MAST serves this)
-  DR2 -> DR3 via `gaiadr3.dr2_neighbourhood`, which is where `ruwe` lives.
-
-The neighbourhood table is many-to-many — one DR2 source can map to several
-DR3 sources where DR3 resolved a blend. Taking an arbitrary row would attach a
-*neighbour's* RUWE to our target, which is exactly the kind of wrong-but-
-plausible value this pipeline keeps getting bitten by, so `_best_match` keeps
-the nearest match and records how many candidates it beat.
+That table is many-to-many where DR3 resolved a blend DR2 saw as one source.
+`_best_match` keeps the nearest and records how many candidates it beat —
+an arbitrary row would attach a neighbour's RUWE to our target.
 """
 
 from __future__ import annotations

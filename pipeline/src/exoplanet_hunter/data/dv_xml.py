@@ -1,19 +1,13 @@
 """Parse a SPOC DV report XML into difference images and DV scalars.
 
-Reader half of `data/dv.py`. Structure confirmed against the real report for
-TIC 337385330 (`tess2021233042500-s0042-s0046-...-00550_dvr.xml`, 2026-08-01).
+Reader half of `data/dv.py`. Three traps, each yielding a plausible wrong
+number rather than an error:
 
-Three traps, each of which yields a plausible wrong number rather than an error:
-
-- **One `planetResults` per TCE, not per target.** Taking the first attributes
-  another signal's diagnostics to our row, so the catalogue period picks the
-  nearest `@orbitalPeriodInDays` and the mismatch is recorded and logged.
-- **Difference images are a sparse CCD-pixel list, not a raster** — extent is
-  the target's aperture (11x11 here, not Kepler's fixed 33x33). This returns
-  the sparse arrays and bounding box and invents no shape; re-gridding to a
-  fixed stamp is the consumer's job.
-- **A sentinel is not a measurement.** DV writes `-1.0` where a statistic was
-  attempted and is undefined; those become None so they cannot be averaged in.
+- one `planetResults` per TCE, not per target — the catalogue period picks the
+  nearest `@orbitalPeriodInDays` and the mismatch is returned;
+- difference images are a sparse CCD-pixel list sized to the target's aperture,
+  not Kepler's fixed 33x33 — re-gridding is the consumer's job;
+- `-1.0` is DV's "attempted, undefined" sentinel, not a measurement.
 """
 
 from __future__ import annotations

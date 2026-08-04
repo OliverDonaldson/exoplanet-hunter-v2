@@ -162,12 +162,10 @@ def check_dv_archive(
 ) -> list[str]:
     """Structural checks on a fetched DV archive; returns problems (empty = pass).
 
-    The headline check is **presence-mask integrity**. 18.5% of TESS targets
-    genuinely have no DV products, and the difference-image branch masks them
-    out. A target that was never queried looks identical to one that was
-    queried and has none — so an interrupted fetch would silently mask out real
-    data for every target after the interruption. Only the manifest can tell
-    those apart, which is why it records both outcomes explicitly.
+    The headline check is presence-mask integrity: ~20% of targets genuinely
+    have no DV products, and one never queried looks identical to one queried
+    and empty. Without the manifest an interrupted fetch silently masks out real
+    data for everything after the interruption.
     """
     problems: list[str] = []
     manifest_path = Path(cache_dir) / "manifest.json"

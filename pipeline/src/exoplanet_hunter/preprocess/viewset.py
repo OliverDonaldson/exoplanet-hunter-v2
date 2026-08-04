@@ -1,28 +1,11 @@
-"""ExoMiner-grade view set: per-diagnostic views at 301/31 bins.
+"""Per-diagnostic view set at 301/31 bins (stage 1 of the ExoMiner rebuild).
 
-Stage 1 of the rebuild. Separate from `views.py` on purpose — that module's
-2001/201 pair feeds the live `ca906040` model and must not move while this is
-built.
+Separate from `views.py`, whose 2001/201 pair feeds the live model.
 
-Every view here is **(bins, 3)**: `[flux, scatter, present]`.
-
-- `flux` is the median in each bin, baseline-subtracted and depth-normalised
-  exactly as `views._normalise` does, so shape is what the model sees.
-- `scatter` is the per-bin MAD on the *same* scale. Dividing it by the same
-  depth matters: an unscaled scatter channel next to a normalised flux channel
-  would make the model's notion of "noisy" depend on transit depth.
-- `present` is 1 where the bin held a cadence and 0 where it did not. Without
-  it, an empty bin filled to baseline is indistinguishable from a bin measured
-  to be flat — and a transit falling in a data gap reads as no transit. The
-  same reason every branch here carries a presence mask: Kepler has DV, K2 has
-  none, FFI differs again, and a missing branch that looks like a measured zero
-  poisons every row of its mission.
-
-The unfolded branch is the one aimed squarely at the measured failure: score
-correlates +0.211 with observation baseline and −0.003 with transit count, so
-the model is reading how long a target was watched rather than how often it
-dipped. Individual transits, plus observed/expected counts, are what make
-repetition explicit.
+Most views are `(bins, 3)` = `[flux, scatter, present]`: flux is the per-bin
+median normalised so the primary's depth is -1, scatter the per-bin MAD on the
+same scale, and `present` marks bins that held a cadence. Without `present` an
+empty bin filled to baseline is indistinguishable from one measured flat.
 """
 
 from __future__ import annotations
@@ -41,6 +24,8 @@ GLOBAL_BINS = 301
 LOCAL_BINS = 31
 LOCAL_DURATIONS = 3.0
 MAX_TRANSITS = 20
+PERIODOGRAM_BINS = 256
+PERIODOGRAM_RANGE = (0.5, 30.0)  # days
 
 
 @dataclass(frozen=True)
@@ -53,11 +38,13 @@ class ViewSet:
     even_view: np.ndarray  # (31, 3)  even-numbered transits only
     secondary_view: np.ndarray  # (31, 3)  centred on the deepest non-primary phase
     trend_view: np.ndarray  # (301, 3) what the detrending removed
-    #: (MAX_TRANSITS, 31, 3) — individual transits, newest bins last.
-    unfolded_view: np.ndarray
-    #: Transits with any cadence coverage, and how many the ephemeris predicts
-    #: over the observed baseline. Their ratio is the completeness the folded
-    #: views cannot express.
+    unfolded_view: np.ndarray  # (MAX_TRANSITS, 31, 3) individual transits
+    centroid_view: np.ndarray  # (31, 3)  offset in out-of-transit sigma
+    gap_view: np.ndarray  # (301, 2) [missing fraction, present]
+    periodogram_view: np.ndarray  # (256, 2) [BLS power, present], fixed grid
+    periodogram_masked_view: np.ndarray  # (256, 2) same, transits removed
+    #: Coverage the folded views cannot express: a single-transit candidate and
+    #: a 40-transit one look identical once folded.
     observed_transit_count: int
     expected_transit_count: int
     secondary_phase: float
@@ -78,17 +65,10 @@ def _normalise_pair(
 ) -> np.ndarray:
     """Stack (median, scatter, present) into a normalised (bins, 3) view.
 
-    Baseline at 0 and, by default, the deepest bin at -1 — so the model sees
-    transit *shape* rather than magnitude. Scatter is divided by the same depth
-    so the two channels stay commensurate.
-
-    `depth` overrides that scale, and the comparison views **must** pass the
-    primary's. Normalising the odd and even views each by their own depth sends
-    both to exactly -1 and destroys the depth *difference* between them, which
-    is the whole eclipsing-binary signature the branch exists to catch. The
-    same argument applies to the secondary view (a shallow secondary would
-    otherwise look as deep as the primary) and to each unfolded transit (depth
-    varying transit to transit is what a blend looks like).
+    `depth` overrides the self-derived scale, and the comparison views **must**
+    pass the primary's: normalising odd and even each by their own depth sends
+    both to -1 and destroys the depth difference that is the whole EB
+    signature. Same for the secondary and each unfolded transit.
     """
     present = (count > 0).astype(np.float32)
     if not np.isfinite(median).any():
@@ -164,10 +144,9 @@ def _unfolded(
 ) -> tuple[np.ndarray, int, int]:
     """Per-transit views plus (observed, expected) transit counts.
 
-    Expected counts every epoch the ephemeris predicts inside the observed
-    baseline; observed counts those that actually caught a cadence in-window.
-    A single-transit candidate and a 40-transit one are indistinguishable once
-    folded, which is exactly the blind spot being fixed.
+    Expected counts every epoch the ephemeris predicts inside the baseline;
+    observed counts those that caught a cadence. A single-transit candidate and
+    a 40-transit one are indistinguishable once folded.
     """
     stack = np.zeros((max_transits, LOCAL_BINS, 3), dtype=np.float32)
     if time.size == 0:
@@ -191,6 +170,140 @@ def _unfolded(
     return stack, observed, expected
 
 
+def _centroid_view(
+    raw_lc: lk.LightCurve, period: float, t0: float, half: float, n_bins: int
+) -> np.ndarray:
+    """Phase-binned centroid offset in units of its out-of-transit scatter.
+
+    Sigma rather than depth: this is a pixel shift, and normalising it to -1
+    would say every target moved by the same amount.
+    """
+    from exoplanet_hunter.features.centroid import _detrend_axis
+
+    columns = {c.lower() for c in raw_lc.columns}
+    cx_col = next((c for c in ("mom_centr1", "centroid_col") if c in columns), None)
+    cy_col = next((c for c in ("mom_centr2", "centroid_row") if c in columns), None)
+    if cx_col is None or cy_col is None:
+        return _empty_view(n_bins)
+
+    time = np.asarray(raw_lc.time.value, dtype=float)
+    try:
+        cx = _detrend_axis(time, np.asarray(raw_lc[cx_col].value, dtype=float))
+        cy = _detrend_axis(time, np.asarray(raw_lc[cy_col].value, dtype=float))
+    except Exception:
+        return _empty_view(n_bins)
+
+    offset = np.hypot(cx, cy)
+    phase = _phase_of(time, period, t0)
+    finite = np.isfinite(offset)
+    if finite.sum() < n_bins:
+        return _empty_view(n_bins)
+
+    # Scale by the robust scatter of cadences well away from the transit, so
+    # the channel reads as "sigma of centroid shift".
+    out_of_transit = finite & (np.abs(phase) > 3.0 * half)
+    if out_of_transit.sum() > 3:
+        sample = offset[out_of_transit]
+        sigma = 1.4826 * float(np.median(np.abs(sample - np.median(sample))))
+    else:
+        sigma = float("nan")
+    if not np.isfinite(sigma) or sigma < 1e-12:
+        sigma = 1.0
+
+    profile = bin_profile(phase[finite], offset[finite] / sigma, n_bins, -half, half)
+    present = (profile.count > 0).astype(np.float32)
+    baseline = float(np.nanmedian(profile.median)) if np.isfinite(profile.median).any() else 0.0
+    return np.stack(
+        [
+            np.nan_to_num(profile.median - baseline, nan=0.0),
+            np.nan_to_num(profile.scatter, nan=0.0),
+            present,
+        ],
+        axis=-1,
+    ).astype(np.float32)
+
+
+def _gap_view(lc: lk.LightCurve, period: float, t0: float, n_bins: int) -> np.ndarray:
+    """Fraction of expected cadences missing from each phase bin.
+
+    The momentum-dump branch, measured as the hole a dump leaves. Reading
+    `QUALITY` bit 5 directly gives zero for every target in the cache —
+    lightkurve's default bitmask drops those cadences at download time — so the
+    flag would have been an all-zero branch that looked like a feature.
+    """
+    from exoplanet_hunter.features.centroid import _segment_by_time_gaps
+
+    time = np.asarray(lc.time.value, dtype=float)
+    time = np.sort(time[np.isfinite(time)])
+    if time.size < 2:
+        return np.zeros((n_bins, 2), dtype=np.float32)
+    cadence = float(np.median(np.diff(time)))
+    if not np.isfinite(cadence) or cadence <= 0:
+        return np.zeros((n_bins, 2), dtype=np.float32)
+
+    # The ideal grid spans each *observed segment*, not the whole baseline.
+    # Spanning the baseline counts the multi-year holes between sectors as
+    # missing cadences, which pins every bin near the same large number — on
+    # TIC 337385330 that was 0.823-0.902 across all 301 bins, a branch with no
+    # discriminating power dressed up as a measurement.
+    edges = np.linspace(-0.5, 0.5, n_bins + 1)
+    ideal = np.concatenate(
+        [
+            np.arange(time[lo], time[hi - 1] + cadence, cadence)
+            for lo, hi in _segment_by_time_gaps(time)
+            if hi > lo
+        ]
+        or [np.empty(0)]
+    )
+    observed = np.bincount(
+        np.clip(np.digitize(_phase_of(time, period, t0), edges) - 1, 0, n_bins - 1),
+        minlength=n_bins,
+    ).astype(float)
+    expected = np.bincount(
+        np.clip(np.digitize(_phase_of(ideal, period, t0), edges) - 1, 0, n_bins - 1),
+        minlength=n_bins,
+    ).astype(float)
+    missing = np.divide(expected - observed, expected, out=np.zeros(n_bins), where=expected > 0)
+    return np.stack([np.clip(missing, 0.0, 1.0), (expected > 0).astype(float)], axis=-1).astype(
+        np.float32
+    )
+
+
+def _periodogram_view(lc: lk.LightCurve, n_bins: int) -> np.ndarray:
+    """BLS power on a fixed log-period grid, so bin k is the same period always.
+
+    `bls_periodogram`'s own grid depends on the target's baseline, which would
+    make bin 40 a different period for every target.
+    """
+    from exoplanet_hunter.search.bls import bls_periodogram
+
+    grid = np.geomspace(*PERIODOGRAM_RANGE, n_bins)
+    try:
+        periods, power, _ = bls_periodogram(
+            lc, period_min=PERIODOGRAM_RANGE[0], period_max=PERIODOGRAM_RANGE[1], max_periods=2000
+        )
+    except Exception:
+        return np.zeros((n_bins, 2), dtype=np.float32)
+    if periods.size < 2 or not np.isfinite(power).any():
+        return np.zeros((n_bins, 2), dtype=np.float32)
+
+    order = np.argsort(periods)
+    resampled = np.interp(grid, periods[order], power[order], left=np.nan, right=np.nan)
+    present = np.isfinite(resampled).astype(np.float32)
+    peak = float(np.nanmax(resampled)) if present.any() else 0.0
+    scale = peak if peak > 1e-12 else 1.0
+    return np.stack([np.nan_to_num(resampled / scale, nan=0.0), present], axis=-1).astype(
+        np.float32
+    )
+
+
+def _mask_transits(lc: lk.LightCurve, period: float, t0: float, duration: float) -> lk.LightCurve:
+    """Drop in-transit cadences so a second periodicity can surface."""
+    time = np.asarray(lc.time.value, dtype=float)
+    phase_days = (time - t0 + 0.5 * period) % period - 0.5 * period
+    return lc[np.abs(phase_days) > duration]
+
+
 def build_view_set(
     lc: lk.LightCurve,
     *,
@@ -198,10 +311,12 @@ def build_view_set(
     t0: float,
     duration: float,
     trend_lc: lk.LightCurve | None = None,
+    raw_lc: lk.LightCurve | None = None,
     global_bins: int = GLOBAL_BINS,
     local_bins: int = LOCAL_BINS,
     local_durations: float = LOCAL_DURATIONS,
     max_transits: int = MAX_TRANSITS,
+    periodogram_bins: int = PERIODOGRAM_BINS,
 ) -> ViewSet:
     """Build every view for one (light curve, ephemeris).
 
@@ -215,6 +330,10 @@ def build_view_set(
                       shows up here and nowhere else. Omitted, the branch is all
                       zeros with `present` 0, which is the honest encoding of
                       "not available" rather than "flat".
+    raw_lc          : the *unprocessed* curve, for the centroid branch —
+                      `clean_lightcurve` drops `MOM_CENTR1/2`, so it cannot be
+                      recovered downstream. Omitted, that branch reads as absent
+                      rather than as flat.
     """
     if not np.isfinite(period) or period <= 0:
         raise ValueError(f"invalid period: {period}")
@@ -264,6 +383,18 @@ def build_view_set(
         time, flux, period, t0, duration, local_durations, max_transits, primary_depth
     )
 
+    if raw_lc is not None:
+        centroid_view = _centroid_view(raw_lc, period, t0, half, local_bins)
+        gap_view = _gap_view(lc, period, t0, global_bins)
+    else:
+        centroid_view = _empty_view(local_bins)
+        gap_view = _gap_view(lc, period, t0, global_bins)
+
+    periodogram_view = _periodogram_view(lc, periodogram_bins)
+    periodogram_masked_view = _periodogram_view(
+        _mask_transits(lc, period, t0, duration), periodogram_bins
+    )
+
     return ViewSet(
         global_view=global_view,
         local_view=local_view,
@@ -272,6 +403,10 @@ def build_view_set(
         secondary_view=secondary_view,
         trend_view=trend_view,
         unfolded_view=unfolded_view,
+        centroid_view=centroid_view,
+        gap_view=gap_view,
+        periodogram_view=periodogram_view,
+        periodogram_masked_view=periodogram_masked_view,
         observed_transit_count=observed,
         expected_transit_count=expected,
         secondary_phase=sec_phase,

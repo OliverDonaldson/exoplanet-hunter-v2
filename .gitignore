@@ -23,6 +23,7 @@ frontend/dist/
 data/raw/
 data/raw_kepler/
 data/raw_dv/
+data/raw_ffi/
 data/interim/
 models/cv/*
 !models/cv/*.dvc

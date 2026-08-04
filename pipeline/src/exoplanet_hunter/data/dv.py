@@ -1,23 +1,14 @@
-"""TESS Data Validation (DV) product ingest — availability query + XML fetch.
+"""TESS DV product ingest — availability query + XML fetch.
 
-SPOC's `*_dvr.xml` carries per-sector difference images, the DV scalars and
-observed/expected transit counts in one ~0.3 MB file; `dv_xml.py` reads it.
+SPOC's `*_dvr.xml` (~0.3 MB) carries per-sector difference images, the DV
+scalars and observed/expected transit counts; `dv_xml.py` reads it.
 
-Sizing measured 2026-08-01 over a random sample of 200 targets: **81.5%** have
-at least one DV product (candidates 78%, labelled 85%) at ~0.34 MB per XML.
-The roadmap's 2-8 MB/file was the DVR *PDF* (18-21 MB) and DVT *FITS*, not the
-XML.
+`query_criteria` takes a list of target names, so targets are queried 40 per
+round trip. Selection keeps the widest multi-sector run, which already holds
+one `differenceImageResults` per sector it spans; skipped products stay in the
+manifest with size and URI so a policy change needs no second query pass.
 
-Two design choices follow from that:
-
-**Batching.** `query_criteria` takes a list of `target_name`s, so 40 targets
-cost one round trip — 0.29 s/target against 1.8 s unbatched, 35 min for 7,199.
-
-**Selection.** The widest multi-sector run holds one `differenceImageResults`
-per sector it spans, so taking it alone keeps the per-sector imaging at a
-quarter of the bytes (3.8 GB vs 13.3 GB); targets with no multi-sector run keep
-all their single-sector ones. Skipped products stay in the manifest with size
-and URI, so changing that policy is a download-only pass.
+Sizing and coverage measurements are in HANDOVER.md (2026-08-01).
 """
 
 from __future__ import annotations

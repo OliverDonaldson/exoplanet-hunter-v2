@@ -1,18 +1,13 @@
 """Fetch TESS DV report XML for every target the pipeline knows about.
 
-Resumable and manifest-tracked from the first run — every long job here has
-been interrupted at least once. Re-running skips finished targets and targets
-known to have no DV products, and retries only transient failures.
-
     python pipeline/scripts/fetch_dv.py                    # labelled TESS + scored candidates
-    python pipeline/scripts/fetch_dv.py --limit 400        # measure shard growth first
+    python pipeline/scripts/fetch_dv.py --limit 400        # a bounded slice
     python pipeline/scripts/fetch_dv.py --tics my_tics.csv # an explicit list
 
-**Do not run alongside another MAST job** — contention with the validation runs
-is what tripped astroquery's 600 s limit and cost the back half of a run.
-
-Sized 2026-08-01 from 200 sampled targets: 81.5% have DV products at ~0.53 MB
-selected each, so 7,199 targets is roughly 3.8 GB and ~35 min of queries.
+Resumable: re-running skips finished targets and targets known to have no DV
+products, and retries only transient failures. Needs network.
+**Do not run alongside another MAST job** — contention tripped astroquery's
+600 s limit and cost the back half of an earlier run.
 """
 
 from __future__ import annotations
@@ -30,7 +25,7 @@ log = get_logger(__name__)
 
 
 def _default_tics(root: Path) -> list[int]:
-    """Labelled TESS targets ∪ scored candidates — the 7,199 that need DV."""
+    """Labelled TESS targets ∪ scored candidates."""
     tics: set[int] = set()
     labels = root / "data" / "labels" / "labels.parquet"
     if labels.exists():
@@ -102,8 +97,6 @@ def main() -> None:
         done = i + len(batch)
         elapsed = time.time() - started
         rate = done / elapsed if elapsed else 0.0
-        # One line per batch, not per target: 7,199 targets at 40 per line is
-        # 180 lines, which stays readable in a log tailed over hours.
         log.info(
             "[dv] %d/%d  ok=%d none=%d fail=%d  %.2f GB  %.1f targets/s  eta %.0f min",
             done,

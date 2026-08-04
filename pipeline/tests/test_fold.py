@@ -1,9 +1,8 @@
 """Phase binning: the primitive under every view.
 
-`bin_profile` replaced a per-bin boolean mask with a sort-and-split, and added
-the scatter/count channels. The equivalence test pins the median path against
-the original implementation, because `fold_and_bin` feeds the live serving
-views and a silent change there moves every score.
+The equivalence test pins the median path against the original per-bin-mask
+implementation — `fold_and_bin` feeds live serving, so a silent change there
+moves every score.
 """
 
 from __future__ import annotations

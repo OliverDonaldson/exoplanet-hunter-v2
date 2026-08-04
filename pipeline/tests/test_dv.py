@@ -1,11 +1,7 @@
-"""TESS DV product ingest: filename parsing, selection policy, manifest.
+"""DV ingest: filename parsing, selection policy, manifest.
 
-Every check here guards a way the DV fetch could return *plausible but wrong*
-results rather than crash — an unrecognised filename that looks like "target
-has no DV products", a transient MAST blip cached as permanent, or a selection
-policy that quietly drops the per-sector difference images.
-
-Filenames are the real ones observed on MAST for TIC 337385330 (2026-08-01).
+Filenames are real ones observed on MAST for TIC 337385330. Each test guards a
+way the fetch could return plausible-but-wrong results rather than crash.
 """
 
 from __future__ import annotations

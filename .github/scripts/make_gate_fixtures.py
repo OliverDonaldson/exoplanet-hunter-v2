@@ -22,6 +22,7 @@ from exoplanet_hunter.datasets.views_io import load_views
 from exoplanet_hunter.validation.promotion import evaluate_promotion, promote
 from exoplanet_hunter.validation.schemas import (
     candidate_catalogue_schema,
+    check_dv_archive,
     check_views,
     label_catalogue_schema,
 )
@@ -30,14 +31,17 @@ from exoplanet_hunter.validation.schemas import (
 def _labels_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "tic_id": [1001, 1002, 757450, 211390903],
-            "period": [3.5, 1.2, 8.9, 2.6],
-            "t0": [1325.0, 1330.5, 131.5, -1614.0],
-            "duration": [0.12, 0.08, 0.25, 0.1],
-            "depth": [0.001, 0.02, 0.005, 0.0],
-            "disposition": ["CP", "FP", "CONFIRMED", "CANDIDATE"],
-            "label": [1, 0, 1, -1],
-            "mission": ["TESS", "TESS", "Kepler", "K2"],
+            # TESS-majority, like the real catalogue: the DV gate's coverage
+            # floor is a ratio, so two TESS rows cannot express "most targets
+            # have DV products and a few genuinely do not".
+            "tic_id": [1001, 1002, 1003, 1004, 1005, 757450, 211390903],
+            "period": [3.5, 1.2, 5.4, 11.0, 0.9, 8.9, 2.6],
+            "t0": [1325.0, 1330.5, 1412.0, 1500.25, 1290.0, 131.5, -1614.0],
+            "duration": [0.12, 0.08, 0.15, 0.3, 0.05, 0.25, 0.1],
+            "depth": [0.001, 0.02, 0.003, 0.0008, 0.04, 0.005, 0.0],
+            "disposition": ["CP", "FP", "CP", "KP", "FP", "CONFIRMED", "CANDIDATE"],
+            "label": [1, 0, 1, 1, 0, 1, -1],
+            "mission": ["TESS", "TESS", "TESS", "TESS", "TESS", "Kepler", "K2"],
         }
     )
 
@@ -72,6 +76,28 @@ def _views_npz(path: Path) -> None:
     )
 
 
+def _dv_archive(root: Path, tic_ids: list[int]) -> Path:
+    """A DV archive covering `tic_ids`, one target deliberately without products.
+
+    The absent target is the point: ~20% of real targets have no DV, and the
+    gate has to accept that while still catching a target that was never
+    queried at all.
+    """
+    cache = root / "raw_dv"
+    cache.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, dict] = {}
+    for i, tic in enumerate(tic_ids):
+        if i == len(tic_ids) - 1:
+            manifest[str(tic)] = {"success": False, "n_available": 0, "reason": "no DV products"}
+            continue
+        path = cache / f"tic_{tic}" / f"tess-s0001-s0009-{tic:016d}-00001_dvr.xml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('<?xml version="1.0"?><dv:dvTargetResults/>')
+        manifest[str(tic)] = {"success": True, "n_available": 1, "paths": [str(path)]}
+    (cache / "manifest.json").write_text(json.dumps(manifest))
+    return cache
+
+
 def _cv_summary(auc: float, brier: float, ece: float) -> dict:
     return {
         "folds": [],
@@ -100,6 +126,12 @@ def main(out_dir: Path) -> None:
     problems = check_views(load_views(out_dir / "views.npz"))
     if problems:
         raise SystemExit(f"views fixture fails its own gate: {problems}")
+
+    tess_tics = labels.loc[labels["mission"] == "TESS", "tic_id"].astype(int).tolist()
+    dv_dir = _dv_archive(out_dir, tess_tics)
+    problems = check_dv_archive(dv_dir, tess_tics)
+    if problems:
+        raise SystemExit(f"DV fixture fails its own gate: {problems}")
 
     # Incumbent registry via the real promote() path, plus one candidate the
     # gate must accept and one it must reject.

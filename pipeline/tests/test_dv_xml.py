@@ -1,10 +1,7 @@
 """DV report parsing: TCE matching, sparse difference images, sentinels.
 
-The fixture mirrors the real report for TIC 337385330 (2026-08-01) — same
-nesting, same attribute names, same `sectorsObserved` convention — shrunk to
-two TCEs and a 2x2 aperture. Each test pins a way the parse could return a
-plausible wrong number: the wrong TCE's diagnostics, sectors off by one, or a
-`-1.0` "not computed" read as a measurement.
+The fixture mirrors the real report for TIC 337385330 — same nesting, attribute
+names and `sectorsObserved` convention — shrunk to two TCEs and a 2x2 aperture.
 """
 
 from __future__ import annotations

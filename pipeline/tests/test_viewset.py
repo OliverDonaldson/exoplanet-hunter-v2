@@ -1,9 +1,8 @@
-"""ExoMiner-grade view set.
+"""The 301/31 view set.
 
-The normalisation tests are the important ones. Scaling each comparison view by
-its own depth sends odd, even and secondary all to exactly -1, which looks
-entirely reasonable and silently destroys the three diagnostics they exist to
-provide. They must share the primary's scale.
+The normalisation tests are the important ones: scaling each comparison view by
+its own depth sends odd, even and secondary all to -1, which looks reasonable
+and destroys the three diagnostics they exist to provide.
 """
 
 from __future__ import annotations
@@ -24,11 +23,19 @@ class FakeTime:
 
 
 class FakeLightCurve:
-    """Minimal stand-in — build_view_set only reads .time.value and .flux.value."""
+    """Minimal stand-in for the parts of lk.LightCurve build_view_set touches.
 
-    def __init__(self, time, flux):
+    Needs boolean indexing as well as .time/.flux, because the masked
+    periodogram drops the in-transit cadences before re-running BLS.
+    """
+
+    def __init__(self, time, flux, columns=()):
         self.time = FakeTime(np.asarray(time, dtype=float))
         self.flux = FakeTime(np.asarray(flux, dtype=float))
+        self.columns = list(columns)
+
+    def __getitem__(self, mask):
+        return FakeLightCurve(self.time.value[mask], self.flux.value[mask], self.columns)
 
 
 def make_lc(
@@ -175,6 +182,52 @@ def test_missing_trend_branch_is_absent_not_flat():
 
     with_trend = build(make_lc(), trend_lc=make_lc(depth=0.02))
     assert with_trend.trend_view[:, 2].sum() > 0
+
+
+def test_gap_view_measures_within_segment_holes_not_the_baseline():
+    # Punch a hole at one phase inside an otherwise continuous run. Measuring
+    # against the whole baseline instead of the observed segments pins every
+    # bin near the same large number — a branch with no discriminating power
+    # dressed up as a measurement.
+    lc = make_lc(n_transits=6)
+    t = lc.time.value
+    phase = ((t - T0) / PERIOD + 0.5) % 1.0 - 0.5
+    keep = ~((phase > 0.20) & (phase < 0.25))
+    vs = build(FakeLightCurve(t[keep], lc.flux.value[keep]))
+    gap = vs.gap_view[:, 0]
+    assert vs.gap_view.shape == (301, 2)
+    assert gap.max() > 0.5  # the punched phase
+    assert np.median(gap) < 0.1  # everywhere else is intact
+    assert (gap >= 0).all() and (gap <= 1).all()
+
+
+def test_gap_view_is_flat_when_nothing_is_missing():
+    vs = build(make_lc(n_transits=4))
+    assert vs.gap_view[:, 0].max() < 0.35
+
+
+def test_periodogram_lands_on_a_fixed_grid():
+    # Bin k must be the same period for every target, or a conv filter learns
+    # nothing transferable. Two targets with different baselines, same grid.
+    short = build(make_lc(n_transits=4))
+    long = build(make_lc(n_transits=12))
+    assert short.periodogram_view.shape == (256, 2)
+    assert long.periodogram_view.shape == (256, 2)
+    assert np.isfinite(short.periodogram_view).all()
+    # Power is normalised to its own peak, so the scale is comparable too.
+    assert short.periodogram_view[:, 0].max() == pytest.approx(1.0)
+
+
+def test_masking_the_transit_changes_the_periodogram():
+    vs = build(make_lc(n_transits=10, depth=0.02))
+    assert not np.allclose(vs.periodogram_view[:, 0], vs.periodogram_masked_view[:, 0])
+
+
+def test_centroid_branch_absent_without_a_raw_curve():
+    vs = build(make_lc())
+    assert vs.centroid_view.shape == (31, 3)
+    assert vs.centroid_view[:, 2].sum() == 0  # present == 0: absent, not flat
+    assert vs.centroid_view.sum() == pytest.approx(0.0)
 
 
 def test_rejects_an_unusable_ephemeris():

@@ -1,15 +1,9 @@
 """Phase-folding and binning for transit search.
 
-Once a (period, t0) is known (or estimated by BLS/TLS), we phase-fold the
-light curve so all transits overlay on top of each other. This amplifies the
-transit signal and makes it visible to a human and a model.
-
-`bin_profile` is the primitive: it returns the per-bin **median, scatter and
-count** in one pass. The scatter is the paired variance channel ExoMiner feeds
-alongside each view — at 301 bins over a multi-sector light curve a bin holds
-tens of cadences, and how much they disagree separates a real transit from a
-bin that happened to average low. `fold_and_bin` is the median-only wrapper the
-existing 2001/201 views use.
+Folding overlays every transit so the signal adds. `bin_profile` is the
+primitive, returning per-bin median, scatter and count in one pass; the scatter
+is the paired variance channel the new views feed alongside each flux channel.
+`fold_and_bin` is the median-only wrapper the existing 2001/201 views use.
 """
 
 from __future__ import annotations

@@ -69,6 +69,7 @@ jobs:
             --labels "$RUNNER_TEMP/fixtures/labels.parquet" \
             --candidates "$RUNNER_TEMP/fixtures/candidates.parquet" \
             --views "$RUNNER_TEMP/fixtures/views.npz" \
+            --dv "$RUNNER_TEMP/fixtures/raw_dv" \
             --previous-labels "$RUNNER_TEMP/fixtures/labels_previous.parquet"
 
   promotion-gate:

@@ -1,8 +1,7 @@
 """Gaia DR2 -> DR3 RUWE matching.
 
-`dr2_neighbourhood` is many-to-many: where DR3 resolved a blend, one DR2
-source maps to several DR3 sources. Taking an arbitrary row attaches a
-*neighbour's* RUWE to our target — a plausible number for the wrong star.
+`dr2_neighbourhood` is many-to-many where DR3 resolved a blend, so an arbitrary
+row attaches a neighbour's RUWE to our target.
 """
 
 from __future__ import annotations
