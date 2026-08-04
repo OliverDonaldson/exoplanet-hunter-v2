@@ -41,69 +41,33 @@ fixed (gate cwd, `dvc` resolution, MLflow run naming, the CI gate jobs
 `ci.yml` had promised); patched TRICERATOPS vendored.
 
 **Stage 1 — ExoMiner-grade inputs.** *(done 2026-08-05)*
-Built: 5,423-example view set (11 branches), 3.6 GB DV archive, DV scalars
-table, Gaia RUWE, FFI recovery for the `no_fits` candidates, and a seventh
-validation gate. Shards are 122 MB against the legacy 47 MB — 2.6x, so the
-`.cache()` question needed no change. Details and the four corrections in
-HANDOVER.md (2026-08-05).
-
-Original plan:
-Emit 301/31 views with variance channels, odd/even, weak-secondary, centroid,
-flux-trend, unfolded [20,31] + transit counts, momentum dump, and the
-periodogram pair. Ingest TESS DV XML for difference images, DV diagnostics and
-RUWE. Add the TESS-SPOC FFI fallback. Extend the validation gates to the new
-schema.
-
-*No model change in this stage, deliberately.* Changing inputs and
-architecture together makes any outcome uninterpretable — the 13-dim null was
-only diagnosable because the aux vector was the sole variable. The data build
-is also the expensive, network-bound half (hours of MAST), while training
-reads shards from disk, so the ordering pays the slow step once and then
-iterates cheaply. And `cnn_dualview.py` declares exactly three Input layers
-(`global_view`, `local_view`, `aux_features`) — it *cannot* consume an
-unfolded [20,31] tensor or a 33x33xN image stack. Consuming them is Stage 2.
-
-Nothing reaches the promotion gate here either: that gate compares trained
-runs' CV summaries, and this stage produces data, not a model. Stage 1 is
-gated by the *five Pandera gates* instead, which is why extending them is a
-deliverable rather than a nicety — the new artefacts are exactly where silent
-corruption would hide, and this project has already been bitten three times by
-data that was wrong but plausible (the 500/500 catalogue clobber, the
-9-dim-into-13-dim write, the ppm-vs-fraction depth). `ca906040` keeps serving
+A 5,423-example view set with eleven branches — 301/31 flux with variance and
+presence channels, odd/even, weak-secondary, centroid, flux-trend, unfolded
+[20,31] with transit counts, cadence-gap, and the periodogram pair — plus a
+3.6 GB DV archive, its scalars table, Gaia RUWE, FFI recovery for the 744
+`no_fits` candidates, and a seventh validation gate. `ca906040` served
 untouched throughout.
 
-### Stage 1 — three things that will bite
+The three things flagged as likely to bite, and what actually happened:
 
-**Shard size.** TFRecords are 47 MB today (`views.npz` 36 MB, 5,380 examples x
-[2001 + 201 + 13]). Unfolded views and 33x33xN image stacks could plausibly
-push that **20-50x**, which changes what fits in memory and how tf.data should
-be configured (`.cache()` on a 2 GB artefact is not the same decision as on
-47 MB). Measure after the first few hundred targets, not after the full build.
+- **Shard size.** Feared 20-50x. Actual **2.6x** (122 MB against 47 MB), so the
+  `tf.data.cache()` decision needed no revisiting.
+- **Per-branch presence masking.** Necessary exactly as predicted: `dv_usable`
+  is 87.4% on TESS and **0% on Kepler and K2**. Every branch carries a presence
+  channel and the model gates on it.
+- **The DV download.** Sized at 14-56 GB and many hours; actual **3.6 GB** in
+  5.3 h. The 2-8 MB/file estimate was the DVR *PDF* and DVT *FITS*, not the
+  ~0.34 MB XML. What mattered for runtime was batching the availability query
+  (40 TICs per round trip), not scoping sectors.
 
-**Per-branch presence masking is not optional.** Kepler has DV products, K2 has
-none, TESS FFI differs again. Without an explicit presence/quality mask per
-branch, a missing branch poisons every row of that mission — the same class of
-silent, plausible-looking corruption as the 9-dim-into-13-dim write.
-ExoMiner's difference-image quality attention is the pattern to copy.
+Two things could not be built as specified. The **momentum-dump branch** reads
+`QUALITY` bit 5, which lightkurve's default bitmask strips at download — the
+flag is zero on every cadence in the cache — so it measures the hole a dump
+leaves instead. And **difference-image stamps are 11-17 px, not a fixed
+33x33**; that is Kepler's size, and stage 2(d) must re-grid.
 
-**~~The DV download is the biggest single fetch in the project's history.~~**
-*(Done 2026-08-01 — and it was not. Actual: **3.5 GB**, 5.3 h, 7,199 targets.)*
-
-The 2026-07-31 estimate of 14-56 GB was ~5x high: a DV XML is **~0.34 MB**, and
-2-8 MB was the DVR *PDF* (18-21 MB) and DVT *FITS* (11-22 MB). Availability came
-in at **80.0%**, so ~1,440 targets have no DV products and need the presence
-mask. Sector scope turned out to be on disk already — in the `sectors` column of
-`data/catalogue/candidates.parquet` (7,195 of 7,199), not the download manifest,
-which records `n_sectors` as a count only. What actually mattered for runtime was
-**batching**: `query_criteria` takes a list of `target_name`s, and 40 per round
-trip is 0.29 s/target against 1.8 s. The rule that held: **do not run it while
-another MAST job is going**, and write it resumable and manifest-tracked from
-the start — 82 transient failures on the first pass were swept by a re-run.
-
-**The FFI fallback has upside beyond the model.** `TESS-SPOC` HLSP could
-recover a real fraction of the **744 `no_fits`** candidates — targets
-currently invisible to the entire pipeline, not merely poorly scored. That is
-the one Stage 1 item whose value does not depend on Stage 2 succeeding.
+Full detail, and the merge collision that silently dropped the transit counts
+past all seven gates, in HANDOVER.md (2026-08-05).
 
 **Stage 2 — the model, incrementally, each sub-step gated.**
 (a) per-diagnostic branches + scoped scalars + variance channels + joint local
