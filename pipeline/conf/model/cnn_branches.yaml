@@ -1,0 +1,28 @@
+# Per-diagnostic branch CNN — stage 2(a) of the ExoMiner rebuild.
+# One conv tower per view, each with its scoped scalars, then late fusion.
+name: cnn_branches
+type: keras
+
+# Per-branch tower. Kept small deliberately: there are 11 view branches, so
+# capacity per branch multiplies. Filters double each block.
+conv_blocks: 2
+init_filters: 16
+kernel_size: 5
+pool_size: 4
+branch_units: 32
+
+head_units: [256, 128]
+dropout: 0.3
+
+cross_validation:
+  n_splits: 5
+  val_frac_within_fold: 0.2
+  shuffle: true
+  random_state: 42
+
+training:
+  epochs: 40
+  batch_size: 32
+  learning_rate: 1.0e-3
+  # AUC-PR, not loss: it tracks the minority class (ExoMiner papers).
+  patience: 8
