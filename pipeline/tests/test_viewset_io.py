@@ -107,3 +107,17 @@ def test_nan_scalars_are_zeroed_and_flagged_by_the_mask(make_view_set, tmp_path)
     # never measured.
     assert float(features["scalars"][ruwe_idx]) == pytest.approx(0.0)
     assert float(features["masks"][mask_idx]) == pytest.approx(0.0)
+
+
+def test_absent_declared_scalars_are_reported_not_silently_dropped(tmp_path, make_view_set, caplog):
+    # A merge that suffixes a column to _x/_y leaves the declared name absent.
+    # Writing a shorter scalar vector and passing every gate is how the transit
+    # counts — the whole point of the unfolded branch — went missing.
+    arrays = make_view_set(n=4)
+    arrays.scalars = arrays.scalars.rename(
+        columns={"observed_transit_count": "observed_transit_count_x"}
+    )
+    with caplog.at_level("WARNING"):
+        metadata = write_viewset_shards(arrays, tmp_path, examples_per_shard=4)
+    assert "observed_transit_count" not in metadata["scalar_columns"]
+    assert "observed_transit_count" in caplog.text

@@ -200,11 +200,26 @@ def main() -> None:
     scalars["transit_completeness"] = scalars["observed_transit_count"] / scalars[
         "expected_transit_count"
     ].replace(0, np.nan)
+    # DV publishes its own transit counts. Merging them unrenamed collides with
+    # ours and pandas silently suffixes *both* to _x/_y — which dropped the two
+    # scalars the whole unfolded-branch thesis rests on, past every gate. Ours
+    # are measured from the light curve we actually built views from, so they
+    # keep the plain names and DV's are prefixed.
+    dv = dv.drop(columns=["dv_file"], errors="ignore").rename(
+        columns={
+            "observed_transit_count": "dv_observed_transit_count",
+            "expected_transit_count": "dv_expected_transit_count",
+        }
+    )
+    collisions = (set(dv.columns) | set(ruwe.columns)) & set(scalars.columns) - {"tic_id"}
+    if collisions:
+        raise SystemExit(f"side tables would collide with view scalars: {sorted(collisions)}")
+
     # DV and RUWE are TESS-only by construction; Kepler and K2 rows keep NaN and
     # a False mask rather than a silently imputed value.
-    scalars = scalars.merge(dv.drop(columns=["dv_file"], errors="ignore"), on="tic_id", how="left")
+    scalars = scalars.merge(dv, on="tic_id", how="left")
     scalars = scalars.merge(ruwe[["tic_id", "ruwe", "n_dr3_candidates"]], on="tic_id", how="left")
-    scalars["dv_usable"] = scalars["dv_usable"].fillna(False).astype(bool)
+    scalars["dv_usable"] = scalars["dv_usable"].astype("boolean").fillna(False).astype(bool)
     scalars["has_ruwe"] = scalars["ruwe"].notna()
 
     views = {

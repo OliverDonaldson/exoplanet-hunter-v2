@@ -76,6 +76,16 @@ def write_viewset_shards(
     n_shards = max(1, int(np.ceil(n / examples_per_shard)))
     features = [c for c in FEATURE_COLUMNS if c in scalars.columns]
     masks = [c for c in MASK_COLUMNS if c in scalars.columns]
+    # Loud, not silent. A declared feature column that is absent — because a
+    # merge suffixed it to _x/_y, say — otherwise writes a shorter scalar vector
+    # and every gate still passes. That is how the transit counts went missing.
+    absent = [c for c in (*FEATURE_COLUMNS, *MASK_COLUMNS) if c not in scalars.columns]
+    if absent:
+        log.warning(
+            "[viewset-tfrecords] %d declared scalars absent from the index and NOT written: %s",
+            len(absent),
+            absent,
+        )
     # Hoisted out of the per-example loop: pandas scalar access per row is the
     # slowest part of writing 5,700 examples.
     labels = scalars["label"].to_numpy(dtype=np.int64)

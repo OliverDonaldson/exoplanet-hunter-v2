@@ -63,19 +63,21 @@ class ViewSetArrays:
                 problems.append(f"scalars: missing {column}")
         return problems
 
-    def save(self, out_dir: Path) -> None:
-        out_dir.mkdir(parents=True, exist_ok=True)
+    def save(self, out_dir: Path | str) -> None:
+        directory = Path(out_dir)
+        directory.mkdir(parents=True, exist_ok=True)
         # Typed Any because numpy's stub declares savez_compressed's second
         # positional as `allow_pickle: bool`, which a **dict of arrays trips.
         arrays: dict[str, Any] = {k: v.astype(np.float32) for k, v in self.views.items()}
-        np.savez_compressed(out_dir / NPZ_NAME, **arrays)
-        self.scalars.to_parquet(out_dir / SCALARS_NAME, index=False)
+        np.savez_compressed(directory / NPZ_NAME, **arrays)
+        self.scalars.to_parquet(directory / SCALARS_NAME, index=False)
 
     @classmethod
-    def load(cls, out_dir: Path) -> ViewSetArrays:
-        with np.load(out_dir / NPZ_NAME) as f:
+    def load(cls, out_dir: Path | str) -> ViewSetArrays:
+        directory = Path(out_dir)
+        with np.load(directory / NPZ_NAME) as f:
             views = {k: f[k] for k in f.files}
-        return cls(views=views, scalars=pd.read_parquet(out_dir / SCALARS_NAME))
+        return cls(views=views, scalars=pd.read_parquet(directory / SCALARS_NAME))
 
 
 def stack_view_sets(view_sets: list, scalars: pd.DataFrame) -> ViewSetArrays:
