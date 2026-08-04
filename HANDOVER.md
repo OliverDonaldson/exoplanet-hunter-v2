@@ -1341,3 +1341,79 @@ Kepler's size. Stage 2(d) must re-grid.
 **~9% of targets' DV diagnostics describe a different signal** (90.4% match the
 catalogue period within 1%; ~5% are clean 2x/0.5x harmonics, the rest unrelated
 long-period TCEs). `dv_usable` masks them.
+
+## Stage 2(a) run 1 — rejected, and the premise needs re-examining (2026-08-05)
+
+**Serving still `ca906040` — untouched. Nothing promoted; the registry is
+unchanged.** Artefacts in `models/cv/branches-20260805/`.
+
+### The gate rejects it
+
+| | stage 2(a) branches | incumbent `ca906040` |
+|---|---:|---:|
+| ROC-AUC | **0.9325 ± 0.0059** | **0.9581 ± 0.0057** |
+| PR-AUC | 0.9308 | 0.9599 |
+| Brier | 0.1003 | 0.0791 |
+| ECE | 0.0301 | 0.0276 |
+
+`promotion_gate` → REJECT. Not a like-for-like comparison: the incumbent is
+Optuna-tuned with augmentation on 2001/201 views; the branch model is a first
+pass at 193k params, 2 conv blocks, no augmentation, no tuning. How much of the
+2.6-point gap is architecture and how much is tuning is not yet known.
+
+### The +0.211 baseline correlation is label structure, not a model pathology
+
+This is the finding that matters, and it challenges the roadmap's premise.
+
+Measured on the labelled CV set (5,423 rows), with **baseline in days** — the
+covariate the original figure used:
+
+| | baseline (d) | period | n_transits |
+|---|---:|---:|---:|
+| incumbent `ca906040` | +0.238 | +0.287 | −0.087 |
+| stage 2(a) branches | +0.239 | +0.349 | −0.116 |
+| **ground-truth label** | **+0.278** | **+0.265** | **−0.073** |
+
+**The labels themselves correlate +0.278 with observation baseline** — and on
+TESS alone, **+0.387**. Both models sit *below* that. Neither is over-reading
+baseline; both slightly under-read a relationship that is really in the data.
+
+It is not a period artefact. Inside TESS period bands the correlation holds at
++0.408 (<3 d), +0.384 (3-10 d), +0.270 (10-30 d), +0.226 (>30 d). And the
+medians are stark: **TESS confirmed planets have a median baseline of 1,495 d
+against 430 d for false positives**, a 3.5x difference.
+
+The mechanism is almost certainly **confirmation bias in the catalogue**: a
+target observed across many sectors accumulates follow-up and gets promoted to
+confirmed, while a briefly-observed one stays a candidate or is retired as a
+false positive. The model learns "long baseline -> likely confirmed" because in
+the training labels that is true.
+
+### Two measurement errors in the original framing, both mine to flag
+
+**Population.** The +0.211 / −0.003 figures were measured on **3,919 scored
+candidates**, not the labelled set. Candidates have no labels, so the
+label-structure comparison above cannot be made there. The two populations are
+not interchangeable and the roadmap does not distinguish them.
+
+**Covariate.** `observation baseline` in the original is a span in **days**. An
+earlier version of `eval/observation_bias.py` proxied it with
+`expected_transit_count`, which is baseline / period — a different quantity that
+partly cancels the effect being measured. Fixed; the table above uses days.
+
+### What this means for stage 2(b)
+
+Its success criterion is *"corr(prob, n_transits) must leave zero **and** the
+26.4% control-arm host-pass rate must fall"*. On the labelled set, driving the
+baseline correlation toward zero moves the model **away** from the label
+structure (+0.278), which should cost AUC without making it more truthful.
+
+If the effect is a selection artefact in the labels, no architecture change
+fixes it — that is **stage 3** (labels and negatives), not stage 2. The
+criterion needs re-specifying before stage 2(b) is worth running, and that is a
+call for Ollie.
+
+**Not yet tested:** the candidate population, where the original finding lives.
+That needs the branch model scored over the 4,685 candidates, which needs
+candidate views built — the same `build_viewset.py` run against
+`candidates.parquet` rather than `labels.parquet`.
