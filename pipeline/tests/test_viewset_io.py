@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES, ViewSetArrays
@@ -16,34 +15,8 @@ from exoplanet_hunter.datasets.viewset_tfrecords import (
 from exoplanet_hunter.validation import check_view_set
 
 
-def make_arrays(n: int = 6, *, seed: int = 0) -> ViewSetArrays:
-    rng = np.random.default_rng(seed)
-    views = {}
-    for name, shape in VIEW_SHAPES.items():
-        arr = rng.normal(0.0, 1.0, size=(n, *shape)).astype(np.float32)
-        # Presence channel is 0/1, and not all 1 — a mask stuck at 1 is the
-        # failure the gate looks for.
-        arr[..., -1] = (rng.random((n, *shape[:-1])) > 0.2).astype(np.float32)
-        views[name] = arr
-    scalars = pd.DataFrame(
-        {
-            "tic_id": np.arange(1, n + 1),
-            "mission": ["TESS"] * n,
-            "label": [1, 0] * (n // 2),
-            "observed_transit_count": rng.integers(1, 20, n),
-            "expected_transit_count": rng.integers(20, 40, n),
-            "transit_completeness": rng.random(n),
-            "secondary_phase": rng.random(n) - 0.5,
-            "ruwe": rng.normal(1.0, 0.2, n),
-            "dv_usable": [True] * (n - 1) + [False],
-            "has_ruwe": [True] * n,
-        }
-    )
-    return ViewSetArrays(views=views, scalars=scalars)
-
-
-def test_round_trips_through_disk(tmp_path):
-    arrays = make_arrays()
+def test_round_trips_through_disk(make_view_set, tmp_path):
+    arrays = make_view_set()
     arrays.save(tmp_path)
     back = ViewSetArrays.load(tmp_path)
     assert back.validate() == []
@@ -53,32 +26,32 @@ def test_round_trips_through_disk(tmp_path):
     assert len(back.scalars) == len(arrays.scalars)
 
 
-def test_validate_catches_a_view_of_the_wrong_shape():
-    arrays = make_arrays()
+def test_validate_catches_a_view_of_the_wrong_shape(make_view_set):
+    arrays = make_view_set()
     arrays.views["local_view"] = arrays.views["local_view"][:, :10]
     assert any("local_view" in p for p in arrays.validate())
 
 
-def test_gate_passes_a_healthy_set():
-    assert check_view_set(make_arrays()) == []
+def test_gate_passes_a_healthy_set(make_view_set):
+    assert check_view_set(make_view_set()) == []
 
 
-def test_gate_catches_a_dead_branch():
+def test_gate_catches_a_dead_branch(make_view_set):
     # A branch all-zero for every row is the momentum-dump QUALITY bit, and the
     # 13-dim aux vector: present in the schema, carrying nothing.
-    arrays = make_arrays()
+    arrays = make_view_set()
     arrays.views["gap_view"][:] = 0.0
     assert any("dead branch" in p for p in check_view_set(arrays))
 
 
-def test_gate_catches_an_unpopulated_presence_mask():
-    arrays = make_arrays()
+def test_gate_catches_an_unpopulated_presence_mask(make_view_set):
+    arrays = make_view_set()
     arrays.views["centroid_view"][..., -1] = 1.0
     assert any("mask not populated" in p for p in check_view_set(arrays))
 
 
-def test_gate_catches_nan_and_label_problems():
-    arrays = make_arrays()
+def test_gate_catches_nan_and_label_problems(make_view_set):
+    arrays = make_view_set()
     arrays.views["global_view"][2, 5, 0] = np.nan
     arrays.scalars.loc[0, "label"] = 7
     problems = check_view_set(arrays)
@@ -86,10 +59,10 @@ def test_gate_catches_nan_and_label_problems():
     assert any("labels" in p for p in problems)
 
 
-def test_shards_round_trip_through_tensorflow(tmp_path):
+def test_shards_round_trip_through_tensorflow(make_view_set, tmp_path):
     import tensorflow as tf
 
-    arrays = make_arrays(n=8)
+    arrays = make_view_set(n=8)
     metadata = write_viewset_shards(arrays, tmp_path, examples_per_shard=3)
     assert metadata["n_examples"] == 8 and metadata["n_shards"] == 3
     assert load_metadata(tmp_path) == metadata
@@ -108,16 +81,16 @@ def test_shards_round_trip_through_tensorflow(tmp_path):
     assert features["masks"].shape[0] == len(metadata["mask_columns"])
 
 
-def test_rewriting_a_smaller_set_leaves_no_stale_shards(tmp_path):
+def test_rewriting_a_smaller_set_leaves_no_stale_shards(make_view_set, tmp_path):
     # Shards from a previous, larger build survive a rename and poison readers
     # with a mixed schema — the 2026-07-12 expansion-run crash.
-    write_viewset_shards(make_arrays(n=8), tmp_path, examples_per_shard=3)
-    write_viewset_shards(make_arrays(n=4), tmp_path, examples_per_shard=3)
+    write_viewset_shards(make_view_set(n=8), tmp_path, examples_per_shard=3)
+    write_viewset_shards(make_view_set(n=4), tmp_path, examples_per_shard=3)
     assert len(list(tmp_path.glob("viewset-*.tfrecord"))) == 2
 
 
-def test_nan_scalars_are_zeroed_and_flagged_by_the_mask(tmp_path):
-    arrays = make_arrays(n=4)
+def test_nan_scalars_are_zeroed_and_flagged_by_the_mask(make_view_set, tmp_path):
+    arrays = make_view_set(n=4)
     arrays.scalars.loc[0, "ruwe"] = np.nan
     arrays.scalars.loc[0, "has_ruwe"] = False
     metadata = write_viewset_shards(arrays, tmp_path, examples_per_shard=4)

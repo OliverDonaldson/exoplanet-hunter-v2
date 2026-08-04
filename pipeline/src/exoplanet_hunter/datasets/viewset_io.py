@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -64,11 +65,10 @@ class ViewSetArrays:
 
     def save(self, out_dir: Path) -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
-        arrays = {k: v.astype(np.float32) for k, v in self.views.items()}
-        # numpy's stub declares savez_compressed's second positional as
-        # `allow_pickle: bool`, so a **dict of arrays trips it; the runtime
-        # signature takes them as **kwds.
-        np.savez_compressed(out_dir / NPZ_NAME, **arrays)  # type: ignore[arg-type]
+        # Typed Any because numpy's stub declares savez_compressed's second
+        # positional as `allow_pickle: bool`, which a **dict of arrays trips.
+        arrays: dict[str, Any] = {k: v.astype(np.float32) for k, v in self.views.items()}
+        np.savez_compressed(out_dir / NPZ_NAME, **arrays)
         self.scalars.to_parquet(out_dir / SCALARS_NAME, index=False)
 
     @classmethod
