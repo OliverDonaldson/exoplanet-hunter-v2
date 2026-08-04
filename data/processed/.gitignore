@@ -1,3 +1,7 @@
 /views.npz
 /tfrecords
 /dv_scalars.parquet
+/viewset.npz
+/viewset_scalars.parquet
+/viewset_tfrecords
+/candidates_viewset

@@ -1,0 +1,6 @@
+outs:
+- md5: 56dbf97f033fd3185d1e24bb040289a7.dir
+  size: 62209924
+  nfiles: 2
+  hash: md5
+  path: candidates_viewset

@@ -1,0 +1,5 @@
+outs:
+- md5: b418495da11f22b4f9f680325b0a4b86
+  size: 940638
+  hash: md5
+  path: viewset_scalars.parquet

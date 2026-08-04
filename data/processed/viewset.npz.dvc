@@ -1,0 +1,5 @@
+outs:
+- md5: 596025e18f45ddb50adf2c4a8586b43e
+  size: 64289921
+  hash: md5
+  path: viewset.npz

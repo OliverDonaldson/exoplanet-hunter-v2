@@ -1,0 +1,6 @@
+outs:
+- md5: 3ac44216ccf3fd685e40f303df83e076.dir
+  size: 128236802
+  nfiles: 13
+  hash: md5
+  path: viewset_tfrecords
