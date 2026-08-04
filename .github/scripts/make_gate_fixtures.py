@@ -19,10 +19,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from exoplanet_hunter.datasets.views_io import load_views
+from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES, ViewSetArrays
 from exoplanet_hunter.validation.promotion import evaluate_promotion, promote
 from exoplanet_hunter.validation.schemas import (
     candidate_catalogue_schema,
     check_dv_archive,
+    check_view_set,
     check_views,
     label_catalogue_schema,
 )
@@ -98,6 +100,32 @@ def _dv_archive(root: Path, tic_ids: list[int]) -> Path:
     return cache
 
 
+def _view_set(labels: pd.DataFrame) -> ViewSetArrays:
+    """A view set whose presence channels vary, since a mask stuck at 1 fails."""
+    rng = np.random.default_rng(7)
+    n = len(labels)
+    views = {}
+    for name, shape in VIEW_SHAPES.items():
+        arr = rng.normal(0.0, 1.0, size=(n, *shape)).astype(np.float32)
+        arr[..., -1] = (rng.random((n, *shape[:-1])) > 0.2).astype(np.float32)
+        views[name] = arr
+    scalars = pd.DataFrame(
+        {
+            "tic_id": labels["tic_id"].to_numpy(),
+            "mission": labels["mission"].to_numpy(),
+            "label": labels["label"].to_numpy(),
+            "observed_transit_count": rng.integers(1, 20, n),
+            "expected_transit_count": rng.integers(20, 40, n),
+            "transit_completeness": rng.random(n),
+            "secondary_phase": rng.random(n) - 0.5,
+            "ruwe": rng.normal(1.0, 0.2, n),
+            "dv_usable": rng.random(n) > 0.2,
+            "has_ruwe": [True] * n,
+        }
+    )
+    return ViewSetArrays(views=views, scalars=scalars)
+
+
 def _cv_summary(auc: float, brier: float, ece: float) -> dict:
     return {
         "folds": [],
@@ -126,6 +154,13 @@ def main(out_dir: Path) -> None:
     problems = check_views(load_views(out_dir / "views.npz"))
     if problems:
         raise SystemExit(f"views fixture fails its own gate: {problems}")
+
+    trainable = labels[labels["label"].isin([0, 1])].reset_index(drop=True)
+    view_set = _view_set(trainable)
+    problems = check_view_set(view_set)
+    if problems:
+        raise SystemExit(f"view-set fixture fails its own gate: {problems}")
+    view_set.save(out_dir / "viewset")
 
     tess_tics = labels.loc[labels["mission"] == "TESS", "tic_id"].astype(int).tolist()
     dv_dir = _dv_archive(out_dir, tess_tics)

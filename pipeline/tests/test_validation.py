@@ -377,6 +377,8 @@ def run_validate_data(tmp_path, *extra: str) -> tuple[int, str]:
             str(tmp_path / "absent.npz"),
             "--dv",
             str(tmp_path / "absent_dv"),
+            "--viewset",
+            str(tmp_path / "absent_viewset"),
             *extra,
         ],
         capture_output=True,

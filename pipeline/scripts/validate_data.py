@@ -24,12 +24,14 @@ import pandas as pd
 import pandera.errors
 
 from exoplanet_hunter.datasets import load_views
+from exoplanet_hunter.datasets.viewset_io import ViewSetArrays
 from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation import (
     assert_refresh_safe,
     candidate_catalogue_schema,
     check_catalogue_shrink,
     check_dv_archive,
+    check_view_set,
     check_views,
     label_catalogue_schema,
 )
@@ -58,6 +60,7 @@ def main() -> None:
     )
     parser.add_argument("--views", type=Path, default=Path("data/processed/views.npz"))
     parser.add_argument("--dv", type=Path, default=Path("data/raw_dv"))
+    parser.add_argument("--viewset", type=Path, default=Path("data/processed"))
     parser.add_argument(
         "--previous-labels",
         type=Path,
@@ -117,6 +120,20 @@ def main() -> None:
         results.append(False)
     else:
         log.info("[gate] %-22s SKIP (%s not built yet)", "views", args.views)
+
+    if (args.viewset / "viewset.npz").exists():
+
+        def _viewset_gate() -> None:
+            problems = check_view_set(ViewSetArrays.load(args.viewset))
+            if problems:
+                raise ValueError("; ".join(problems))
+
+        results.append(_gate("view-set", _viewset_gate))
+    elif args.strict:
+        log.error("[gate] %-22s FAIL: %s missing", "view-set", args.viewset / "viewset.npz")
+        results.append(False)
+    else:
+        log.info("[gate] %-22s SKIP (%s not built yet)", "view-set", args.viewset)
 
     if args.dv.exists():
 

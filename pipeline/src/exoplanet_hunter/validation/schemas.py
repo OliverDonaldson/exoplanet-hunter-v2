@@ -153,6 +153,50 @@ def check_views(views: ViewArrays, *, max_nan_frac: float = 0.5) -> list[str]:
     return problems
 
 
+def check_view_set(arrays: object, *, max_dead_frac: float = 0.98) -> list[str]:
+    """Structural checks on the 301/31 view set; returns problems (empty = pass).
+
+    Shapes and label domain, plus two things the legacy `check_views` cannot
+    express. A branch that is all-zero for nearly every row is a dead branch —
+    that is what reading the momentum-dump QUALITY bit produced, and what the
+    13-dim aux vector was. And a `present` channel stuck at 1 everywhere means
+    the mask was never populated, so a missing branch would read as measured.
+    """
+    problems: list[str] = []
+    views = getattr(arrays, "views", {})
+    scalars = getattr(arrays, "scalars", None)
+    if scalars is None or not len(scalars):
+        return ["view set is empty"]
+    n = len(scalars)
+
+    for name, arr in views.items():
+        if len(arr) != n:
+            problems.append(f"{name}: {len(arr)} rows but {n} scalar rows")
+            continue
+        if not np.isfinite(arr).all():
+            bad = int((~np.isfinite(arr)).any(axis=tuple(range(1, arr.ndim))).sum())
+            problems.append(f"{name}: {bad} rows contain NaN or inf")
+        flat = arr.reshape(n, -1)
+        dead = float((np.abs(flat).max(axis=1) == 0).mean())
+        if dead > max_dead_frac:
+            problems.append(f"{name}: all-zero for {dead:.1%} of rows — dead branch")
+        # Last channel is `present` on the 3-channel views and on the 2-channel
+        # gap/periodogram views alike.
+        present = arr[..., -1]
+        if present.size and float(present.min()) == 1.0 and float(present.max()) == 1.0:
+            problems.append(f"{name}: presence channel is 1 everywhere — mask not populated")
+
+    labels = np.asarray(scalars["label"])
+    if not np.isin(labels, [0, 1]).all():
+        problems.append("labels: values outside {0, 1}")
+    elif len(np.unique(labels)) < 2:
+        problems.append("labels: only one class present")
+    if (np.asarray(scalars["tic_id"]) <= 0).any():
+        problems.append("tic_ids: non-positive IDs present")
+
+    return problems
+
+
 def check_dv_archive(
     cache_dir: Path,
     expected_tics: Iterable[int] | None = None,
