@@ -101,6 +101,11 @@ def main() -> None:
     parser.add_argument("--cache", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument(
+        "--include-candidates",
+        action="store_true",
+        help="Also build label -1 rows (candidates) — for scoring, not training",
+    )
+    parser.add_argument(
         "--assemble-only",
         action="store_true",
         help="Skip building; stack whatever the cache already holds",
@@ -113,10 +118,14 @@ def main() -> None:
     cache.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_parquet(catalogue)
-    df = df[df["label"].isin([0, 1])].reset_index(drop=True)
+    # Candidates carry label -1. They cannot train, but scoring them is the only
+    # way to measure model behaviour on the population the observation-bias
+    # finding was made on.
+    keep = [-1, 0, 1] if args.include_candidates else [0, 1]
+    df = df[df["label"].isin(keep)].reset_index(drop=True)
     if args.limit:
         df = df.head(args.limit)
-    log.info("[viewset] %d labelled targets from %s", len(df), catalogue)
+    log.info("[viewset] %d targets from %s", len(df), catalogue)
 
     skips = {"missing_fits": 0, "missing_ephemeris": 0, "preprocess_error": 0}
     built = 0
