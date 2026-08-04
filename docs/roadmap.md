@@ -40,7 +40,14 @@ evaluation than they publish, and remain the gate.
 fixed (gate cwd, `dvc` resolution, MLflow run naming, the CI gate jobs
 `ci.yml` had promised); patched TRICERATOPS vendored.
 
-**Stage 1 — ExoMiner-grade inputs.** *(data only; one rebuild run)*
+**Stage 1 — ExoMiner-grade inputs.** *(done 2026-08-05)*
+Built: 5,423-example view set (11 branches), 3.6 GB DV archive, DV scalars
+table, Gaia RUWE, FFI recovery for the `no_fits` candidates, and a seventh
+validation gate. Shards are 122 MB against the legacy 47 MB — 2.6x, so the
+`.cache()` question needed no change. Details and the four corrections in
+HANDOVER.md (2026-08-05).
+
+Original plan:
 Emit 301/31 views with variance channels, odd/even, weak-secondary, centroid,
 flux-trend, unfolded [20,31] + transit counts, momentum dump, and the
 periodogram pair. Ingest TESS DV XML for difference images, DV diagnostics and

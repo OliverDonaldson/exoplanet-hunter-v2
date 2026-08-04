@@ -1256,3 +1256,88 @@ taking an arbitrary row would have attached a *neighbour's* RUWE to the target,
 and a neighbour's RUWE is a perfectly plausible number.
 
 Both artefacts are DVC-tracked (pointers in git, bytes need `dvc push`).
+
+## Stage 1 complete — the view set is built and gated (2026-08-05)
+
+**Serving still `ca906040` (9-dim) on Fly — untouched throughout.** 300 tests
+green (was 240), ruff and mypy clean, all **seven** gates pass against the real
+artefacts.
+
+### The artefacts
+
+| | |
+|---|---|
+| `data/raw_dv/` | 5,766 targets, 3.6 GB, 80.0% coverage |
+| `data/processed/dv_scalars.parquet` | 6,484 rows, 1.9 MB, 0 parse failures |
+| `data/gaia/ruwe.parquet` | 7,071 with RUWE, median 1.028, 16.5% above 1.4 |
+| `data/raw_ffi/` | FFI light curves for the `no_fits` candidates |
+| `data/processed/viewset.npz` | **5,423 examples, 65 MB** |
+| `data/processed/viewset_tfrecords/` | **11 shards, 15 scalars, 2 masks, 122 MB** |
+
+5,423 of 5,703 labelled targets built (95.1%): 273 have no cached FITS, 7 no
+ephemeris, and **zero preprocess errors**. Sources: Kepler 2,500, SPOC-2min
+2,392, K2 527, FFI 4.
+
+**Shard size is settled: 122 MB against the legacy 47 MB — 2.6x, not the 20-50x
+the roadmap allowed for.** `tf.data.cache()` needs no revisiting.
+
+**The presence masks are doing real work.** `dv_usable` is 87.4% on TESS and
+**0% on Kepler and K2**; RUWE the same shape. That is the "a missing branch
+poisons every row of its mission" case being stated explicitly rather than
+imputed as a zero.
+
+### The bug that passed every gate
+
+The DV scalars table publishes its **own** observed/expected transit counts.
+The side-table merge left both unrenamed, so pandas suffixed ours *and* theirs
+to `_x`/`_y`, and the shard writer's `if c in scalars.columns` filter then wrote
+**13 scalars instead of 15 without a word**.
+
+The two columns lost were `observed_transit_count` and `expected_transit_count`
+— the exact pair the unfolded branch exists to provide, and the pair stage
+2(b)'s success criterion is measured on. The build succeeded, all seven gates
+passed, and the shards were wrong. Caught only by counting the scalars in
+`metadata.json` against `FEATURE_COLUMNS`.
+
+Fixed twice over: DV's counts are prefixed `dv_*` and a guard raises on any
+side-table collision, and the shard writer now logs every declared column it
+cannot find. Silently writing a shorter vector is what let this reach disk.
+
+### FFI recovery works
+
+The 744 `no_fits` candidates are targets SPOC never produced a 2-minute light
+curve for — not badly scored, **absent**. A 40-target probe found **100%**
+recoverable from an FFI author (QLP 100%, TGLC 75%, TESS-SPOC 42.5%). The view
+builder was then tested on 12 real FFI curves at 200 s and 600 s cadence:
+12/12 build finite views with sensible transit counts.
+
+They are cached separately (`data/raw_ffi/`) and never mixed into `data/raw/`,
+because FFI cadence is 200 s to 30 min against SPOC's 120 s.
+
+### The momentum-dump branch could not be built as specified
+
+TESS flags reaction-wheel desaturations in `QUALITY` bit 5, but lightkurve's
+default `quality_bitmask` drops those cadences at download — **bit 32 is set on
+zero cadences across the entire cache**, because the flagged rows are not in the
+files. Reading it would have shipped an all-zero branch for the whole corpus
+that looked like a working feature.
+
+It measures the *hole* a dump leaves instead. That needed segmenting by
+observation gap: measuring against the full baseline counted the multi-year
+holes between sectors and pinned every bin at ~87% with no discriminating power.
+Segmented, it reads 0-2% typical with real peaks to 17%.
+
+### Also corrected
+
+`sectorsObserved` is indexed **directly by sector** (position 0 unused), not
+offset by one — cross-checked against `differenceImageResults/@sector`, since an
+off-by-one would mislabel every difference image by a sector.
+`weakSecondary` hangs off `planetCandidate`, not `planetResults`; looking in the
+wrong place returned None for every target. `-1.0` sentinels are now None.
+
+**Difference-image stamps are 11/13/15/17 px, not a fixed 33x33** — that is
+Kepler's size. Stage 2(d) must re-grid.
+
+**~9% of targets' DV diagnostics describe a different signal** (90.4% match the
+catalogue period within 1%; ~5% are clean 2x/0.5x harmonics, the rest unrelated
+long-period TCEs). `dv_usable` masks them.
