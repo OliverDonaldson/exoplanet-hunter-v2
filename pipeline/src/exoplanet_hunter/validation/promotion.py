@@ -131,7 +131,17 @@ def paired_folds(
     if not np.isfinite(deltas).all():
         return None
     spread = float(deltas.std(ddof=1)) if len(deltas) > 1 else 0.0
-    effect = float(deltas.mean() / spread) if spread > 1e-12 else math.inf * np.sign(deltas.mean())
+    mean = float(deltas.mean())
+    if spread > 1e-12:
+        effect = mean / spread
+    elif mean == 0.0:
+        # Every fold identical: no effect, not an unmeasurable one. `inf * 0` is
+        # nan, which loses every downstream inequality and reads as "could not
+        # tell" for the one case that is certain.
+        effect = 0.0
+    else:
+        # Every fold moved by the same non-zero amount — infinitely consistent.
+        effect = math.copysign(math.inf, mean)
 
     p_value = None
     if len(deltas) >= MIN_PAIRS_FOR_P_VALUE and np.any(deltas != 0):
@@ -165,8 +175,26 @@ def _mean_or_none(summary: dict[str, Any], metric: str) -> float | None:
 
 
 def _gate_slice(summary: dict[str, Any]) -> dict[str, float] | None:
-    """The deployment slice's metrics, or None on a summary without the block."""
-    return summary.get("per_mission", {}).get(GATE_MISSION)
+    """The deployment slice's metrics, or None on a summary without the block.
+
+    A summary that carries `per_mission` but no `GATE_MISSION` is not the same
+    case as one that predates the block, and returning None for both is how the
+    fallback gets entered while reporting that the summary is simply old. Worse,
+    `_population_mismatch` compares mission *sets*, so two summaries that both
+    lack TESS agree with each other and never trigger the refusal — leaving the
+    gate deciding on pooled means with nothing saying so. Refuse instead.
+    """
+    per_mission = summary.get("per_mission")
+    if not per_mission:
+        return None
+    gate = per_mission.get(GATE_MISSION)
+    if gate is None:
+        raise ValueError(
+            f"summary carries a per_mission block with {sorted(per_mission)} but no "
+            f"{GATE_MISSION}, which is 100% of the deployment population — refusing to "
+            "fall back to pooled means, which would read as a like-for-like comparison"
+        )
+    return gate
 
 
 def _population_mismatch(candidate: dict[str, Any], incumbent: dict[str, Any]) -> str | None:
@@ -189,6 +217,65 @@ def _population_mismatch(candidate: dict[str, Any], incumbent: dict[str, Any]) -
         f"only the incumbent scored {', '.join(only_incumbent)}" if only_incumbent else "",
     ]
     return "; ".join(p for p in parts if p) or None
+
+
+def _gate_population_drift(
+    cand_slice: dict[str, float] | None, inc_slice: dict[str, float] | None
+) -> str | None:
+    """Whether the two gate slices are measured over the same number of rows.
+
+    `_population_mismatch` compares mission *sets*, so two summaries that both
+    carry TESS agree with each other however much their TESS membership differs.
+    Measured 2026-08-08, the re-baselined incumbent gates on 2,367 TESS rows and
+    run 2 on 2,399 — a 32-row gap that reads as a model difference. Row counts
+    are the only membership evidence a summary carries, and equal counts do not
+    prove equal rows; unequal counts disprove it. Alarmed rather than blocking,
+    because the catalogue legitimately grows between runs.
+    """
+    if cand_slice is None or inc_slice is None:
+        return None
+    # `.get`, not `[]`: this is an advisory alarm, and a summary predating the
+    # row count should lose the alarm rather than the whole comparison.
+    cand_n, inc_n = cand_slice.get("n"), inc_slice.get("n")
+    if cand_n is None or inc_n is None or cand_n == inc_n:
+        return None
+    cand_n, inc_n = int(cand_n), int(inc_n)
+    return (
+        f"the {GATE_MISSION} slice holds {cand_n} rows for the candidate and {inc_n} for the "
+        f"incumbent ({cand_n - inc_n:+d}) — the gating comparison is not row-for-row"
+    )
+
+
+def _reproducibility_warning(candidate: dict[str, Any]) -> str | None:
+    """Whether the candidate's numbers can be traced to a known code state.
+
+    Alarmed, not blocking: a deliberate promotion from a working tree is the
+    operator's call. But promoting a run whose code state contradicts its
+    recorded commit means the served model cannot be rebuilt from the
+    repository, and nothing downstream would ever surface that.
+
+    Only a *recorded* claim is checked. `git_dirty` absent means the summary
+    predates the field; `git_dirty: None` means provenance ran and git could not
+    be reached, which is a different statement from a clean tree and is the one
+    place this distinction earns its keep.
+    """
+    config = candidate.get("run_config", {})
+    if "git_dirty" not in config:
+        # A summary written before the field existed cannot be held to it, and
+        # alarming on every legacy artefact is how an alarm list becomes noise
+        # that gets skimmed. Absence is quiet; a recorded claim is checked.
+        return None
+    if config["git_dirty"] is None:
+        return (
+            "git was unreachable when this run was recorded, so whether it was trained "
+            "from a clean tree is unknown"
+        )
+    if config["git_dirty"]:
+        return (
+            f"trained from a dirty working tree at {config.get('git_sha', 'an unknown commit')} "
+            "— the recorded commit does not describe the code that ran"
+        )
+    return None
 
 
 def _diagnostics(
@@ -257,6 +344,7 @@ def evaluate_promotion(
 
     mismatch = _population_mismatch(candidate, incumbent)
     paired = paired_folds(candidate, incumbent)
+    gate_size = _gate_population_drift(cand_slice, inc_slice)
     reasons = [
         header,
         f"ROC-AUC {cand_auc:.4f} vs incumbent {inc_auc:.4f}",
@@ -264,6 +352,10 @@ def evaluate_promotion(
     ]
     diagnostics, alarms = _diagnostics(candidate, incumbent, mission_alarm)
     reasons += diagnostics
+    if gate_size:
+        alarms.append(gate_size)
+    if provenance := _reproducibility_warning(candidate):
+        alarms.append(provenance)
 
     # Every comparison below is an inequality, and NaN loses all of them — so a
     # degenerate run (a single-class fold, an empty slice, a blown-up loss)

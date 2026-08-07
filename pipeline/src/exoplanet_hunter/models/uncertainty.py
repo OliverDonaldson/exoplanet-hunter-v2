@@ -13,6 +13,7 @@ a candidate that needs follow-up.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import tensorflow as tf
@@ -47,7 +48,7 @@ def mc_dropout_predict(
     dominates on CPU serving.
     """
 
-    def _batch_size(x) -> int:
+    def _batch_size(x: Any) -> int:
         arr = (
             next(iter(x.values())) if isinstance(x, dict) else (x[0] if isinstance(x, list) else x)
         )

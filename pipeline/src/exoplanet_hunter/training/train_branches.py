@@ -44,6 +44,7 @@ from exoplanet_hunter.eval.observation_bias import measure_observation_bias
 from exoplanet_hunter.models.cnn_branches import build_cnn_branches
 from exoplanet_hunter.training.calibration import PlattScaler, expected_calibration_error
 from exoplanet_hunter.utils.logging import get_logger
+from exoplanet_hunter.utils.provenance import git_provenance
 from exoplanet_hunter.validation.leakage import drop_quarantined, load_quarantine
 from exoplanet_hunter.validation.promotion import GATE_MISSION
 
@@ -97,6 +98,13 @@ class CVConfig:
     batch_size: int = 32
     patience: int = 8
     learning_rate: float = 1e-3
+    #: Fixes the split and the initialisation, **not the result**. Augmentation
+    #: draws from stateful `tf.random` inside a parallel `map`, nothing sets
+    #: `enable_op_determinism`, and Metal reduces nondeterministically — so a
+    #: rerun of this exact config lands somewhere else. Measured 2026-08-08 at
+    #: `seed_sd = 0.0081` per model. Recording the seed without that number
+    #: implies a reproducibility this does not have, which is why
+    #: `summary.variance` reports it beside every run.
     seed: int = 42
     #: Models trained per fold, averaged before calibration. At 1 a fold's score
     #: is a single seed draw, and the measured spread of that draw is sd 0.0106
@@ -108,6 +116,21 @@ class CVConfig:
     #: the incumbent it was compared against had it — one of the ways that
     #: comparison was not like-for-like.
     augment: AugmentConfig | None = field(default_factory=AugmentConfig)
+
+
+def _resolved_model_config(model_cfg: object) -> dict[str, Any] | None:
+    """The architecture this run actually built, as JSON.
+
+    `CVConfig` records how training ran; nothing recorded *what was trained*, so
+    two runs with the same CVConfig and different architectures were
+    indistinguishable from their summaries alone — and the promotion gate reads
+    nothing else. None means the caller passed no config, which is itself worth
+    recording: `run_cv` then takes every architecture default via `getattr`.
+    """
+    data = getattr(model_cfg, "__dict__", None)
+    if not data:
+        return None
+    return {key: value for key, value in data.items() if not key.startswith("_")}
 
 
 def per_mission_summary(predictions: pd.DataFrame) -> dict[str, dict[str, float]]:
@@ -407,9 +430,15 @@ def run_cv(
             **asdict(config),
             "view_shapes": {k: list(v) for k, v in metadata["view_shapes"].items()},
             "n_examples": len(index),
+            **git_provenance().as_dict(),
+            "model_config": _resolved_model_config(model_cfg),
         },
     }
-    (out_dir / "cv_summary.json").write_text(json.dumps(payload, indent=2))
+    # `default=str` so a value that is not JSON-native is still recorded rather
+    # than raising here and discarding an hour of training along with every
+    # number in this payload. Everything that comes out of the model YAML is
+    # JSON-native already, so nothing that matters is coerced.
+    (out_dir / "cv_summary.json").write_text(json.dumps(payload, indent=2, default=str))
     for mission, slice_metrics in per_mission.items():
         log.info(
             "[train-branches] %-7s n=%-5d AUC %.4f  Brier %.4f  ECE %.4f  R@1%%FPR %.3f%s",

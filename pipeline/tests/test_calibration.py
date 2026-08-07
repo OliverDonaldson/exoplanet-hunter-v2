@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from exoplanet_hunter.training.calibration import (
     PlattScaler,
     TemperatureScaler,
     expected_calibration_error,
     fit_platt,
+    fit_temperature,
 )
 
 
@@ -59,3 +61,33 @@ def test_ece_near_zero_for_a_calibrated_model():
     p = rng.random(20000)
     y = (rng.random(20000) < p).astype(float)
     assert expected_calibration_error(y, p) < 0.03
+
+
+# ------------------------------------- refusing to fit what cannot be fitted --
+
+
+@pytest.mark.parametrize("label", [0.0, 1.0])
+def test_platt_refuses_a_single_class_validation_split(label):
+    """With one class the NLL is minimised at the extremes, so the optimiser
+    converges and returns a scaler mapping every score to one end. That bundle
+    is what gets written to disk as the servable calibrator."""
+    scores, _ = shifted_scores(n=200)
+    labels = np.full(len(scores), label)
+    with pytest.raises(ValueError, match="both classes"):
+        fit_platt(scores, labels)
+
+
+@pytest.mark.parametrize("label", [0.0, 1.0])
+def test_temperature_refuses_a_single_class_validation_split(label):
+    scores, _ = shifted_scores(n=200)
+    labels = np.full(len(scores), label)
+    with pytest.raises(ValueError, match="both classes"):
+        fit_temperature(scores, labels)
+
+
+def test_a_healthy_split_still_fits():
+    """The guards must not fire on the ordinary case."""
+    scores, y = shifted_scores(n=500)
+    a, b = fit_platt(scores, y)
+    assert np.isfinite(a) and np.isfinite(b) and a > 0
+    assert np.isfinite(fit_temperature(scores, y))

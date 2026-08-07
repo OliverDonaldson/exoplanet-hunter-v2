@@ -24,9 +24,10 @@ Silently mixing them across one population is itself a comparability defect, so
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 import joblib
 import numpy as np
@@ -38,7 +39,9 @@ from exoplanet_hunter.datasets.tfrecords import (
     load_index,
     make_parse_fn,
 )
+from exoplanet_hunter.eval.comparison import SliceMetrics
 from exoplanet_hunter.utils.logging import get_logger
+from exoplanet_hunter.validation.promotion import AGGREGATE_SLICE, GATE_MISSION
 
 log = get_logger(__name__)
 
@@ -203,3 +206,141 @@ def score_run(
         ),
         protocol,
     )
+
+
+#: The only protocol a gate slice may be measured under. `ZERO_SHOT` rows are a
+#: real measurement of cross-mission transfer, but they are not the same
+#: quantity, so they are reported apart rather than averaged in.
+GATE_PROTOCOL = Protocol.OUT_OF_FOLD
+
+#: `SliceMetrics` field -> the `summary` key the gate's pooled fallback reads.
+_SUMMARY_METRICS = {"roc_auc": "test_roc_auc", "brier": "test_brier", "ece": "test_ece"}
+
+
+def _measure(frame: pd.DataFrame, name: str) -> dict[str, Any]:
+    """One slice's metrics, refusing to measure across two protocols.
+
+    Every slice this function returns is single-protocol by construction, so the
+    check can only fire if a caller reaches past `summarise_scored`'s filter.
+    It is kept because that is exactly how the original defect arrived: the
+    invariant was stated in this module's docstring and enforced nowhere.
+    """
+    protocols = sorted(set(frame["protocol"]))
+    if len(protocols) != 1:
+        raise ValueError(
+            f"slice {name!r} spans protocols {protocols} — an out-of-fold score and a "
+            "zero-shot score are not the same measurement, and pooling them reports a "
+            "population no model was asked about"
+        )
+    return asdict(SliceMetrics.measure(frame["label"].to_numpy(), frame["score"].to_numpy()))
+
+
+def summarise_scored(
+    scored: pd.DataFrame, *, source: str, exclude_unresolved: bool = False
+) -> dict[str, Any]:
+    """A gate-readable summary from a scored frame, one protocol per slice.
+
+    `evaluate_promotion` gates on `per_mission[GATE_MISSION]`. A summary without
+    that block makes it fall through to comparing pooled means over populations
+    that may differ, which is how every stage-2 decision before 2026-08-07 was
+    silently taken. The live incumbent `ca906040` has no such block, and the
+    re-baseline exists only as predictions — so this is what lets the gate
+    engage at all.
+
+    **Slices are out-of-fold only, and that is the point.** A re-baselined
+    incumbent carries both protocols in one frame: measured 2026-08-08, the live
+    set holds 2,238 out-of-fold Kepler rows plus 243 zero-shot ones that are
+    **all negatives**. Pooling them moves the Kepler figure for reasons that have
+    nothing to do with the model. It happens to be worth only +0.0001 there
+    (0.9915 pooled against 0.9914 out-of-fold, because the incumbent already
+    ranks those negatives low) — which makes it more dangerous rather than less,
+    since a plausible right answer is one nobody re-checks. Zero-shot rows are
+    kept, labelled, under `zero_shot`, and never reach the gate.
+    """
+    required = {"tic_id", "label", "score", "mission", "protocol"}
+    if missing := sorted(required - set(scored.columns)):
+        raise ValueError(f"scored frame is missing {missing} — cannot build a gate summary")
+
+    # `groupby` drops null keys by default, so an unresolved mission would leave
+    # the per-mission slices summing to less than the aggregate with nothing
+    # saying so. Refuse the frame instead of measuring part of it.
+    #
+    # A row reaches here when it was scored against a shard set the mission
+    # source does not cover. On 2026-08-08 that was five rows: the incumbent was
+    # re-scored on the legacy 9-dim shards (5,380 rows, no mission column) while
+    # missions resolve from the current view set (5,426), and five confirmed
+    # planets present in the former dropped out of the Stage 1 rebuild. They are
+    # outside the comparison population — no candidate can score them — so
+    # excluding them is right, but it is a decision the caller makes explicitly.
+    unresolved = scored[scored["mission"].isna()]
+    if len(unresolved):
+        if not exclude_unresolved:
+            raise ValueError(
+                f"{len(unresolved)} row(s) carry no mission, so they would vanish from every "
+                "per-mission slice while still counting toward the aggregate. They were "
+                "scored against a shard set the mission source does not cover; pass "
+                "exclude_unresolved=True to drop them from the comparison population, "
+                "which records each one."
+            )
+        log.info(
+            "[summarise] excluded %d row(s) with no mission: %s",
+            len(unresolved),
+            sorted(int(t) for t in unresolved["tic_id"]),
+        )
+        scored = scored[scored["mission"].notna()]
+
+    held_out = scored[scored["protocol"] == GATE_PROTOCOL]
+    if held_out.empty:
+        raise ValueError(
+            f"no {GATE_PROTOCOL} rows in {source} — every slice here would be zero-shot, "
+            "which is not a held-out measurement and cannot gate"
+        )
+
+    per_mission = {
+        str(mission): _measure(group, str(mission))
+        for mission, group in held_out.groupby("mission")
+    }
+    per_mission[AGGREGATE_SLICE] = _measure(held_out, AGGREGATE_SLICE)
+
+    # The aggregate has to be exactly the missions that make it up. This is the
+    # arithmetic that would have caught a mission silently leaving a comparison.
+    counted = sum(v["n"] for k, v in per_mission.items() if k != AGGREGATE_SLICE)
+    if counted != per_mission[AGGREGATE_SLICE]["n"]:
+        raise ValueError(
+            f"per-mission rows sum to {counted} but the aggregate holds "
+            f"{per_mission[AGGREGATE_SLICE]['n']} — a slice is being dropped"
+        )
+    if GATE_MISSION not in per_mission:
+        raise ValueError(
+            f"{source} has no out-of-fold {GATE_MISSION} rows, so it cannot gate: "
+            f"{GATE_MISSION} is 100% of the deployment population"
+        )
+
+    zero_shot = {
+        str(mission): _measure(group, str(mission))
+        for mission, group in scored[scored["protocol"] != GATE_PROTOCOL].groupby("mission")
+    }
+
+    return {
+        # No `folds` block: this run's folds are a different split from any
+        # candidate's, so pairing on fold index would compare fold *k* of one
+        # partition against fold *k* of another. `paired_folds` returns None on a
+        # missing block, which is the honest outcome rather than a fabricated one.
+        "summary": {
+            key: {"mean": per_mission[AGGREGATE_SLICE][field], "std": None}
+            for field, key in _SUMMARY_METRICS.items()
+        },
+        "per_mission": per_mission,
+        "zero_shot": zero_shot,
+        "provenance": {
+            "source": source,
+            "protocol": str(GATE_PROTOCOL),
+            "n_rows": len(scored),
+            "n_gated": len(held_out),
+            "excluded_unresolved": sorted(int(t) for t in unresolved["tic_id"]),
+            "note": (
+                "per_mission and summary are pooled out-of-fold metrics, not fold means; "
+                "zero_shot is reported for coverage and never gates"
+            ),
+        },
+    }

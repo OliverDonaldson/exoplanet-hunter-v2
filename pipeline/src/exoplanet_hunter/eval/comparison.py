@@ -150,7 +150,11 @@ def mission_coverage(
     missions = _mission_lookup(left, right, key)
 
     def labelled(frame: pd.DataFrame) -> pd.DataFrame:
-        out = frame[[key]].drop_duplicates().merge(missions, on=key, how="left")
+        out = (
+            frame[[key]]
+            .drop_duplicates()
+            .merge(missions, on=key, how="left", validate="one_to_one")
+        )
         out[MISSION_COLUMN] = out[MISSION_COLUMN].fillna("unknown")
         return out
 
@@ -207,10 +211,14 @@ def compare_prediction_sets(
 
     missions = _mission_lookup(left, right, key)
     columns = [key, label_column, score_column]
+    # `validate` on both: a repeated tic_id on either side turns this into a
+    # many-to-many join that multiplies rows, and every metric below would then
+    # be computed over a population that does not exist. pandas does that
+    # silently, and the row count is the only trace.
     merged = (
         left[columns]
-        .merge(right[columns], on=key, suffixes=("_left", "_right"))
-        .merge(missions, on=key, how="left")
+        .merge(right[columns], on=key, suffixes=("_left", "_right"), validate="one_to_one")
+        .merge(missions, on=key, how="left", validate="many_to_one")
     )
     merged[MISSION_COLUMN] = merged[MISSION_COLUMN].fillna("unknown")
     if not merged[f"{label_column}_left"].equals(merged[f"{label_column}_right"]):

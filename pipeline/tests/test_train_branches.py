@@ -6,6 +6,7 @@ import json
 
 import joblib
 import numpy as np
+import pandas as pd
 import pytest
 import tensorflow as tf
 
@@ -21,6 +22,12 @@ from exoplanet_hunter.training.train_branches import (
 )
 from exoplanet_hunter.validation.promotion import evaluate_promotion
 
+#: 40 rows over 2 folds leaves ~20 for training, so the default 0.2 inner
+#: split is 4 validation rows — too few for a Platt fit to reliably see both
+#: classes, which it requires. Production splits ~868. This is a property of
+#: the fixture, not of the trainer.
+FAST_CV = {"n_splits": 2, "epochs": 1, "batch_size": 8, "patience": 1, "val_frac": 0.5}
+
 
 @pytest.fixture
 def shard_dir(tmp_path, make_view_set):
@@ -33,7 +40,7 @@ def test_cv_writes_a_summary_the_promotion_gate_can_read(shard_dir, tmp_path):
     payload = run_cv(
         shard_dir,
         out,
-        config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1),
+        config=CVConfig(**FAST_CV),
     )
     assert len(payload["folds"]) == 2
     for key in SUMMARY_KEYS:
@@ -52,16 +59,32 @@ def test_every_example_is_tested_exactly_once(shard_dir, tmp_path):
     payload = run_cv(
         shard_dir,
         tmp_path / "cv",
-        config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1),
+        config=CVConfig(**FAST_CV),
     )
     assert sum(fold["n_test"] for fold in payload["folds"]) == 40
+
+
+def test_a_multi_planet_host_never_spans_two_folds(tmp_path, make_view_set):
+    """The count above holds whether or not grouping works, so it cannot catch
+    the leakage it names. With every row on its own star — the live catalogue's
+    state, 5,703 rows over 5,703 TICs — no test can. This spreads 40 rows over
+    8 stars so the group constraint is load-bearing, and asserts what the CV
+    design actually promises."""
+    shards = tmp_path / "shards"
+    write_viewset_shards(make_view_set(n=40, seed=3, hosts=8), shards, examples_per_shard=16)
+    run_cv(shards, tmp_path / "cv", config=CVConfig(**FAST_CV))
+
+    predictions = pd.read_parquet(tmp_path / "cv" / "predictions.parquet")
+    assert predictions["tic_id"].nunique() == 8
+    spread = predictions.groupby("tic_id")["fold"].nunique()
+    assert (spread == 1).all(), f"stars held out by >1 fold: {spread[spread > 1].to_dict()}"
 
 
 def test_metrics_are_finite_and_in_range(shard_dir, tmp_path):
     payload = run_cv(
         shard_dir,
         tmp_path / "cv",
-        config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1),
+        config=CVConfig(**FAST_CV),
     )
     for fold in payload["folds"]:
         assert np.isfinite(fold["test_roc_auc"]) and 0.0 <= fold["test_roc_auc"] <= 1.0
@@ -74,7 +97,7 @@ def test_every_fold_leaves_a_servable_artefact(shard_dir, tmp_path):
     this trainer wrote no checkpoint at all, so run 1 of stage 2(a) scored
     weights that existed only in memory and left nothing to promote or serve."""
     out = tmp_path / "cv"
-    run_cv(shard_dir, out, config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1))
+    run_cv(shard_dir, out, config=CVConfig(**FAST_CV))
 
     for fold in range(2):
         assert (out / f"fold_{fold}" / CHECKPOINT_NAME).is_file()
@@ -87,7 +110,7 @@ def test_the_checkpoint_reloads_without_disabling_keras_safe_mode(shard_dir, tmp
     which would make every promoted checkpoint unloadable without waiving a
     safety check. The gating and column-picking layers are registered instead."""
     out = tmp_path / "cv"
-    run_cv(shard_dir, out, config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1))
+    run_cv(shard_dir, out, config=CVConfig(**FAST_CV))
 
     model = tf.keras.models.load_model(out / "fold_0" / CHECKPOINT_NAME, compile=False)
     assert model.count_params() > 0
@@ -101,7 +124,7 @@ def test_an_ensemble_fold_writes_every_member_and_averages_them(shard_dir, tmp_p
     payload = run_cv(
         shard_dir,
         out,
-        config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1, n_models_per_fold=2),
+        config=CVConfig(**FAST_CV, n_models_per_fold=2),
     )
     for fold in range(2):
         members = sorted((out / f"fold_{fold}").glob(f"model_*_{CHECKPOINT_NAME}"))
@@ -115,7 +138,7 @@ def test_the_summary_separates_seed_variance_from_fold_difficulty(shard_dir, tmp
     payload = run_cv(
         shard_dir,
         tmp_path / "cv",
-        config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1, n_models_per_fold=2),
+        config=CVConfig(**FAST_CV, n_models_per_fold=2),
     )
     variance = payload["summary"]["variance"]
     assert variance["n_models_per_fold"] == 2
@@ -124,16 +147,12 @@ def test_the_summary_separates_seed_variance_from_fold_difficulty(shard_dir, tmp
 
 
 def test_seed_variance_is_unmeasurable_from_a_single_draw_per_fold(shard_dir, tmp_path):
-    payload = run_cv(
-        shard_dir, tmp_path / "cv", config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1)
-    )
+    payload = run_cv(shard_dir, tmp_path / "cv", config=CVConfig(**FAST_CV))
     assert payload["summary"]["variance"]["seed_sd"] is None
 
 
 def test_the_summary_carries_the_per_mission_block_the_gate_reads(shard_dir, tmp_path):
-    payload = run_cv(
-        shard_dir, tmp_path / "cv", config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1)
-    )
+    payload = run_cv(shard_dir, tmp_path / "cv", config=CVConfig(**FAST_CV))
     assert "all" in payload["per_mission"]
     assert {"roc_auc", "brier", "ece", "recall_at_1pct_fpr", "n"} <= set(
         payload["per_mission"]["all"]
@@ -151,9 +170,7 @@ def test_augmentation_is_training_only(shard_dir, tmp_path, monkeypatch):
         return original(*args, augment=augment, split=split, **kwargs)
 
     monkeypatch.setattr(train_branches, "make_viewset_dataset", spy)
-    run_cv(
-        shard_dir, tmp_path / "cv", config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1)
-    )
+    run_cv(shard_dir, tmp_path / "cv", config=CVConfig(**FAST_CV))
 
     assert {augmented for split, augmented in splits_augmented if split is Split.TRAIN} == {True}
     assert {augmented for split, augmented in splits_augmented if split is not Split.TRAIN} == {

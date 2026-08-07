@@ -1,8 +1,18 @@
-"""Score a run onto a shard set, or compare two prediction sets.
+"""Score a run onto a shard set, compare two prediction sets, or summarise one.
 
-One entry point for both halves, because they are the same question asked twice
-and keeping them apart is how three different readings of the incumbent came to
-exist. `score` produces a `predictions.parquet`; `compare` reads two of them.
+One entry point for all three, because they are the same question asked at
+different stages and keeping them apart is how three different readings of the
+incumbent came to exist. `score` produces a `predictions.parquet`; `compare`
+reads two of them; `summarise` turns one into the `cv_summary.json` the
+promotion gate reads.
+
+**`summarise` is what lets the gate engage at all.** `evaluate_promotion` gates
+on `per_mission[TESS]`, the live incumbent's summary has no such block, and the
+re-baseline existed only as predictions — so every stage-2 decision was refused
+(and before 2026-08-07, silently taken on pooled means). Slices are out-of-fold
+only: the re-baselined set carries 243 zero-shot Kepler rows that are *all*
+negatives, and pooling them into the out-of-fold Kepler figure measures a
+population no model was asked about.
 
 Coverage is reported before any metric. The stage 2(a) comparison matched 4,605
 rows and looked complete while dropping all 527 K2 examples, because the
@@ -23,11 +33,16 @@ different binnings, so they share one primitive in `eval.comparison`.
     python pipeline/scripts/evaluate.py score \
         --run models/cv/<incumbent> --protocol zeroshot --mission K2 \
         --out results/incumbent_k2.parquet
+
+    python pipeline/scripts/evaluate.py summarise \
+        --predictions results/incumbent_rebaselined.parquet \
+        --out models/cv/incumbent-rebaselined/cv_summary.json --exclude-unresolved
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +55,7 @@ from exoplanet_hunter.eval.comparison import (
     paired_frame,
 )
 from exoplanet_hunter.utils.logging import get_logger
+from exoplanet_hunter.validation.promotion import GATE_MISSION
 
 log = get_logger(__name__)
 
@@ -183,6 +199,45 @@ def cmd_score(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_summarise(args: argparse.Namespace) -> None:
+    from exoplanet_hunter.eval.scoring import summarise_scored
+
+    scalars = pd.read_parquet(args.scalars)[["tic_id", "mission"]].drop_duplicates("tic_id")
+    scored = load_predictions(args.predictions, scalars)
+    if "protocol" not in scored.columns:
+        if args.protocol is None:
+            raise SystemExit(
+                f"{args.predictions} carries no protocol column. Pass --protocol to declare "
+                "how these rows were scored; guessing is what made a zero-shot number "
+                "readable as a held-out one."
+            )
+        scored = scored.assign(protocol=args.protocol)
+
+    summary = summarise_scored(
+        scored, source=str(args.predictions), exclude_unresolved=args.exclude_unresolved
+    )
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(summary, indent=2) + "\n")
+
+    gate = summary["per_mission"][GATE_MISSION]
+    log.info(
+        "[summarise] %d of %d rows gate on %s: AUC %.4f, recall@1%%FPR %.3f -> %s",
+        summary["provenance"]["n_gated"],
+        summary["provenance"]["n_rows"],
+        GATE_MISSION,
+        gate["roc_auc"],
+        gate["recall_at_1pct_fpr"],
+        args.out,
+    )
+    for mission, metrics in summary["zero_shot"].items():
+        log.info(
+            "[summarise] %s: %d zero-shot rows reported, never gates (AUC %.4f)",
+            mission,
+            metrics["n"],
+            metrics["roc_auc"],
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -208,6 +263,28 @@ def main() -> None:
     score.add_argument("--mission", default=None, help="restrict to one mission")
     score.add_argument("--out", type=Path, required=True)
     score.set_defaults(func=cmd_score)
+
+    summarise = sub.add_parser(
+        "summarise", help="a gate-readable cv_summary.json from a scored prediction set"
+    )
+    summarise.add_argument("--predictions", type=Path, required=True)
+    summarise.add_argument("--out", type=Path, required=True)
+    summarise.add_argument(
+        "--protocol",
+        choices=["oof", "zeroshot"],
+        default=None,
+        help="declare the protocol when the frame carries no protocol column",
+    )
+    summarise.add_argument(
+        "--exclude-unresolved",
+        action="store_true",
+        help=(
+            "drop rows whose mission does not resolve — they were scored against a shard "
+            "set the mission source does not cover, so no candidate can score them. Each "
+            "excluded tic_id is logged and recorded in the summary's provenance block."
+        ),
+    )
+    summarise.set_defaults(func=cmd_summarise)
 
     args = parser.parse_args()
     args.func(args)

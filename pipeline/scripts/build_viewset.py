@@ -1,4 +1,7 @@
-"""Build the 301/31 view set for every target in a catalogue.
+"""Build the branch-model view set for every target in a catalogue.
+
+Resolution comes from `preprocess.viewset`'s own constants and is not restated
+here — this line read "301/31" while the builder emitted 2001/201.
 
     python pipeline/scripts/build_viewset.py --root /Users/ollie/Project/v2
 
@@ -13,6 +16,7 @@ Leaves the legacy `views.npz` alone — that artefact feeds the live model.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import time
 from pathlib import Path
 
@@ -23,12 +27,35 @@ from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES, ViewSetArrays
 from exoplanet_hunter.preprocess import clean_lightcurve, flatten_lightcurve
 from exoplanet_hunter.preprocess.viewset import GLOBAL_BINS, LOCAL_BINS, build_view_set
 from exoplanet_hunter.utils import get_logger
+from exoplanet_hunter.validation.schemas import MISSIONS
 
 log = get_logger(__name__)
 
 SIGMA_CLIP = 5.0
 WINDOW_LENGTH = 401
 POLYORDER = 2
+
+
+def _assert_missions_resolve(df: pd.DataFrame, catalogue: Path) -> None:
+    """Every row names a mission this builder knows how to find files for.
+
+    `row.get("mission", "TESS")` on a Series returns the *stored* NaN rather than
+    the default, so a null mission becomes the string "nan": it keys its own
+    cache directory, and `_lightcurve_path` falls through to the TESS branch and
+    reads a TESS path for a Kepler target. Both produce a view set that builds
+    cleanly and is wrong, so the catalogue is checked once here instead.
+    """
+    if "mission" not in df.columns:
+        log.info("[viewset] no mission column in %s — every row treated as TESS", catalogue)
+        return
+    unknown = sorted(set(df["mission"].dropna().unique()) - set(MISSIONS))
+    if null_count := int(df["mission"].isna().sum()):
+        unknown.append(f"{null_count} null")
+    if unknown:
+        raise SystemExit(
+            f"{catalogue} carries mission value(s) {unknown} outside {MISSIONS} — these would "
+            "key their own view cache and resolve to a TESS light-curve path"
+        )
 
 
 def _lightcurve_path(root: Path, tic: int, mission: str) -> tuple[Path | None, str]:
@@ -89,15 +116,49 @@ def _build_one(path: Path, row: pd.Series) -> tuple[object, dict] | None:
     return views, scalars
 
 
-def _cache_path(cache: Path, mission: str, tic: int) -> Path:
-    """Per-target cache, keyed by resolution.
+def _ephemeris_key(row: pd.Series) -> str:
+    """Digest of the ephemeris a target's views are folded on.
+
+    Two planets on one host share `(mission, tic)` and differ only here. Keyed
+    on the target alone, the second would silently read back the first's views —
+    built from the first's period, epoch and duration — and train on them as its
+    own. `labels.parquet` currently holds 5,703 rows across 5,703 unique TICs so
+    nothing collides today, but a catalogue refresh is precisely what introduces
+    a multi-planet host, and `StratifiedGroupKFold(groups=tic_id)` protects the
+    split while this protects what the split is made of.
+
+    Formatted to 10 significant figures before hashing so a float that
+    round-trips through parquet at a different last bit does not invalidate a
+    cache entry.
+    """
+    raw = "|".join(f"{float(row[key]):.10g}" for key in ("period", "t0", "duration"))
+    return hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
+def _cache_path(cache: Path, mission: str, tic: int, ephemeris: str) -> Path:
+    """Per-target cache, keyed by resolution and ephemeris.
 
     The bin counts are baked into every cached array, so a rebuild at a new
     resolution against an unkeyed cache reads back the old shapes. `validate()`
     would catch it — but only after re-reading all 5,423 files, and only if the
     whole cache is stale rather than half of it.
+
+    The ephemeris entered the key on 2026-08-08 and **invalidates every existing
+    entry**: the next build re-derives the interim cache from the light curves
+    rather than reusing it. That is the one-time cost of making a multi-planet
+    host impossible to get wrong, and the interim cache is derived data.
     """
-    return cache / f"g{GLOBAL_BINS}l{LOCAL_BINS}" / f"{mission.lower()}_{tic}.npz"
+    return _cache_dir(cache) / f"{mission.lower()}_{tic}_{ephemeris}.npz"
+
+
+def _cache_dir(cache: Path) -> Path:
+    """The resolution-scoped directory every cached target lives under."""
+    return cache / f"g{GLOBAL_BINS}l{LOCAL_BINS}"
+
+
+def _has_ephemeris(row: pd.Series) -> bool:
+    """Whether this row can be folded at all. No ephemeris, no views."""
+    return bool(np.isfinite([row.get("period"), row.get("t0"), row.get("duration")]).all())
 
 
 def main() -> None:
@@ -117,12 +178,20 @@ def main() -> None:
         action="store_true",
         help="Skip building; stack whatever the cache already holds",
     )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help=(
+            "Accept a view set smaller than the catalogue. Without this, targets that have "
+            "no cached views and no recorded skip reason are a hard error."
+        ),
+    )
     args = parser.parse_args()
 
     catalogue = args.catalogue or (args.root / "data" / "labels" / "labels.parquet")
     out = args.out or (args.root / "data" / "processed")
     cache = args.cache or (args.root / "data" / "interim" / "viewset")
-    _cache_path(cache, "x", 0).parent.mkdir(parents=True, exist_ok=True)
+    _cache_dir(cache).mkdir(parents=True, exist_ok=True)
     log.info("[viewset] %d/%d bins, cache %s", GLOBAL_BINS, LOCAL_BINS, cache)
 
     df = pd.read_parquet(catalogue)
@@ -133,6 +202,7 @@ def main() -> None:
     df = df[df["label"].isin(keep)].reset_index(drop=True)
     if args.limit:
         df = df.head(args.limit)
+    _assert_missions_resolve(df, catalogue)
     log.info("[viewset] %d targets from %s", len(df), catalogue)
 
     skips = {"missing_fits": 0, "missing_ephemeris": 0, "preprocess_error": 0}
@@ -143,12 +213,14 @@ def main() -> None:
         for i, row in enumerate(df.itertuples(index=False), start=1):
             row = pd.Series(row._asdict())
             tic, mission = int(row["tic_id"]), str(row.get("mission", "TESS"))
-            target_cache = _cache_path(cache, mission, tic)
+            # Ordered before the cache lookup: a row with no ephemeris cannot be
+            # folded, so there is nothing to key it on and nothing to find.
+            if not _has_ephemeris(row):
+                skips["missing_ephemeris"] += 1
+                continue
+            target_cache = _cache_path(cache, mission, tic, _ephemeris_key(row))
             if target_cache.exists():
                 built += 1
-                continue
-            if not np.isfinite([row.get("period"), row.get("t0"), row.get("duration")]).all():
-                skips["missing_ephemeris"] += 1
                 continue
             path, source = _lightcurve_path(args.root, tic, mission)
             if path is None:
@@ -187,11 +259,17 @@ def main() -> None:
     dv, ruwe = _side_tables(args.root)
     view_sets: list[dict] = []
     rows: list[dict] = []
+    uncached = 0
     for row in df.itertuples(index=False):
         row = pd.Series(row._asdict())
         tic, mission = int(row["tic_id"]), str(row.get("mission", "TESS"))
-        target_cache = _cache_path(cache, mission, tic)
+        if not _has_ephemeris(row):
+            # Never buildable, so its absence is accounted for and is not the
+            # silent shortfall `uncached` exists to catch.
+            continue
+        target_cache = _cache_path(cache, mission, tic, _ephemeris_key(row))
         if not target_cache.exists():
+            uncached += 1
             continue
         with np.load(target_cache, allow_pickle=False) as f:
             view_sets.append({name: f[name] for name in VIEW_SHAPES})
@@ -212,6 +290,23 @@ def main() -> None:
 
     if not rows:
         raise SystemExit("no targets built — check the light-curve caches")
+
+    # A target missing from the cache is expected exactly when the build loop
+    # skipped it and said why. Anything beyond that is a target that should be
+    # here and is not, and `--assemble-only` records no skips at all — so a run
+    # over a half-populated cache would otherwise write a smaller view set and
+    # log a clean build. Everything downstream would then be measured on a
+    # population nobody chose.
+    # Only the skips that *could* have been built are subtracted: a row with no
+    # ephemeris never reaches `uncached` at all, so counting it on both sides
+    # would cancel a real shortfall out of existence.
+    explained = skips["missing_fits"] + skips["preprocess_error"]
+    if (unaccounted := uncached - explained) > 0 and not args.allow_partial:
+        raise SystemExit(
+            f"{unaccounted} of {len(df)} targets have no cached views and no recorded reason "
+            f"({uncached} uncached, {explained} skipped with a reason: {skips}). Re-run without "
+            "--assemble-only to build them, or pass --allow-partial to accept a smaller set."
+        )
 
     scalars = pd.DataFrame(rows)
     scalars["transit_completeness"] = scalars["observed_transit_count"] / scalars[

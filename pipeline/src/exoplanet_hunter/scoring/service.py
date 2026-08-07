@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -48,6 +48,9 @@ from exoplanet_hunter.scoring.ensemble import ScoringEnsemble
 from exoplanet_hunter.search import bls_period_search
 from exoplanet_hunter.search.bls import bls_periodogram
 from exoplanet_hunter.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    import lightkurve as lk
 
 log = get_logger(__name__)
 
@@ -260,7 +263,7 @@ class TargetScorer:
             q_ratio=duration_check.q_ratio if duration_check is not None else None,
         )
 
-    def _search_lightcurve(self, cleaned, tic_id: int):
+    def _search_lightcurve(self, cleaned: lk.LightCurve, tic_id: int) -> lk.LightCurve:
         """Unmasked flatten + decimation for BLS (search only, not the fold)."""
         lc = flatten_lightcurve(
             cleaned,

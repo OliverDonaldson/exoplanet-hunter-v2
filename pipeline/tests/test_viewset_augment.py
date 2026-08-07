@@ -161,3 +161,33 @@ def test_draws_are_fresh_on_every_call():
     a = augment_viewset({"local_view": view}, cfg)["local_view"].numpy()
     b = augment_viewset({"local_view": view}, cfg)["local_view"].numpy()
     assert not np.allclose(a, b)
+
+
+def test_masking_leaves_non_flux_views_alone():
+    """Zero is the out-of-transit baseline on folded flux, so masking there
+    removes a measurement. On a gap fraction zero says "no cadence was missing"
+    and on a peak-normalised periodogram it says "no power at this period" —
+    both asserted while `present` still reports the bin as measured. The old
+    code masked every view kind alike."""
+    cfg = AugmentConfig(time_shift_frac=0.0, noise_std=0.0, scale_range=0.0, mask_prob=1.0)
+    for name in ("gap_view", "periodogram_view", "periodogram_masked_view"):
+        shape = VIEW_SHAPES[name]
+        view = tf.concat(
+            [tf.fill((1, shape[0], shape[1] - 1), 0.7), tf.ones((1, shape[0], 1))], axis=-1
+        )
+        out = augment_viewset({name: view}, cfg)[name]
+        assert float(tf.reduce_min(out[..., :-1])) == pytest.approx(0.7), (
+            f"{name} was masked to zero, which is a claim rather than an absence"
+        )
+
+
+def test_masking_still_applies_to_folded_flux():
+    cfg = AugmentConfig(time_shift_frac=0.0, noise_std=0.0, scale_range=0.0, mask_prob=1.0)
+    shape = VIEW_SHAPES["local_view"]
+    view = tf.concat(
+        [tf.fill((1, shape[0], shape[1] - 1), 0.7), tf.ones((1, shape[0], 1))], axis=-1
+    )
+    out = augment_viewset({"local_view": view}, cfg)["local_view"]
+    assert float(tf.reduce_max(out[..., :-1])) == pytest.approx(0.0)
+    # `present` untouched: the bin was measured.
+    assert float(tf.reduce_min(out[..., -1])) == pytest.approx(1.0)

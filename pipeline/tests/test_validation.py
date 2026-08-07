@@ -1,6 +1,7 @@
 """Tests for the validation gates: schemas, leakage guard, promotion."""
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -572,6 +573,49 @@ def test_a_tess_regression_rejects_however_good_the_aggregate_is():
     assert any("does not beat" in r for r in decision.reasons)
 
 
+def test_a_per_mission_block_without_tess_refuses_rather_than_pooling():
+    """The gate mission missing from a block that exists is not the same as a
+    summary predating the block, and returning None for both is how the pooled
+    fallback gets entered while reporting the summary is merely old."""
+    candidate = summary(0.99, 0.01) | slices(Kepler={"roc_auc": 0.99})
+    incumbent = summary(0.80, 0.20) | slices(Kepler={"roc_auc": 0.80})
+    with pytest.raises(ValueError, match="no TESS"):
+        evaluate_promotion(candidate, incumbent)
+
+
+def test_a_gate_slice_measured_over_different_row_counts_alarms():
+    """Equal counts do not prove equal rows, but unequal counts disprove it.
+    Measured 2026-08-08: the re-baselined incumbent gates on 2,367 TESS rows
+    against run 2's 2,399."""
+    candidate = gated(0.92, 0.10) | slices(TESS={"roc_auc": 0.92, "brier": 0.10, "n": 2399})
+    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91, "n": 2367})
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.promoted
+    assert any("not row-for-row" in a for a in decision.alarms)
+
+
+def test_a_gate_slice_over_matched_rows_does_not_alarm():
+    decision = evaluate_promotion(gated(0.92, 0.10), gated(0.91, 0.10))
+    assert not any("row-for-row" in a for a in decision.alarms)
+
+
+def test_a_run_trained_from_a_dirty_tree_alarms():
+    """The recorded commit does not describe the code that ran, so the served
+    model could not be rebuilt from the repository."""
+    candidate = gated(0.92, 0.10)
+    candidate["run_config"] = {"git_sha": "abc123", "git_dirty": True}
+    decision = evaluate_promotion(candidate, gated(0.91, 0.10))
+    assert decision.promoted
+    assert any("dirty working tree" in a for a in decision.alarms)
+
+
+def test_a_run_with_a_clean_commit_does_not_alarm_on_provenance():
+    candidate = gated(0.92, 0.10)
+    candidate["run_config"] = {"git_sha": "abc123", "git_dirty": False}
+    decision = evaluate_promotion(candidate, gated(0.91, 0.10))
+    assert not any("git" in a or "commit" in a for a in decision.alarms)
+
+
 def test_the_aggregate_is_reported_and_never_gates():
     """Kepler is drawn at exactly 1,250/1,250, so the pooled slice is weighted
     by a sampling decision in a comparison whose consequences are all TESS."""
@@ -834,3 +878,18 @@ def test_incumbent_summary_resolves_registry_path_from_any_cwd(tmp_path, monkeyp
     incumbent = load_incumbent_summary(models_dir)
     assert incumbent is not None
     assert incumbent["summary"]["test_roc_auc"]["mean"] == 0.93
+
+
+def test_two_identical_runs_have_zero_effect_not_an_undefined_one():
+    """`inf * sign(0)` is nan, which loses every downstream inequality and reads
+    as "could not tell" for the one comparison that is certain."""
+    identical = folds(0.9, 0.9, 0.9)
+    paired = paired_folds(identical, identical)
+    assert paired is not None
+    assert paired.effect_size == 0.0
+
+
+def test_a_uniform_shift_across_every_fold_is_infinitely_consistent():
+    paired = paired_folds(folds(0.92, 0.92, 0.92), folds(0.90, 0.90, 0.90))
+    assert paired is not None
+    assert paired.effect_size == math.inf

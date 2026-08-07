@@ -9,8 +9,16 @@ import pytest
 from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES, ViewSetArrays
 
 
-def _make_view_set(n: int = 6, *, seed: int = 0) -> ViewSetArrays:
-    """A well-formed view set: presence channels vary, both classes present."""
+def _make_view_set(n: int = 6, *, seed: int = 0, hosts: int | None = None) -> ViewSetArrays:
+    """A well-formed view set: presence channels vary, both classes present.
+
+    `hosts` spreads the `n` rows over that many stars, so more than one row
+    shares a `tic_id`. The default gives every row its own star, which makes
+    `StratifiedGroupKFold(groups=tic_id)` degenerate — the guard holds trivially
+    and a test cannot tell grouped splitting from ungrouped. The live catalogue
+    is in exactly that state (5,703 rows, 5,703 unique TICs), so a multi-planet
+    host has to be constructed to be tested at all.
+    """
     rng = np.random.default_rng(seed)
     views = {}
     for name, shape in VIEW_SHAPES.items():
@@ -21,7 +29,12 @@ def _make_view_set(n: int = 6, *, seed: int = 0) -> ViewSetArrays:
     dv_usable = np.array([True] * (n - 1) + [False])
     scalars = pd.DataFrame(
         {
-            "tic_id": np.arange(1, n + 1),
+            # Contiguous blocks, not `% hosts`: labels alternate, so a modulo
+            # assignment with an even `hosts` puts every same-parity row on the
+            # same star and each host comes out single-class — which is both
+            # unlike a real multi-planet system and enough to starve the Platt
+            # fit of one class.
+            "tic_id": np.arange(n) // max(1, n // (hosts or n)) + 1,
             "mission": ["TESS"] * n,
             "label": [1, 0] * (n // 2),
             "observed_transit_count": rng.integers(1, 20, n),

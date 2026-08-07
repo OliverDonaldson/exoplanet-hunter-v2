@@ -1,16 +1,20 @@
-"""TFRecord shards for the 301/31 view set.
+"""TFRecord shards for the branch-model view set.
 
-Parallel to `tfrecords.py`, which stays pinned to the legacy 2001/201 schema
-that feeds the live model. This one is generic over `VIEW_SHAPES`, so adding a
-branch means adding it there and nowhere else.
+Parallel to `tfrecords.py`, the legacy 9-dim two-view schema that feeds the live
+model. This one is generic over `VIEW_SHAPES`, so adding a branch means adding
+it there and nowhere else. The bin counts are deliberately not restated here: a
+docstring naming a resolution is a second declaration of it, and this file
+carried "301/31" for two days after the set became 2001/201.
 
-    viewset-00000-of-00006.tfrecord
+    viewset-00000-of-00011.tfrecord
     metadata.json   view shapes, scalar columns, n_examples, n_shards
     index.parquet   the scalars table, in shard order
 
-Measured 2026-08-01: ~26 kB per example, so the full labelled set is ~150 MB —
-about 3x the legacy 47 MB, not the 20-50x the roadmap allowed for. That keeps
-`tf.data.cache()` viable.
+**Sizing, re-measured 2026-08-08: 699 MB over 5,426 examples, ~129 kB each**,
+against the legacy set's 47 MB. This supersedes the 2026-08-01 figure of ~26 kB
+per example (~150 MB total), which was measured before the 2001/201 restore and
+was the basis for calling `tf.data.cache()` affordable. That decision still
+holds on a 24 GB machine, but it rests on 699 MB rather than 150.
 """
 
 from __future__ import annotations

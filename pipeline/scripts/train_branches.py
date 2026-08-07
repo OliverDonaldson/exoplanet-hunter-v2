@@ -61,6 +61,13 @@ def main() -> None:
         help="models averaged per fold; >1 also makes seed variance measurable "
         "separately from fold difficulty (see summary.variance)",
     )
+    parser.add_argument(
+        "--init-filters",
+        type=int,
+        default=None,
+        help="override the declared per-branch filter count. This is the capacity arm, so "
+        "that capacity is tested within one architecture rather than across two",
+    )
     args = parser.parse_args()
 
     if not args.model_config.exists():
@@ -82,6 +89,13 @@ def main() -> None:
         n_models_per_fold=args.n_models_per_fold or int(training.get("n_models_per_fold", 1)),
         augment=_augment_config(raw),
     )
+    if args.init_filters is not None:
+        # Overridden in the resolved config rather than the YAML, so the run
+        # records what it actually built (run_config.model_config) while the
+        # declared architecture on disk stays the main line's.
+        raw["init_filters"] = args.init_filters
+        log.info("[train-branches] init_filters overridden to %d", args.init_filters)
+
     log.info("[train-branches] %s -> %s  (%s)", args.shards, args.out, config)
     run_cv(args.shards, args.out, config=config, model_cfg=_Config(raw))
 

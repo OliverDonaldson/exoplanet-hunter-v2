@@ -14,6 +14,8 @@ path expects.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from scipy.optimize import minimize, minimize_scalar
 
@@ -29,6 +31,29 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
 
 
+def _assert_both_classes(labels: np.ndarray, fit: str) -> None:
+    """Refuse to calibrate on one class.
+
+    With every label identical the NLL is minimised by pushing the fit to its
+    extremes, so the optimiser converges happily and returns a scaler that maps
+    every score to ~0 or ~1. Nothing downstream can tell that apart from a
+    confident model, and the bundle is written to disk as the servable
+    calibrator — a plausible artefact standing in for a failed fit.
+    """
+    present = np.unique(labels)
+    if len(present) < 2:
+        raise ValueError(
+            f"{fit} needs both classes in the validation split, got only {present.tolist()} "
+            f"over {len(labels)} rows — the fit would collapse every probability to one end"
+        )
+
+
+def _assert_converged(res: Any, fit: str) -> None:
+    """A non-converged optimiser returns its last iterate, not a solution."""
+    if not res.success:
+        raise RuntimeError(f"{fit} did not converge: {res.message}")
+
+
 def fit_temperature(
     scores: np.ndarray,
     labels: np.ndarray,
@@ -38,6 +63,7 @@ def fit_temperature(
     """Minimise NLL(T) on validation `(scores, labels)` and return T*."""
     scores = np.asarray(scores, dtype=np.float64).ravel()
     labels = np.asarray(labels, dtype=np.float64).ravel()
+    _assert_both_classes(labels, "fit_temperature")
     logits = _logit(scores)
 
     def nll(T: float) -> float:
@@ -48,6 +74,7 @@ def fit_temperature(
         return -float(np.mean(labels * np.log(p) + (1.0 - labels) * np.log(1.0 - p)))
 
     res = minimize_scalar(nll, bounds=bounds, method="bounded")
+    _assert_converged(res, "fit_temperature")
     return float(res.x)
 
 
@@ -59,6 +86,7 @@ def fit_platt(scores: np.ndarray, labels: np.ndarray) -> tuple[float, float]:
     """
     scores = np.asarray(scores, dtype=np.float64).ravel()
     labels = np.asarray(labels, dtype=np.float64).ravel()
+    _assert_both_classes(labels, "fit_platt")
     logits = _logit(scores)
 
     def nll(params: np.ndarray) -> float:
@@ -73,6 +101,7 @@ def fit_platt(scores: np.ndarray, labels: np.ndarray) -> tuple[float, float]:
         return np.array([float(np.mean(residual * logits)) * a, float(np.mean(residual))])
 
     res = minimize(nll, x0=np.array([0.0, 0.0]), jac=grad, method="BFGS")
+    _assert_converged(res, "fit_platt")
     return float(np.exp(res.x[0])), float(res.x[1])
 
 

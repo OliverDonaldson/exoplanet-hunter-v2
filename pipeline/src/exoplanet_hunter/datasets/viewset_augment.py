@@ -72,6 +72,16 @@ _SHIFTED = (ViewKind.FOLDED_FLUX, ViewKind.UNFOLDED_FLUX, ViewKind.PHASE_FRACTIO
 #: depth scaling applies. A gap fraction and a peak-normalised periodogram are
 #: not depths and do not move when the transit gets deeper.
 _DEPTH_SCALED = (ViewKind.FOLDED_FLUX, ViewKind.UNFOLDED_FLUX)
+#: Views where zero is the *neutral* value, so dropping a bin to it removes a
+#: measurement rather than asserting a different one. On folded flux, zero is
+#: the out-of-transit baseline and masking reads as "nothing to see here".
+#: Elsewhere it is a claim: zero in a gap fraction says **no cadence was
+#: missing**, and zero in a peak-normalised periodogram says **no power at this
+#: period** — both stated confidently while `present` still says the bin was
+#: measured. That is the flip this module's docstring exists to prevent, applied
+#: by the module itself. Deliberately its own constant rather than reusing
+#: `_DEPTH_SCALED`: the two sets coincide today for unrelated reasons.
+_MASKABLE = (ViewKind.FOLDED_FLUX, ViewKind.UNFOLDED_FLUX)
 
 
 @dataclass(frozen=True)
@@ -114,11 +124,12 @@ def _augment_view(view: tf.Tensor, kind: ViewKind, draw: _Draw, cfg: AugmentConf
     if cfg.scale_range > 0 and kind in _DEPTH_SCALED:
         data = data * draw.scale
 
-    if cfg.mask_prob > 0:
+    if cfg.mask_prob > 0 and kind in _MASKABLE:
         # Masking drops a bin's measurement to the out-of-transit baseline,
         # exactly as the incumbent does. `present` is untouched: the bin was
         # measured, and claiming otherwise is the flip this module exists to
-        # prevent.
+        # prevent. Gated on `_MASKABLE` because zero is only neutral on the flux
+        # family — on a gap fraction or a periodogram it is a positive claim.
         keep = tf.random.uniform(tf.shape(data)[:-1]) > cfg.mask_prob
         data = data * tf.cast(keep, tf.float32)[..., None]
 
