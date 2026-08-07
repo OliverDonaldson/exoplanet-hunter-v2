@@ -54,10 +54,21 @@ def main() -> None:
     parser.add_argument("--n-splits", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--n-models-per-fold",
+        type=int,
+        default=None,
+        help="models averaged per fold; >1 also makes seed variance measurable "
+        "separately from fold difficulty (see summary.variance)",
+    )
     args = parser.parse_args()
 
+    if not args.model_config.exists():
+        # Falling back to `{}` silently trains every architecture default, and
+        # nothing in cv_summary.json would record which model actually ran.
+        raise SystemExit(f"no model config at {args.model_config} — run from the repository root")
     set_global_seed(args.seed)
-    raw = yaml.safe_load(args.model_config.read_text()) if args.model_config.exists() else {}
+    raw = yaml.safe_load(args.model_config.read_text())
     cv = raw.get("cross_validation", {})
     training = raw.get("training", {})
     config = CVConfig(
@@ -68,6 +79,7 @@ def main() -> None:
         patience=int(training.get("patience", 8)),
         learning_rate=float(training.get("learning_rate", 1e-3)),
         seed=args.seed,
+        n_models_per_fold=args.n_models_per_fold or int(training.get("n_models_per_fold", 1)),
         augment=_augment_config(raw),
     )
     log.info("[train-branches] %s -> %s  (%s)", args.shards, args.out, config)

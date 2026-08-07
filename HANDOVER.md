@@ -1,5 +1,13 @@
 # Exoplanet Hunter V2 — Handover (2026-07-10)
 
+> **2026-08-07 — read `docs/audit-2026-08-07.md` before trusting any number
+> below.** A full audit of the model and every recorded metric found the figures
+> arithmetically correct but the comparisons behind them invalid: the incumbent
+> baseline predated the entire Stage 1 rebuild, the TESS promotion gate never
+> engaged, K2 was in no comparison, and four separate defects meant neither
+> stage 2(a) run was a fair test of the architecture. All fixed. The stage 2(a)
+> readings in this file are superseded by the roadmap's audit section.
+
 Written at the end of the build sprint that took V2 from an empty orphan
 branch to a complete, self-running system. The next session is a **fresh-eyes
 audit**: tidy-up, verification of everything claimed below, and the steps
