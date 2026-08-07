@@ -35,44 +35,15 @@ __all__ = [
 ]
 
 
-#: Columns measured on a logarithmic scale, transformed before the robust
-#: centre and spread are fitted. `bootstrap_significance` is a false-alarm
-#: probability spanning 1e-146 to 0.83: in linear space its median is 3.8e-146
-#: and its MAD 1.1e-138, so the degenerate-scale guard below substituted 1.0 and
-#: the ±10 clip then collapsed 1,378 distinct values to effectively {-1, 0}. The
-#: column that motivated median/MAD in the first place was the one it destroyed.
-LOG_SCALED_COLUMNS = frozenset({"bootstrap_significance"})
-#: Floor for the log transform, below the smallest significance seen (1e-146).
-_LOG_FLOOR = 1e-300
-
-
-def _log_scale(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """log10 of the flagged columns, leaving the rest untouched.
-
-    Non-positive entries floor rather than becoming NaN — a significance of
-    exactly 0 is a real reading, not a missing one, and NaN here would be
-    imputed away as though nothing had been measured.
-    """
-    if not mask.any():
-        return values
-    out = values.copy()
-    out[:, mask] = np.log10(np.maximum(out[:, mask], _LOG_FLOOR))
-    return out
-
-
 @dataclass(frozen=True)
 class ScalarConstants:
     """Per-column median and scale for the scalar feature vector."""
 
     median: np.ndarray
     scale: np.ndarray
-    #: Per-column flag; the reader must apply the same transform the fit did.
-    log_scaled: np.ndarray
 
     @classmethod
-    def from_arrays(
-        cls, median: np.ndarray, scale: np.ndarray, log_scaled: np.ndarray | None = None
-    ) -> ScalarConstants:
+    def from_arrays(cls, median: np.ndarray, scale: np.ndarray) -> ScalarConstants:
         degenerate = ~(np.isfinite(scale) & (scale > 1e-12))
         if degenerate.any():
             # Substituting 1.0 turns a near-constant column into a near-constant
@@ -86,7 +57,6 @@ class ScalarConstants:
         return cls(
             median=np.nan_to_num(median).astype(np.float32),
             scale=np.where(degenerate, 1.0, scale).astype(np.float32),
-            log_scaled=(np.zeros(len(median), dtype=bool) if log_scaled is None else log_scaled),
         )
 
 
@@ -95,16 +65,17 @@ def fit_scalar_constants(index: pd.DataFrame, columns: list[str]) -> ScalarConst
 
     Median and MAD rather than mean and standard deviation: the DV scalars have
     heavy tails and one outlier would otherwise set the scale for the whole
-    column. Columns in `LOG_SCALED_COLUMNS` are transformed first, because a
-    robust scale is still meaningless on a quantity spanning 146 decades.
+    column. Columns needing a log scale are already stored that way — the shard
+    writer applies it, because a float32 record cannot hold the raw values (see
+    `LOG_SCALED_COLUMNS`), so the index this reads and the shards the model
+    reads carry the same numbers.
     """
     if not columns:
         return ScalarConstants.from_arrays(np.zeros(0), np.ones(0))
-    log_scaled = np.array([c in LOG_SCALED_COLUMNS for c in columns])
-    values = _log_scale(index[columns].to_numpy(dtype=np.float64), log_scaled)
+    values = index[columns].to_numpy(dtype=np.float64)
     median = np.nanmedian(values, axis=0)
     mad = np.nanmedian(np.abs(values - median), axis=0)
-    return ScalarConstants.from_arrays(median, 1.4826 * mad, log_scaled)
+    return ScalarConstants.from_arrays(median, 1.4826 * mad)
 
 
 def parse_viewset_shards(shard_files: list[str], metadata: dict) -> tf.data.Dataset:
@@ -179,11 +150,8 @@ def make_viewset_dataset(
     if has_scalars and scalar_constants is not None:
         centre = tf.constant(scalar_constants.median, tf.float32)
         spread = tf.constant(scalar_constants.scale, tf.float32)
-        log_flags = tf.constant(scalar_constants.log_scaled, tf.bool)
-        any_log = bool(scalar_constants.log_scaled.any())
     else:
-        centre = spread = log_flags = None
-        any_log = False
+        centre = spread = None
 
     def finalize(
         feats: dict, label: tf.Tensor
@@ -192,14 +160,6 @@ def make_viewset_dataset(
         if has_scalars:
             scalars = feats["scalars"]
             if centre is not None:
-                if any_log:
-                    # Same transform the fit applied, and before the impute — the
-                    # centre for these columns is a log-space number.
-                    scalars = tf.where(
-                        log_flags,
-                        tf.math.log(tf.maximum(scalars, _LOG_FLOOR)) / tf.math.log(10.0),
-                        scalars,
-                    )
                 # Impute before scaling, so an unmeasured scalar lands at exactly
                 # z=0 and says nothing. Filling with any constant at write time
                 # instead puts it at a real percentile of the column, which the

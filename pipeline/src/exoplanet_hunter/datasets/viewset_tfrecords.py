@@ -59,6 +59,15 @@ MASK_COLUMNS = ("dv_usable", "has_ruwe")
 #: the lane `MASK_COLUMNS` exists to own. NaN is now written through and imputed
 #: to the fitted centre at normalisation time, where it means exactly nothing.
 SCALAR_ENCODING = "nan"
+#: Columns stored as log10, because they are not representable otherwise.
+#: `bootstrap_significance` is a false-alarm probability reaching 1e-146, and a
+#: TFRecord float list is float32 — 1,639 of its 2,235 measured values underflow
+#: to exactly 0.0 below float32's smallest normal (1.18e-38). Transforming at
+#: read time cannot recover them: by then the information is already gone, and
+#: the constants fitted on the float64 index describe values the model never
+#: sees. A non-positive entry is not a measurement on this scale — a negative is
+#: DV's -1.0 sentinel — so it is written as NaN and imputed like any other gap.
+LOG_SCALED_COLUMNS = frozenset({"bootstrap_significance"})
 
 
 def _float_feature(values: np.ndarray) -> tf.train.Feature:
@@ -114,11 +123,21 @@ def write_viewset_shards(
     # reader imputes it to the fold's own fitted centre, which is the only value
     # that carries no information; any constant chosen at this layer is a value
     # inside the real distribution once normalisation runs.
-    feature_values = (
-        scalars[features].to_numpy(dtype=np.float32)
-        if features
-        else np.empty((n, 0), dtype=np.float32)
-    )
+    if features:
+        wide = scalars[features].astype(np.float64)
+        for column in features:
+            if column in LOG_SCALED_COLUMNS:
+                values = wide[column].to_numpy()
+                measured = values > 0.0
+                scaled = np.full(len(values), np.nan)
+                scaled[measured] = np.log10(values[measured])
+                wide[column] = scaled
+        # The index is written from the same frame, so whatever the model reads
+        # is what the normalisation constants are fitted on.
+        scalars = scalars.assign(**{c: wide[c] for c in features if c in LOG_SCALED_COLUMNS})
+        feature_values = wide.to_numpy(dtype=np.float32)
+    else:
+        feature_values = np.empty((n, 0), dtype=np.float32)
     mask_values = (
         scalars[masks].to_numpy(dtype=np.float32) if masks else np.empty((n, 0), dtype=np.float32)
     )
@@ -149,6 +168,7 @@ def write_viewset_shards(
         "scalar_columns": features,
         "mask_columns": masks,
         "scalar_encoding": SCALAR_ENCODING,
+        "log_scaled_columns": [c for c in features if c in LOG_SCALED_COLUMNS],
     }
     (out_dir / METADATA_NAME).write_text(json.dumps(metadata, indent=2))
     scalars.to_parquet(out_dir / INDEX_NAME, index=False)
