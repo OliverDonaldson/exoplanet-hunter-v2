@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import joblib
 import numpy as np
@@ -53,6 +54,41 @@ CHECKPOINT_NAME = "cnn_branches.keras"
 BUNDLE_NAME = "cnn_calibrator.joblib"
 
 
+def _checkpoint_name(index: int, n_models: int) -> str:
+    """One model per fold keeps the historical filename; an ensemble numbers them."""
+    return CHECKPOINT_NAME if n_models <= 1 else f"model_{index}_{CHECKPOINT_NAME}"
+
+
+class _MemberRun(NamedTuple):
+    """One trained member's scores, before averaging and calibration."""
+
+    val_scores: np.ndarray
+    val_labels: np.ndarray
+    test_scores: np.ndarray
+    test_labels: np.ndarray
+    test_tics: np.ndarray
+
+
+def _variance_decomposition(rows: list[dict]) -> dict[str, float | None]:
+    """Split the run's spread into seed variance and fold difficulty.
+
+    The `±` this project has been quoting is the spread of fold means within one
+    run, and it has been read as the run's own repeatability. They are different
+    quantities: it mixes how hard each fold is with how much a single training
+    draw wanders, and only the second says anything about whether a rerun would
+    land in the same place. `seed` is None until a fold trains more than one
+    model, because with one draw per fold there is nothing to measure it from.
+    """
+    per_fold = [r.get("model_roc_auc") or [] for r in rows]
+    fold_means = [float(np.mean(m)) for m in per_fold if m]
+    within = [float(np.std(m, ddof=1)) for m in per_fold if len(m) > 1]
+    return {
+        "fold_sd": float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else None,
+        "seed_sd": float(np.mean(within)) if within else None,
+        "n_models_per_fold": len(per_fold[0]) if per_fold and per_fold[0] else 1,
+    }
+
+
 @dataclass
 class CVConfig:
     n_splits: int = 5
@@ -62,6 +98,12 @@ class CVConfig:
     patience: int = 8
     learning_rate: float = 1e-3
     seed: int = 42
+    #: Models trained per fold, averaged before calibration. At 1 a fold's score
+    #: is a single seed draw, and the measured spread of that draw is sd 0.0106
+    #: — larger than most differences this project decides on. Averaging n draws
+    #: shrinks it by ~sqrt(n), and each model's own metrics are recorded so
+    #: seed variance and fold difficulty can finally be told apart.
+    n_models_per_fold: int = 1
     #: None disables augmentation. Run 1 of stage 2(a) trained without it while
     #: the incumbent it was compared against had it — one of the ways that
     #: comparison was not like-for-like.
@@ -157,53 +199,72 @@ def run_fold(
             with_tic_id=identify,
         )
 
-    model = build_cnn_branches(
-        model_cfg,
-        scalar_columns=list(metadata["scalar_columns"]),
-        mask_columns=list(metadata["mask_columns"]),
-    )
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(config.learning_rate),
-        loss="binary_crossentropy",
-        metrics=[tf.keras.metrics.AUC(curve="PR", name="pr_auc")],
-    )
-    callbacks: list[tf.keras.callbacks.Callback] = [
-        # AUC-PR rather than loss: the ExoMiner papers stop on it, and it
-        # is the metric that tracks the minority class we care about.
-        tf.keras.callbacks.EarlyStopping(
-            monitor="val_pr_auc",
-            mode="max",
-            patience=config.patience,
-            restore_best_weights=True,
+    def train_one(index: int) -> _MemberRun:
+        """Fit one model and return its val and test scores, plus their labels."""
+        # A distinct init per model, so the n draws are actually independent —
+        # otherwise averaging them buys nothing. The stream's own shuffle and
+        # augmentation seeds stay pinned to config.seed, so the data order is
+        # identical across models and only the weights differ.
+        tf.keras.utils.set_random_seed(config.seed * 1_000 + index)
+        model = build_cnn_branches(
+            model_cfg,
+            scalar_columns=list(metadata["scalar_columns"]),
+            mask_columns=list(metadata["mask_columns"]),
         )
-    ]
-    ckpt_path = None
-    if fold_dir is not None:
-        fold_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_path = fold_dir / CHECKPOINT_NAME
-        callbacks.append(
-            tf.keras.callbacks.ModelCheckpoint(
-                filepath=str(ckpt_path), monitor="val_pr_auc", mode="max", save_best_only=True
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(config.learning_rate),
+            loss="binary_crossentropy",
+            metrics=[tf.keras.metrics.AUC(curve="PR", name="pr_auc")],
+        )
+        callbacks: list[tf.keras.callbacks.Callback] = [
+            # AUC-PR rather than loss: the ExoMiner papers stop on it, and it
+            # is the metric that tracks the minority class we care about.
+            tf.keras.callbacks.EarlyStopping(
+                monitor="val_pr_auc",
+                mode="max",
+                patience=config.patience,
+                restore_best_weights=True,
             )
+        ]
+        ckpt_path = None
+        if fold_dir is not None:
+            fold_dir.mkdir(parents=True, exist_ok=True)
+            ckpt_path = fold_dir / _checkpoint_name(index, config.n_models_per_fold)
+            callbacks.append(
+                tf.keras.callbacks.ModelCheckpoint(
+                    filepath=str(ckpt_path), monitor="val_pr_auc", mode="max", save_best_only=True
+                )
+            )
+
+        model.fit(
+            stream(Split.TRAIN, shuffle=True),
+            validation_data=stream(Split.VAL, shuffle=False),
+            epochs=config.epochs,
+            callbacks=callbacks,
+            verbose=0,
         )
+        if ckpt_path is not None:
+            # In-memory weights after fit() are not guaranteed to match the file
+            # (measured drift up to 0.31 per example on cebb0fe6). Every metric
+            # and calibrator below describes the checkpoint.
+            model = tf.keras.models.load_model(str(ckpt_path), compile=False)
 
-    model.fit(
-        stream(Split.TRAIN, shuffle=True),
-        validation_data=stream(Split.VAL, shuffle=False),
-        epochs=config.epochs,
-        callbacks=callbacks,
-        verbose=0,
-    )
-    if ckpt_path is not None:
-        # In-memory weights after fit() are not guaranteed to match the file
-        # (measured drift up to 0.31 per example on cebb0fe6). Every metric and
-        # calibrator below describes the checkpoint.
-        model = tf.keras.models.load_model(str(ckpt_path), compile=False)
+        val_scores, val_labels, _ = _predict(model, stream(Split.VAL, shuffle=False, identify=True))
+        test_scores, test_labels, test_tics = _predict(
+            model, stream(Split.TEST, shuffle=False, identify=True)
+        )
+        return _MemberRun(val_scores, val_labels, test_scores, test_labels, test_tics)
 
-    val_scores, val_labels, _ = _predict(model, stream(Split.VAL, shuffle=False, identify=True))
-    test_scores, test_labels, test_tics = _predict(
-        model, stream(Split.TEST, shuffle=False, identify=True)
-    )
+    runs = [train_one(i) for i in range(max(1, config.n_models_per_fold))]
+    val_labels, test_labels, test_tics = runs[0].val_labels, runs[0].test_labels, runs[0].test_tics
+    # Averaged before calibration, so the Platt fit describes the ensemble that
+    # actually ships rather than one of its members.
+    val_scores = np.mean([r.val_scores for r in runs], axis=0)
+    test_scores = np.mean([r.test_scores for r in runs], axis=0)
+    # Each member's own test AUC, which is what makes seed variance measurable
+    # separately from fold difficulty.
+    per_model = [float(classification_metrics(test_labels, r.test_scores).roc_auc) for r in runs]
+
     calibrator = PlattScaler.from_validation(val_scores, val_labels)
     calibrated = calibrator.predict(test_scores)
     if fold_dir is not None:
@@ -239,6 +300,10 @@ def run_fold(
         "test_brier": metrics.brier,
         "test_ece": float(expected_calibration_error(test_labels, calibrated)),
         "n_test": len(test_labels),
+        # Uncalibrated, per member. The spread across these *within* a fold is
+        # seed variance; the spread of fold means across folds is fold
+        # difficulty. The reported ± has always conflated the two.
+        "model_roc_auc": per_model,
     }, predictions
 
 
@@ -314,13 +379,14 @@ def run_cv(
             metrics["n_test"],
         )
 
-    summary = {
+    summary: dict[str, Any] = {
         key: {
             "mean": float(np.mean([r[key] for r in rows])),
             "std": float(np.std([r[key] for r in rows])),
         }
         for key in SUMMARY_KEYS
     }
+    summary["variance"] = _variance_decomposition(rows)
 
     # Every row is tested exactly once across folds, so this is a full
     # out-of-fold prediction set — what the observation-bias metric reads.

@@ -93,6 +93,43 @@ def test_the_checkpoint_reloads_without_disabling_keras_safe_mode(shard_dir, tmp
     assert model.count_params() > 0
 
 
+def test_an_ensemble_fold_writes_every_member_and_averages_them(shard_dir, tmp_path):
+    """At one model per fold the fold's score is a single seed draw, and the
+    measured spread of that draw is sd 0.0106 — larger than most differences
+    this project decides on."""
+    out = tmp_path / "cv"
+    payload = run_cv(
+        shard_dir,
+        out,
+        config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1, n_models_per_fold=2),
+    )
+    for fold in range(2):
+        members = sorted((out / f"fold_{fold}").glob(f"model_*_{CHECKPOINT_NAME}"))
+        assert len(members) == 2, "each member needs its own checkpoint"
+    assert all(len(row["model_roc_auc"]) == 2 for row in payload["folds"])
+
+
+def test_the_summary_separates_seed_variance_from_fold_difficulty(shard_dir, tmp_path):
+    """The reported ± has always been the spread of fold means within one run,
+    read as the run's repeatability. They are different quantities."""
+    payload = run_cv(
+        shard_dir,
+        tmp_path / "cv",
+        config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1, n_models_per_fold=2),
+    )
+    variance = payload["summary"]["variance"]
+    assert variance["n_models_per_fold"] == 2
+    assert variance["seed_sd"] is not None and variance["seed_sd"] >= 0.0
+    assert variance["fold_sd"] is not None
+
+
+def test_seed_variance_is_unmeasurable_from_a_single_draw_per_fold(shard_dir, tmp_path):
+    payload = run_cv(
+        shard_dir, tmp_path / "cv", config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1)
+    )
+    assert payload["summary"]["variance"]["seed_sd"] is None
+
+
 def test_the_summary_carries_the_per_mission_block_the_gate_reads(shard_dir, tmp_path):
     payload = run_cv(
         shard_dir, tmp_path / "cv", config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1)

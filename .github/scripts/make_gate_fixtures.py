@@ -126,13 +126,35 @@ def _view_set(labels: pd.DataFrame) -> ViewSetArrays:
     return ViewSetArrays(views=views, scalars=scalars)
 
 
-def _cv_summary(auc: float, brier: float, ece: float) -> dict:
+def _cv_summary(auc: float, brier: float, ece: float, *, recall: float = 0.30) -> dict:
+    """A summary in the shape a current run writes.
+
+    The `per_mission` block is not optional decoration: the gate reads TESS from
+    it, and without it on both sides `evaluate_promotion` refuses the comparison
+    rather than falling back to pooled means over populations it cannot match.
+    A fixture without it would exercise the deprecated path instead of the one
+    that decides anything.
+    """
     return {
         "folds": [],
         "summary": {
             "test_roc_auc": {"mean": auc, "std": 0.005},
             "test_brier": {"mean": brier, "std": 0.003},
             "test_ece": {"mean": ece, "std": 0.003},
+        },
+        "per_mission": {
+            mission: {
+                "n": 200,
+                "n_positive": 100,
+                "roc_auc": auc,
+                "pr_auc": auc,
+                "brier": brier,
+                "ece": ece,
+                "recall_at_1pct_fpr": recall,
+                "recall_at_5pct_fpr": recall,
+                "recall_at_10pct_fpr": recall,
+            }
+            for mission in ("TESS", "Kepler", "K2", "all")
         },
     }
 
@@ -176,6 +198,14 @@ def main(out_dir: Path) -> None:
     incumbent = _cv_summary(auc=0.90, brier=0.10, ece=0.02)
     incumbent_path = cv_dir / "cv_summary.json"
     incumbent_path.write_text(json.dumps(incumbent))
+    # `promote()` refuses a run with nothing to serve, so the fixture carries
+    # per-fold artefacts. A metrics-only run is exactly what stage 2(a) run 1
+    # was: it would have promoted cleanly and failed later, at serve time.
+    for fold in range(2):
+        fold_dir = cv_dir / f"fold_{fold}"
+        fold_dir.mkdir(parents=True, exist_ok=True)
+        (fold_dir / "cnn_branches.keras").write_bytes(b"")
+        (fold_dir / "cnn_calibrator.joblib").write_bytes(b"")
     promote(models_dir, "incumbent", incumbent_path)
 
     better = _cv_summary(auc=0.93, brier=0.09, ece=0.02)

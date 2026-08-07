@@ -31,7 +31,9 @@ from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES
 BRANCH_SCALARS: dict[str, tuple[str, ...]] = {
     "global_view": (),
     "local_view": (),
-    "odd_view": ("odd_even_statistic",),
+    # `odd_even_statistic` qualifies the *pair*, so it is scoped to the contrast
+    # branch (CONTRAST_SCALARS) rather than to either half on its own.
+    "odd_view": (),
     "even_view": (),
     # `secondary_phase` is the phase the candidate secondary sits at, and it is
     # the one DV-adjacent scalar measured on all three missions — it was written
@@ -48,6 +50,20 @@ BRANCH_SCALARS: dict[str, tuple[str, ...]] = {
     "periodogram_view": (),
     "periodogram_masked_view": (),
 }
+
+#: Views that are the same measurement — phase-folded flux at LOCAL_BINS — and
+#: are meant to be compared against each other. They share one conv tower, so a
+#: depth difference the head reads between odd and even transits is a difference
+#: in the data and not partly a difference between two independently-learned
+#: sets of kernels. `centroid_view` has the same shape but carries a pixel shift
+#: in units of its own scatter, so it is not comparable and keeps its own tower.
+SHARED_LOCAL_VIEWS: tuple[str, ...] = ("local_view", "odd_view", "even_view", "secondary_view")
+#: The pair whose *difference* is the diagnostic. Fusion takes `odd - even`
+#: rather than the two embeddings: an eclipsing binary shows alternating depths,
+#: and a subtraction is only meaningful under tied weights.
+CONTRAST_PAIR: tuple[str, str] = ("odd_view", "even_view")
+#: Scoped onto the contrast branch rather than either half of the pair.
+CONTRAST_SCALARS: tuple[str, ...] = ("odd_even_statistic",)
 
 #: Scalars with no view of their own; one small dense tower each.
 SCALAR_BRANCHES: dict[str, tuple[str, ...]] = {
@@ -89,6 +105,28 @@ def _conv_tower(
         if x.shape[1] is not None and x.shape[1] >= pool_size * 2:
             x = layers.MaxPooling1D(pool_size, name=f"{name}_pool{block}")(x)
     return layers.GlobalAveragePooling1D(name=f"{name}_gap")(x)
+
+
+def _conv_tower_model(
+    input_shape: tuple[int, ...],
+    *,
+    blocks: int,
+    filters: int,
+    kernel_size: int,
+    pool_size: int,
+    name: str,
+) -> Model:
+    """The conv stack as a reusable `Model`, so `TimeDistributed` can tie weights."""
+    view = layers.Input(shape=input_shape, name=f"{name}_input")
+    encoded = _conv_tower(
+        view,
+        blocks=blocks,
+        filters=filters,
+        kernel_size=kernel_size,
+        pool_size=pool_size,
+        name=name,
+    )
+    return Model(view, encoded, name=name)
 
 
 def _branch(
@@ -136,6 +174,39 @@ class PresenceFlag(layers.Layer):
 
     def compute_output_shape(self, input_shape: tuple) -> tuple:
         return (input_shape[0], 1)
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class StackViews(layers.Layer):
+    """Stack same-shaped views on a new axis, for a `TimeDistributed` tower.
+
+    Registered rather than a `Lambda`, for the reason in `PresenceFlag`.
+    """
+
+    def call(self, views: list[tf.Tensor]) -> tf.Tensor:
+        return tf.stack(views, axis=1)
+
+    def compute_output_shape(self, input_shape: list[tuple]) -> tuple:
+        first = input_shape[0]
+        return (first[0], len(input_shape), *first[1:])
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class PickView(layers.Layer):
+    """One view's feature vector out of the shared tower's stacked output."""
+
+    def __init__(self, index: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.index = int(index)
+
+    def call(self, encoded: tf.Tensor) -> tf.Tensor:
+        return encoded[:, self.index, :]
+
+    def compute_output_shape(self, input_shape: tuple) -> tuple:
+        return (input_shape[0], input_shape[2])
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "index": self.index}
 
 
 @keras.saving.register_keras_serializable(package="exoplanet_hunter")
@@ -230,8 +301,53 @@ def build_cnn_branches(
             return None
         return PickColumns([index[n] for n in names], name=f"pick_{names[0]}")(scalar_in)
 
+    def _head(features: tf.Tensor, scoped: tf.Tensor | None, name: str) -> tf.Tensor:
+        if scoped is not None:
+            features = layers.Concatenate(name=f"{name}_with_scalars")([features, scoped])
+        return layers.Dense(branch_units, activation="relu", name=f"{name}_fc")(features)
+
     embeddings: list[tf.Tensor] = []
+
+    # One tower over the whole phase-folded-flux family. Four independent towers
+    # meant an odd-versus-even difference was partly a difference between two
+    # sets of kernels, which is the one comparison this branch exists to make.
+    shared = _conv_tower_model(
+        VIEW_SHAPES[SHARED_LOCAL_VIEWS[0]],
+        blocks=blocks,
+        filters=filters,
+        kernel_size=kernel_size,
+        pool_size=pool_size,
+        name="local_shared",
+    )
+    encoded = layers.TimeDistributed(shared, name="local_shared_td")(
+        StackViews(name="local_stack")([inputs[v] for v in SHARED_LOCAL_VIEWS])
+    )
+    features = {
+        view: PickView(i, name=f"{view}_features")(encoded)
+        for i, view in enumerate(SHARED_LOCAL_VIEWS)
+    }
+
+    for name in SHARED_LOCAL_VIEWS:
+        if name in CONTRAST_PAIR:
+            continue
+        head = _head(features[name], _slice(BRANCH_SCALARS.get(name, ())), name)
+        embeddings.append(_gated(head, inputs[name], name))
+
+    odd, even = CONTRAST_PAIR
+    contrast = _head(
+        layers.Subtract(name="odd_even_difference")([features[odd], features[even]]),
+        _slice(CONTRAST_SCALARS),
+        "odd_even",
+    )
+    # Both halves have to be measured for their difference to mean anything, so
+    # the contrast is gated on each in turn.
+    embeddings.append(
+        _gated(_gated(contrast, inputs[odd], f"{odd}_pair"), inputs[even], "odd_even")
+    )
+
     for name in VIEW_SHAPES:
+        if name in SHARED_LOCAL_VIEWS:
+            continue
         view = inputs[name]
         embedding = _branch(
             view,

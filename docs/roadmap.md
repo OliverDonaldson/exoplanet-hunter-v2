@@ -91,8 +91,26 @@ silently unmeasured, and is now neither.
 | **The incumbent had never been scored on the current view set**, so every stage-2 comparison ran against a 2026-07-19 baseline whose 4,818 rows predate K2, the DV scalars and the merge-collision fix | auditing which rows each `cv_summary.json` mean was computed over | `eval/scoring.py`, re-baselined set at `results/incumbent_rebaselined.parquet` |
 | **The TESS gate never actually engaged.** `_gate_slice` returns `None` for a summary without a `per_mission` block, and the live incumbent has none — so every stage-2 decision silently fell back to comparing pooled means over different populations | regenerating the gate's decision from the real artefacts | `_population_mismatch` refuses the unmatched pooled comparison in `validation/promotion.py` |
 
-Tests: **304 → 405** (373 pipeline + 32 api). ruff and mypy clean on the
+| **Odd and even transits went through separate conv towers**, so the depth difference the head reads was partly a difference between two independently-learned sets of kernels — in the branch this model exists to make | reviewing ExoMiner's `build_joint_local_conv_branches` | one `TimeDistributed` tower over the flux family; fusion takes `odd - even` |
+| A fold's score was a single seed draw, and the `±` in every summary mixed seed variance with fold difficulty with no way to separate them | the 0.0106 noise floor having no home in the artefact | `CVConfig.n_models_per_fold`; `summary.variance` reports `seed_sd` and `fold_sd` apart |
+
+Tests: **304 → 428** (396 pipeline + 32 api). ruff and mypy clean on the
 pre-commit config. Seven data gates pass.
+
+### The shared flux tower — 2026-08-07
+
+`local_view`, `odd_view`, `even_view` and `secondary_view` are the same
+measurement at 201 bins, and they now pass through **one** conv tower
+(`SHARED_LOCAL_VIEWS`). Fusion takes `odd - even` rather than the two
+embeddings, gated on both halves being measured, and `odd_even_statistic` is
+scoped to that contrast rather than to either half alone.
+
+An eclipsing binary is the alternating-depth case; a subtraction only means
+anything under tied weights. The model drops **233,617 → 215,281 parameters**,
+which also removes the confound that muddied run 2: it is now *below* the
+incumbent's 227,641 rather than above it, so a Kepler gain can no longer be
+read as bought capacity. `centroid_view` is the same shape but carries a pixel
+shift in units of its own scatter, so it is not comparable and keeps its tower.
 
 ### Audit of the recorded numbers — 2026-08-07
 

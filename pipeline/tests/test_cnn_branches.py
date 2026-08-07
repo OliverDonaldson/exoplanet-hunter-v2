@@ -10,7 +10,13 @@ import tensorflow as tf
 
 from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES
 from exoplanet_hunter.datasets.viewset_tfrecords import FEATURE_COLUMNS, MASK_COLUMNS
-from exoplanet_hunter.models.cnn_branches import BRANCH_SCALARS, build_cnn_branches
+from exoplanet_hunter.models.cnn_branches import (
+    BRANCH_SCALARS,
+    CONTRAST_SCALARS,
+    SCALAR_BRANCHES,
+    SHARED_LOCAL_VIEWS,
+    build_cnn_branches,
+)
 
 SCALARS = list(FEATURE_COLUMNS)
 MASKS = list(MASK_COLUMNS)
@@ -154,12 +160,68 @@ def test_a_missing_gate_mask_raises_rather_than_ungating_the_branch():
 def test_every_declared_scalar_is_read_by_some_branch():
     """`secondary_phase` was written to every shard, normalised, and read by
     nothing — and it is the only DV-adjacent scalar present on all three
-    missions. Two separate literals with nothing tying them together."""
-    from exoplanet_hunter.models.cnn_branches import SCALAR_BRANCHES
-
+    missions. Separate literals with nothing tying them together."""
     consumed = {c for names in BRANCH_SCALARS.values() for c in names}
     consumed |= {c for names in SCALAR_BRANCHES.values() for c in names}
+    consumed |= set(CONTRAST_SCALARS)
     assert set(FEATURE_COLUMNS) == consumed
+
+
+def test_the_checkpoint_reloads_without_waiving_safe_mode(model, tmp_path):
+    """Every custom layer must be a registered serialisable, not a `Lambda`.
+    Gating once used a `Lambda` and the checkpoint could only be loaded with
+    `safe_mode=False` — on the artefact that gets promoted and served."""
+    batch = make_batch(seed=21)
+    before = model(batch, training=False).numpy()
+
+    path = tmp_path / "branches.keras"
+    model.save(path)
+    reloaded = tf.keras.models.load_model(path, compile=False)
+
+    np.testing.assert_allclose(before, reloaded(batch, training=False).numpy(), rtol=1e-6)
+
+
+# ------------------------------------------------- the shared local tower --
+
+
+def test_the_flux_family_passes_through_one_set_of_weights(model):
+    """Four independent towers made an odd-versus-even difference partly a
+    difference between two sets of kernels — the one comparison this branch
+    exists to make. Identical inputs must now give identical features."""
+    batch = make_batch(seed=11)
+    same = batch["local_view"].copy()
+    for view in SHARED_LOCAL_VIEWS:
+        batch[view] = same.copy()
+
+    probe = tf.keras.Model(
+        model.inputs, [model.get_layer(f"{v}_features").output for v in SHARED_LOCAL_VIEWS]
+    )
+    features = [f.numpy() for f in probe(batch, training=False)]
+    for other in features[1:]:
+        np.testing.assert_allclose(features[0], other, rtol=1e-6, atol=1e-6)
+
+
+def test_identical_odd_and_even_transits_give_a_zero_contrast(model):
+    """An eclipsing binary is the alternating-depth case; a planet is not. The
+    difference can only be read as physical if the weights are tied."""
+    batch = make_batch(seed=12)
+    batch["even_view"] = batch["odd_view"].copy()
+    difference = tf.keras.Model(model.inputs, model.get_layer("odd_even_difference").output)
+    assert np.abs(difference(batch, training=False).numpy()).max() == pytest.approx(0.0, abs=1e-6)
+
+    batch["even_view"] = batch["even_view"] * 0.5
+    assert np.abs(difference(batch, training=False).numpy()).max() > 0
+
+
+@pytest.mark.parametrize("absent", ["odd_view", "even_view"])
+def test_the_contrast_needs_both_halves_measured(model, absent):
+    batch = make_batch(seed=13)
+    probe = tf.keras.Model(model.inputs, model.get_layer("odd_even_gate").output)
+    assert np.abs(probe(batch, training=False).numpy()).sum() > 0
+
+    batch[absent] = batch[absent].copy()
+    batch[absent][..., -1] = 0.0
+    assert np.abs(probe(batch, training=False).numpy()).sum() == pytest.approx(0.0)
 
 
 def test_every_branch_scalar_name_exists_in_the_feature_vector():
