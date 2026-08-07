@@ -129,7 +129,31 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 no_implicit_optional = true
 check_untyped_defs = true
-ignore_missing_imports = true     # astronomy libs lack stubs
+# Deliberately no global `ignore_missing_imports`. It was global until
+# 2026-08-08, which also silenced *first-party* unresolvable imports: a typo'd
+# `exoplanet_hunter.datasets.viewset_augmnet` type-checked clean as `Any`
+# instead of erroring. That is this project's defining failure mode — a check
+# returning a plausible answer instead of failing — sitting in the tool config.
+# The stub gaps are real, so they are named below instead.
+
+[[tool.mypy.overrides]]
+# Third-party packages shipping neither stubs nor a py.typed marker. Measured
+# 2026-08-08: removing this block yields 76 `import-untyped` errors across 43
+# files, every one from a module listed here and none first-party. Prefer a
+# stub package (see pandas-stubs, types-requests, types-tqdm) when one exists.
+module = [
+    "tensorflow.*",
+    "keras.*",
+    "lightkurve.*",
+    "sklearn.*",
+    "scipy.*",
+    "astropy.*",
+    "astroquery.*",
+    "joblib.*",
+    "triceratops.*",
+    "transitleastsquares.*",
+]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "exoplanet_hunter.*"

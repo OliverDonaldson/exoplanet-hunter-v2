@@ -60,7 +60,7 @@ in HANDOVER.md.
 | **2(a)** per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **2(b)** unfolded-flux branch | **built, unmeasured** | the branch has shipped in every run since run 1. What is left is *attribution*, not construction — and its criterion needs the candidate view set rebuilt |
 | **2(c)** trend + periodogram | **built, unmeasured** | same: `trend_view_fc`, `periodogram_view_fc`, `periodogram_masked_view_fc` are all in run 2's saved config |
-| **C** leakage key + candidate rebuild | `_cache_path` **done** 2026-08-08; rebuild not started | the ephemeris key invalidated 10,849 cached targets (401 MB), so the rebuild is now cold — budget well past the old ~2 h; unblocks the control arm |
+| **C** leakage key + candidate rebuild | `_cache_path` **done** 2026-08-08; rebuild not started | the ephemeris key invalidated 5,426 cached targets (309 MB) at 2001/201, so the rebuild is now cold — budget well past the old ~2 h; unblocks the control arm |
 | **D** branch attribution | not started | absorbs 2(b), 2(c) and the training half of stage 4's occlusion |
 | **3** labels and negatives | not started, **moved ahead of 2(d)** | owns the observation-selection problem; its interventions change the training distribution, so 2(d) measured before it would need re-measuring |
 | **2(d)** difference-image branch | not started | the only genuine *build* left in stage 2; needs the 11–17 px stamps re-gridded to a fixed size |
@@ -761,13 +761,23 @@ but not run 2's own promote/reject decision, and it is wasted work if the
 resolution hypothesis is falsified.
 
 *(Superseded 2026-08-08: the two-hour figure assumed a cold cache and was then
-overtaken twice. `data/interim/viewset/g2001l201` had accumulated **10,849
-targets, 401 MB** at the right resolution, which would have made the rebuild
-mostly cache hits — but the `_cache_path` ephemeris key renames every entry, so
-none of them can be found and the build re-derives from the light curves.
-Budget a cold rebuild of all 5,347 candidates. The 401 MB under the old
-`{mission}_{tic}.npz` naming is now orphaned and can be deleted; nothing reads
-it.)*
+overtaken twice. `data/interim/viewset/g2001l201` had accumulated **5,426
+targets, 309 MB** at 2001/201, which would have made the rebuild mostly cache
+hits — but the `_cache_path` ephemeris key renames every entry, so none of them
+can be found and the build re-derives from the light curves. Budget a cold
+rebuild of all 5,347 candidates.
+
+Two orphaned caches, for two different reasons — measured 2026-08-08, do not
+conflate them:
+
+| path | targets | size | resolution | orphaned by |
+|---|---:|---:|---|---|
+| `data/interim/viewset/g2001l201/` | 5,426 | 309 MB | 2001/201 | the `_cache_path` ephemeris key — **a cost this change introduced** |
+| `data/interim/viewset/*.npz` (loose) | 5,423 | 92 MB | 301/31 | superseded resolution, already dead before the key change |
+
+401 MB total is reclaimable, but only the 309 MB is attributable to the
+ephemeris key. Both are under the old `{mission}_{tic}.npz` naming and nothing
+reads either.)*
 
 **Stage 2(b)'s success criterion, re-specified 2026-08-05.** It read
 *"corr(prob, n_transits) must leave zero and the 26.4% control-arm host-pass
