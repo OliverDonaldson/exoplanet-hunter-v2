@@ -34,6 +34,7 @@ from exoplanet_hunter.validation import (
     check_view_set,
     check_views,
     label_catalogue_schema,
+    record_quarantine,
 )
 
 log = get_logger(__name__)
@@ -180,9 +181,14 @@ def main() -> None:
                 pd.read_parquet(args.labels),
             )
             if len(flips):
+                # Recorded, not merely reported. This logged "quarantined" while
+                # writing nothing and nothing applying it, so under the 2% flip
+                # threshold every flipped row stayed eligible for training.
+                quarantine = record_quarantine(flips, args.labels.parent)
                 log.warning(
-                    "[gate] %d label flips quarantined (since-confirmed holdout):\n%s",
+                    "[gate] %d label flips quarantined (%d held out of training in total):\n%s",
                     len(flips),
+                    len(quarantine),
                     flips.to_string(index=False),
                 )
 

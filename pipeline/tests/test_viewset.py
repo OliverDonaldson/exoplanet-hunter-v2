@@ -1,8 +1,13 @@
-"""The 301/31 view set.
+"""The per-diagnostic view set.
 
 The normalisation tests are the important ones: scaling each comparison view by
 its own depth sends odd, even and secondary all to -1, which looks reasonable
 and destroys the three diagnostics they exist to provide.
+
+Shape assertions read the bin counts from the module rather than restating them.
+A test that repeats a constant fails when the constant changes deliberately,
+which trains you to edit tests to match code — the opposite of what it is for.
+What is worth pinning is which view gets which count.
 """
 
 from __future__ import annotations
@@ -10,7 +15,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from exoplanet_hunter.preprocess.viewset import build_view_set
+from exoplanet_hunter.preprocess.viewset import (
+    GLOBAL_BINS,
+    LOCAL_BINS,
+    MAX_TRANSITS,
+    build_view_set,
+)
 
 PERIOD = 4.0
 T0 = 2.0
@@ -71,11 +81,11 @@ def build(lc, **kwargs):
 
 def test_view_shapes_and_channels():
     vs = build(make_lc())
-    assert vs.global_view.shape == (301, 3)
+    assert vs.global_view.shape == (GLOBAL_BINS, 3)
     for name in ("local_view", "odd_view", "even_view", "secondary_view"):
-        assert getattr(vs, name).shape == (31, 3)
-    assert vs.trend_view.shape == (301, 3)
-    assert vs.unfolded_view.shape == (20, 31, 3)
+        assert getattr(vs, name).shape == (LOCAL_BINS, 3)
+    assert vs.trend_view.shape == (GLOBAL_BINS, 3)
+    assert vs.unfolded_view.shape == (MAX_TRANSITS, LOCAL_BINS, 3)
 
 
 def test_every_channel_is_finite():
@@ -195,7 +205,7 @@ def test_gap_view_measures_within_segment_holes_not_the_baseline():
     keep = ~((phase > 0.20) & (phase < 0.25))
     vs = build(FakeLightCurve(t[keep], lc.flux.value[keep]))
     gap = vs.gap_view[:, 0]
-    assert vs.gap_view.shape == (301, 2)
+    assert vs.gap_view.shape == (GLOBAL_BINS, 2)
     assert gap.max() > 0.5  # the punched phase
     assert np.median(gap) < 0.1  # everywhere else is intact
     assert (gap >= 0).all() and (gap <= 1).all()
@@ -225,7 +235,7 @@ def test_masking_the_transit_changes_the_periodogram():
 
 def test_centroid_branch_absent_without_a_raw_curve():
     vs = build(make_lc())
-    assert vs.centroid_view.shape == (31, 3)
+    assert vs.centroid_view.shape == (LOCAL_BINS, 3)
     assert vs.centroid_view[:, 2].sum() == 0  # present == 0: absent, not flat
     assert vs.centroid_view.sum() == pytest.approx(0.0)
 

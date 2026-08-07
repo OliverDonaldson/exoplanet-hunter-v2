@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from exoplanet_hunter.datasets.viewset_augment import AugmentConfig
 from exoplanet_hunter.training.train_branches import CVConfig, run_cv
 from exoplanet_hunter.utils import get_logger, set_global_seed
 
@@ -26,6 +27,21 @@ class _Config:
 
     def __init__(self, data: dict) -> None:
         self.__dict__.update(data)
+
+
+def _augment_config(raw: dict) -> AugmentConfig | None:
+    """The declared augmentation, or None when the config disables it.
+
+    A config with no `augmentation` block gets the defaults rather than nothing:
+    silently training without augmentation is what made run 1's comparison
+    against the incumbent unlike-for-like.
+    """
+    declared = raw.get("augmentation", {})
+    if declared.get("enabled", True) is False:
+        return None
+    return AugmentConfig(
+        **{k: float(v) for k, v in declared.items() if k in AugmentConfig.__dataclass_fields__}
+    )
 
 
 def main() -> None:
@@ -52,6 +68,7 @@ def main() -> None:
         patience=int(training.get("patience", 8)),
         learning_rate=float(training.get("learning_rate", 1e-3)),
         seed=args.seed,
+        augment=_augment_config(raw),
     )
     log.info("[train-branches] %s -> %s  (%s)", args.shards, args.out, config)
     run_cv(args.shards, args.out, config=config, model_cfg=_Config(raw))

@@ -178,6 +178,11 @@ can still check out. The stricter `-w` (workspace-only) variant would also
 prune superseded dataset versions and break `git checkout <old> && dvc
 pull`; only use it deliberately, from a clean, fully-pulled checkout.
 
+**Fetch all branches first.** `--all-commits` reads *local* git history, so a
+pointer that exists only on an unfetched remote branch looks like debris and
+its objects are deleted from the bucket. Run `git fetch --all` immediately
+before, from a checkout that tracks every remote you push to.
+
 ## Docker?
 
 Not needed for anything local. The Dockerfiles exist for the *deployed*

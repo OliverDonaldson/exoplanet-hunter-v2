@@ -1,6 +1,6 @@
-"""Per-diagnostic view set at 301/31 bins (stage 1 of the ExoMiner rebuild).
+"""Per-diagnostic view set (stage 2 of the ExoMiner rebuild).
 
-Separate from `views.py`, whose 2001/201 pair feeds the live model.
+Separate from `views.py`, whose global/local pair feeds the live model.
 
 Most views are `(bins, 3)` = `[flux, scatter, present]`: flux is the per-bin
 median normalised so the primary's depth is -1, scatter the per-bin MAD on the
@@ -20,8 +20,13 @@ from exoplanet_hunter.preprocess.fold import bin_profile
 if TYPE_CHECKING:
     import lightkurve as lk
 
-GLOBAL_BINS = 301
-LOCAL_BINS = 31
+#: The incumbent's resolution, restored 2026-08-06. Stage 2(a) run 1 built these
+#: at ExoMiner's 301/31 — on views ours oversample ~7x — and lost 0.0348 AUC on
+#: Kepler, monotonically in transits caught, while TESS stayed level. That is the
+#: signature of a bin count too coarse to hold what a four-year baseline
+#: resolves. `docs/roadmap.md` carries the pre-registered reading of the re-run.
+GLOBAL_BINS = 2001
+LOCAL_BINS = 201
 LOCAL_DURATIONS = 3.0
 MAX_TRANSITS = 20
 PERIODOGRAM_BINS = 256
@@ -157,16 +162,19 @@ def _unfolded(
     first, last = int(epochs.min()), int(epochs.max())
     expected = last - first + 1
 
-    observed = 0
-    for epoch in range(first, last + 1):
+    # Which epoch each cadence falls in, if any — one pass over `time` rather
+    # than one pass per epoch. A 4-year Kepler baseline at P=0.33 d gives 4,455
+    # epochs, and scanning all 72,000 cadences for each took 0.20 s against
+    # 0.0009 s here. Only the first `max_transits` epochs need binning at all.
+    in_transit = np.abs(time - (t0 + epochs * period)) <= half_days
+    caught = np.unique(epochs[in_transit])
+    observed = int(caught.size)
+
+    for slot, epoch in enumerate(caught[:max_transits]):
         centre = t0 + epoch * period
-        window = np.abs(time - centre) <= half_days
-        if not window.any():
-            continue
-        if observed < max_transits:
-            offset = (time[window] - centre) / (2.0 * half_days)  # -0.5 .. 0.5
-            stack[observed] = _binned_view(offset, flux[window], LOCAL_BINS, depth=depth)
-        observed += 1
+        window = in_transit & (epochs == epoch)
+        offset = (time[window] - centre) / (2.0 * half_days)  # -0.5 .. 0.5
+        stack[slot] = _binned_view(offset, flux[window], LOCAL_BINS, depth=depth)
     return stack, observed, expected
 
 

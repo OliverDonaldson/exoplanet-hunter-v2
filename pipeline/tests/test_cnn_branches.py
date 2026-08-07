@@ -45,6 +45,22 @@ def test_output_is_a_probability(model):
     assert ((out >= 0) & (out <= 1)).all()
 
 
+def test_scoring_is_deterministic_but_mc_dropout_still_works(model):
+    """Head dropout must follow the call-time flag rather than being wired on.
+
+    Built with `training=True` — as this model was until 2026-08-07 — every
+    score is a stochastic draw, so a fold's AUC becomes a sample rather than a
+    measurement. It does not even buy MC-dropout: `mc_dropout_predict` passes
+    `training=True` itself and documents `training=None` as the contract.
+    """
+    batch = make_batch()
+    fixed = [model(batch, training=False).numpy() for _ in range(3)]
+    assert all(np.array_equal(fixed[0], other) for other in fixed[1:])
+
+    sampled = [model(batch, training=True).numpy() for _ in range(6)]
+    assert any(not np.array_equal(sampled[0], other) for other in sampled[1:])
+
+
 @pytest.mark.parametrize("view", ["centroid_view", "trend_view", "unfolded_view"])
 def test_an_absent_branch_contributes_exactly_zero(model, view):
     # The whole point of the presence channel: a branch with nothing measured
@@ -99,6 +115,51 @@ def test_masks_change_the_prediction(model):
     with_data = model(batch, training=False).numpy()
     batch["masks"] = np.zeros_like(batch["masks"])
     assert not np.allclose(with_data, model(batch, training=False).numpy())
+
+
+def test_a_scalar_only_branch_contributes_nothing_when_its_report_is_absent():
+    """`detection` and `ghost` are fed entirely from the DV report, which is
+    absent on every Kepler and K2 row. Ungated they emit relu(bias) — a learned
+    constant — into fusion for 56% of the training set."""
+    batch = make_batch(seed=3)
+    batch["masks"] = np.zeros((4, len(MASKS)), dtype=np.float32)
+    gated = build_cnn_branches(SimpleNamespace(), scalar_columns=SCALARS, mask_columns=MASKS)
+
+    layer_out = {
+        name: gated.get_layer(f"{name}_gate")(
+            [gated.get_layer(f"{name}_fc").output, gated.get_layer(f"{name}_mask").output]
+        )
+        for name in ("detection", "ghost")
+    }
+    probe = tf.keras.Model(gated.inputs, layer_out)
+    for name, values in probe(batch, training=False).items():
+        assert np.abs(values.numpy()).max() == 0.0, f"{name} leaked a bias on an absent report"
+
+
+def test_a_declared_branch_scalar_missing_from_the_shard_set_raises():
+    """Skipping it silently leaves the branch with no scalars and a plausible AUC."""
+    with pytest.raises(ValueError, match="declared on a branch but absent"):
+        build_cnn_branches(
+            SimpleNamespace(),
+            scalar_columns=[c for c in SCALARS if c != "odd_even_statistic"],
+            mask_columns=MASKS,
+        )
+
+
+def test_a_missing_gate_mask_raises_rather_than_ungating_the_branch():
+    with pytest.raises(ValueError, match="does not carry"):
+        build_cnn_branches(SimpleNamespace(), scalar_columns=SCALARS, mask_columns=["has_ruwe"])
+
+
+def test_every_declared_scalar_is_read_by_some_branch():
+    """`secondary_phase` was written to every shard, normalised, and read by
+    nothing — and it is the only DV-adjacent scalar present on all three
+    missions. Two separate literals with nothing tying them together."""
+    from exoplanet_hunter.models.cnn_branches import SCALAR_BRANCHES
+
+    consumed = {c for names in BRANCH_SCALARS.values() for c in names}
+    consumed |= {c for names in SCALAR_BRANCHES.values() for c in names}
+    assert set(FEATURE_COLUMNS) == consumed
 
 
 def test_every_branch_scalar_name_exists_in_the_feature_vector():

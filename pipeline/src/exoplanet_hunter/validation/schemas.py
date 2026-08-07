@@ -154,7 +154,7 @@ def check_views(views: ViewArrays, *, max_nan_frac: float = 0.5) -> list[str]:
 
 
 def check_view_set(arrays: object, *, max_dead_frac: float = 0.98) -> list[str]:
-    """Structural checks on the 301/31 view set; returns problems (empty = pass).
+    """Structural checks on the view set; returns problems (empty = pass).
 
     Shapes and label domain, plus two things the legacy `check_views` cannot
     express. A branch that is all-zero for nearly every row is a dead branch —

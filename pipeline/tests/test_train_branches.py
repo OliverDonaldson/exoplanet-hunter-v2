@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import json
 
+import joblib
 import numpy as np
 import pytest
+import tensorflow as tf
 
+from exoplanet_hunter.datasets.viewset_pipeline import Split
 from exoplanet_hunter.datasets.viewset_tfrecords import write_viewset_shards
-from exoplanet_hunter.training.train_branches import SUMMARY_KEYS, CVConfig, run_cv
+from exoplanet_hunter.training import train_branches
+from exoplanet_hunter.training.train_branches import (
+    BUNDLE_NAME,
+    CHECKPOINT_NAME,
+    SUMMARY_KEYS,
+    CVConfig,
+    run_cv,
+)
 from exoplanet_hunter.validation.promotion import evaluate_promotion
 
 
@@ -57,3 +67,58 @@ def test_metrics_are_finite_and_in_range(shard_dir, tmp_path):
         assert np.isfinite(fold["test_roc_auc"]) and 0.0 <= fold["test_roc_auc"] <= 1.0
         assert np.isfinite(fold["test_brier"]) and 0.0 <= fold["test_brier"] <= 1.0
         assert np.isfinite(fold["test_ece"]) and 0.0 <= fold["test_ece"] <= 1.0
+
+
+def test_every_fold_leaves_a_servable_artefact(shard_dir, tmp_path):
+    """`train.py` reloads its checkpoint before scoring ("score what ships");
+    this trainer wrote no checkpoint at all, so run 1 of stage 2(a) scored
+    weights that existed only in memory and left nothing to promote or serve."""
+    out = tmp_path / "cv"
+    run_cv(shard_dir, out, config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1))
+
+    for fold in range(2):
+        assert (out / f"fold_{fold}" / CHECKPOINT_NAME).is_file()
+        bundle = joblib.load(out / f"fold_{fold}" / BUNDLE_NAME)
+        assert {"calibrator", "platt_a", "platt_b", "scalar_constants"} <= set(bundle)
+
+
+def test_the_checkpoint_reloads_without_disabling_keras_safe_mode(shard_dir, tmp_path):
+    """A `Lambda` over a Python lambda needs `safe_mode=False` to deserialise,
+    which would make every promoted checkpoint unloadable without waiving a
+    safety check. The gating and column-picking layers are registered instead."""
+    out = tmp_path / "cv"
+    run_cv(shard_dir, out, config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1))
+
+    model = tf.keras.models.load_model(out / "fold_0" / CHECKPOINT_NAME, compile=False)
+    assert model.count_params() > 0
+
+
+def test_the_summary_carries_the_per_mission_block_the_gate_reads(shard_dir, tmp_path):
+    payload = run_cv(
+        shard_dir, tmp_path / "cv", config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1)
+    )
+    assert "all" in payload["per_mission"]
+    assert {"roc_auc", "brier", "ece", "recall_at_1pct_fpr", "n"} <= set(
+        payload["per_mission"]["all"]
+    )
+
+
+def test_augmentation_is_training_only(shard_dir, tmp_path, monkeypatch):
+    """A validation or test row must be scored as it is; augmenting it would
+    make the early-stopping signal and every reported metric noise."""
+    splits_augmented = []
+    original = train_branches.make_viewset_dataset
+
+    def spy(*args, augment=None, split=None, **kwargs):
+        splits_augmented.append((split, augment is not None))
+        return original(*args, augment=augment, split=split, **kwargs)
+
+    monkeypatch.setattr(train_branches, "make_viewset_dataset", spy)
+    run_cv(
+        shard_dir, tmp_path / "cv", config=CVConfig(n_splits=2, epochs=1, batch_size=8, patience=1)
+    )
+
+    assert {augmented for split, augmented in splits_augmented if split is Split.TRAIN} == {True}
+    assert {augmented for split, augmented in splits_augmented if split is not Split.TRAIN} == {
+        False
+    }

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import keras
 import tensorflow as tf
 from tensorflow.keras import Model, layers
 
@@ -32,7 +33,10 @@ BRANCH_SCALARS: dict[str, tuple[str, ...]] = {
     "local_view": (),
     "odd_view": ("odd_even_statistic",),
     "even_view": (),
-    "secondary_view": ("weak_secondary_max_mes",),
+    # `secondary_phase` is the phase the candidate secondary sits at, and it is
+    # the one DV-adjacent scalar measured on all three missions — it was written
+    # to every shard and read by no branch until 2026-08-07.
+    "secondary_view": ("weak_secondary_max_mes", "secondary_phase"),
     "trend_view": (),
     "centroid_view": ("mean_sky_offset", "control_sky_offset", "ruwe"),
     "unfolded_view": (
@@ -55,6 +59,12 @@ SCALAR_BRANCHES: dict[str, tuple[str, ...]] = {
     ),
     "ghost": ("ghost_core_statistic", "ghost_halo_statistic"),
 }
+
+#: The mask column that vouches for each scalar-only branch. Both towers are fed
+#: entirely from the DV report, which is absent on 100% of Kepler and K2 rows and
+#: 12.8% of TESS — so without a gate they emit `relu(bias)`, a learned constant,
+#: into fusion for 56% of the training set.
+SCALAR_BRANCH_MASK: dict[str, str] = {"detection": "dv_usable", "ghost": "dv_usable"}
 
 
 def _conv_tower(
@@ -110,19 +120,69 @@ def _branch(
     return x
 
 
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class PresenceFlag(layers.Layer):
+    """1.0 when a view holds at least one measured bin, 0.0 when it holds none.
+
+    A registered layer rather than a `Lambda` over a Python lambda: Keras
+    refuses to deserialise the latter without `safe_mode=False`, which would
+    make every checkpoint unloadable without disabling a safety check — and the
+    checkpoint is the artefact that gets promoted and served.
+    """
+
+    def call(self, view: tf.Tensor) -> tf.Tensor:
+        bin_axes = list(range(1, len(view.shape) - 1))
+        return tf.cast(tf.reduce_max(view[..., -1], axis=bin_axes) > 0.0, tf.float32)[:, None]
+
+    def compute_output_shape(self, input_shape: tuple) -> tuple:
+        return (input_shape[0], 1)
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class PickColumns(layers.Layer):
+    """Gather a branch's scoped scalars out of the shared scalar vector."""
+
+    def __init__(self, indices: list[int], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.indices = list(indices)
+
+    def call(self, scalars: tf.Tensor) -> tf.Tensor:
+        return tf.gather(scalars, self.indices, axis=1)
+
+    def compute_output_shape(self, input_shape: tuple) -> tuple:
+        return (input_shape[0], len(self.indices))
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "indices": self.indices}
+
+
 def _gated(x: tf.Tensor, view: tf.Tensor, name: str) -> tf.Tensor:
     """Zero a branch's contribution when its view holds no measured bins.
 
     The presence channel is the last one on every view. A branch with nothing
     measured must contribute nothing, not a learned bias on a zero tensor.
     """
-    present = layers.Lambda(
-        lambda t: tf.cast(
-            tf.reduce_max(t[..., -1], axis=list(range(1, len(t.shape) - 1))) > 0.0, tf.float32
-        )[:, None],
-        name=f"{name}_present",
-    )(view)
+    present = PresenceFlag(name=f"{name}_present")(view)
     return layers.Multiply(name=f"{name}_gate")([x, present])
+
+
+def _mask_gated(
+    x: tf.Tensor, mask_in: tf.Tensor, mask_index: dict[str, int], column: str, name: str
+) -> tf.Tensor:
+    """Zero a scalar-only branch when the report its inputs come from is absent.
+
+    `_gated` reads a view's own presence channel. A scalar-only tower has no
+    view, so it is gated on the mask column that vouches for its inputs instead.
+    Same invariant, different source — a branch with nothing measured must
+    contribute nothing rather than a learned bias on a zero tensor.
+    """
+    if column not in mask_index:
+        raise ValueError(
+            f"branch {name!r} gates on mask column {column!r}, which this shard set "
+            f"does not carry (has: {sorted(mask_index)})"
+        )
+    flag = PickColumns([mask_index[column]], name=f"{name}_mask")(mask_in)
+    return layers.Multiply(name=f"{name}_gate")([x, flag])
 
 
 def build_cnn_branches(
@@ -157,12 +217,18 @@ def build_cnn_branches(
     inputs["masks"] = mask_in
 
     def _slice(names: tuple[str, ...]) -> tf.Tensor | None:
-        wanted = [index[n] for n in names if n in index]
-        if not wanted:
+        missing = [n for n in names if n not in index]
+        if missing:
+            # Skipping silently leaves the branch with no scalars at all and it
+            # still trains to a plausible AUC. BRANCH_SCALARS and the shard set's
+            # scalar_columns are separate literals; this is what ties them.
+            raise ValueError(
+                f"scalars {missing} are declared on a branch but absent from this shard set "
+                f"(has: {sorted(index)})"
+            )
+        if not names:
             return None
-        return layers.Lambda(lambda t: tf.gather(t, wanted, axis=1), name=f"pick_{names[0]}")(
-            scalar_in
-        )
+        return PickColumns([index[n] for n in names], name=f"pick_{names[0]}")(scalar_in)
 
     embeddings: list[tf.Tensor] = []
     for name in VIEW_SHAPES:
@@ -179,23 +245,29 @@ def build_cnn_branches(
         )
         embeddings.append(_gated(embedding, view, name))
 
+    mask_index = {name: i for i, name in enumerate(mask_columns)}
     for name, columns in SCALAR_BRANCHES.items():
         picked = _slice(columns)
         if picked is None:
             continue
-        embeddings.append(layers.Dense(branch_units, activation="relu", name=f"{name}_fc")(picked))
+        tower = layers.Dense(branch_units, activation="relu", name=f"{name}_fc")(picked)
+        embeddings.append(_mask_gated(tower, mask_in, mask_index, SCALAR_BRANCH_MASK[name], name))
 
-    # The masks ride into the head directly: the model needs to know a scalar
-    # branch was fed zeros because nothing was measured.
+    # The masks still ride into the head directly. The gate above removes the
+    # branch's contribution; this is what tells the head the removal happened,
+    # so "absent" and "measured, and it came out at the median" stay distinct.
     embeddings.append(mask_in)
 
     x = layers.Concatenate(name="fusion")(embeddings)
     for i, units in enumerate(head_units):
         x = layers.Dense(units, name=f"head_fc{i}")(x)
         x = layers.LeakyReLU(negative_slope=0.1, name=f"head_act{i}")(x)
-        # training=True keeps MC-dropout uncertainty working at inference, as
-        # the dual-view model does.
-        x = layers.Dropout(dropout, name=f"head_drop{i}")(x, training=True)
+        # training=None, so the call-time flag decides: deterministic under
+        # predict(), stochastic when `mc_dropout_predict` asks for training=True.
+        # This said training=True until 2026-08-07, with a comment claiming it
+        # matched the dual-view model — that model uses None, and
+        # `mc_dropout_predict` documents None as the contract it needs.
+        x = layers.Dropout(dropout, name=f"head_drop{i}")(x, training=None)
     output = layers.Dense(1, activation="sigmoid", name="prediction")(x)
 
     return Model(inputs=inputs, outputs=output, name="cnn_branches")

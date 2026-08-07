@@ -21,7 +21,7 @@ import pandas as pd
 
 from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES, ViewSetArrays
 from exoplanet_hunter.preprocess import clean_lightcurve, flatten_lightcurve
-from exoplanet_hunter.preprocess.viewset import build_view_set
+from exoplanet_hunter.preprocess.viewset import GLOBAL_BINS, LOCAL_BINS, build_view_set
 from exoplanet_hunter.utils import get_logger
 
 log = get_logger(__name__)
@@ -90,7 +90,14 @@ def _build_one(path: Path, row: pd.Series) -> tuple[object, dict] | None:
 
 
 def _cache_path(cache: Path, mission: str, tic: int) -> Path:
-    return cache / f"{mission.lower()}_{tic}.npz"
+    """Per-target cache, keyed by resolution.
+
+    The bin counts are baked into every cached array, so a rebuild at a new
+    resolution against an unkeyed cache reads back the old shapes. `validate()`
+    would catch it — but only after re-reading all 5,423 files, and only if the
+    whole cache is stale rather than half of it.
+    """
+    return cache / f"g{GLOBAL_BINS}l{LOCAL_BINS}" / f"{mission.lower()}_{tic}.npz"
 
 
 def main() -> None:
@@ -115,7 +122,8 @@ def main() -> None:
     catalogue = args.catalogue or (args.root / "data" / "labels" / "labels.parquet")
     out = args.out or (args.root / "data" / "processed")
     cache = args.cache or (args.root / "data" / "interim" / "viewset")
-    cache.mkdir(parents=True, exist_ok=True)
+    _cache_path(cache, "x", 0).parent.mkdir(parents=True, exist_ok=True)
+    log.info("[viewset] %d/%d bins, cache %s", GLOBAL_BINS, LOCAL_BINS, cache)
 
     df = pd.read_parquet(catalogue)
     # Candidates carry label -1. They cannot train, but scoring them is the only

@@ -15,9 +15,13 @@ the training path applies.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 _KEY = ["mission", "tic_id"]
+#: Where the cumulative quarantine lives, beside the catalogues it derives from.
+QUARANTINE_NAME = "quarantine.parquet"
 
 
 def diff_label_catalogues(old: pd.DataFrame, new: pd.DataFrame) -> pd.DataFrame:
@@ -65,3 +69,45 @@ def assert_refresh_safe(
             f"({flip_frac:.1%} > {max_flip_frac:.1%}) — refusing the refresh"
         )
     return flips
+
+
+def record_quarantine(flips: pd.DataFrame, labels_dir: Path) -> pd.DataFrame:
+    """Union this refresh's flips into the persisted quarantine, and return it.
+
+    Cumulative rather than last-refresh-only: a row that flipped three refreshes
+    ago is still not a training row, and deriving the set from the current pair
+    of catalogues alone would quietly readmit it.
+    """
+    path = labels_dir / QUARANTINE_NAME
+    previous = pd.read_parquet(path) if path.exists() else pd.DataFrame(columns=_KEY)
+    combined = (
+        pd.concat([previous[_KEY], flips[_KEY]], ignore_index=True)
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    combined.to_parquet(path, index=False)
+    return combined
+
+
+def load_quarantine(labels_dir: Path) -> set[tuple[str, int]]:
+    """The persisted quarantine, or an empty set if no refresh has flipped a label."""
+    path = labels_dir / QUARANTINE_NAME
+    return quarantine_tics(pd.read_parquet(path)) if path.exists() else set()
+
+
+def drop_quarantined(index: pd.DataFrame, quarantined: set[tuple[str, int]]) -> pd.DataFrame:
+    """Remove quarantined targets from a training index.
+
+    Applied at the top of cross-validation rather than per split: a flipped row
+    belongs to the since-confirmed holdout, which `eval_since_confirmed.py`
+    scores separately. Letting it into any fold both destroys that holdout and
+    leaks a future label into training.
+    """
+    if not quarantined:
+        return index
+    keep = [
+        (str(m), int(t)) not in quarantined
+        for m, t in zip(index["mission"], index["tic_id"], strict=True)
+    ]
+    return index.loc[keep].reset_index(drop=True)

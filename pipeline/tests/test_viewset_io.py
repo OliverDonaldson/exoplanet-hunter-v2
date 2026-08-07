@@ -75,10 +75,17 @@ def test_shards_round_trip_through_tensorflow(make_view_set, tmp_path):
     features, label = next(iter(dataset))
     for name, shape in VIEW_SHAPES.items():
         assert tuple(features[name].shape) == shape
-    np.testing.assert_allclose(features["global_view"].numpy(), arrays.views["global_view"][0])
-    assert float(label) == float(arrays.scalars["label"].iloc[0])
     assert features["scalars"].shape[0] == len(metadata["scalar_columns"])
     assert features["masks"].shape[0] == len(metadata["mask_columns"])
+
+    # Rows are permuted at write time to break the mission blocking, and the
+    # index is permuted with them. That the stream's row k is the index's row k
+    # is the invariant every prediction alignment depends on.
+    source = int(
+        arrays.scalars.index[arrays.scalars["tic_id"] == load_index(tmp_path)["tic_id"].iloc[0]][0]
+    )
+    np.testing.assert_allclose(features["global_view"].numpy(), arrays.views["global_view"][source])
+    assert float(label) == float(arrays.scalars["label"].iloc[source])
 
 
 def test_rewriting_a_smaller_set_leaves_no_stale_shards(make_view_set, tmp_path):
@@ -89,35 +96,41 @@ def test_rewriting_a_smaller_set_leaves_no_stale_shards(make_view_set, tmp_path)
     assert len(list(tmp_path.glob("viewset-*.tfrecord"))) == 2
 
 
-def test_nan_scalars_are_zeroed_and_flagged_by_the_mask(make_view_set, tmp_path):
+def test_nan_scalars_are_written_through_rather_than_filled(make_view_set, tmp_path):
+    """Filling at write time puts "never measured" at a real percentile of the
+    column once normalisation runs — a missing `odd_even_statistic` landed at
+    z=-0.679 against a real 5th percentile of -0.68, making the fill value a
+    near-perfect mission indicator. The reader imputes to the fitted centre."""
     arrays = make_view_set(n=4)
     arrays.scalars.loc[0, "ruwe"] = np.nan
     arrays.scalars.loc[0, "has_ruwe"] = False
+    unmeasured = int(arrays.scalars["tic_id"].iloc[0])
     metadata = write_viewset_shards(arrays, tmp_path, examples_per_shard=4)
+    assert metadata["scalar_encoding"] == "nan"
 
     import tensorflow as tf
 
     parse = make_parse_fn(metadata)
-    features, _ = next(
-        iter(tf.data.TFRecordDataset(str(next(tmp_path.glob("*.tfrecord")))).map(parse))
-    )
+    rows = list(tf.data.TFRecordDataset(str(next(tmp_path.glob("*.tfrecord")))).map(parse))
+    position = int(load_index(tmp_path).index[load_index(tmp_path)["tic_id"] == unmeasured][0])
+    features, _ = rows[position]
+
     ruwe_idx = metadata["scalar_columns"].index("ruwe")
     mask_idx = metadata["mask_columns"].index("has_ruwe")
-    # 0.0 is a value a dense layer can consume; the mask is what says it was
-    # never measured.
-    assert float(features["scalars"][ruwe_idx]) == pytest.approx(0.0)
+    assert np.isnan(float(features["scalars"][ruwe_idx]))
     assert float(features["masks"][mask_idx]) == pytest.approx(0.0)
 
 
-def test_absent_declared_scalars_are_reported_not_silently_dropped(tmp_path, make_view_set, caplog):
+def test_absent_declared_scalars_raise_rather_than_writing_a_shorter_vector(
+    tmp_path, make_view_set
+):
     # A merge that suffixes a column to _x/_y leaves the declared name absent.
     # Writing a shorter scalar vector and passing every gate is how the transit
-    # counts — the whole point of the unfolded branch — went missing.
+    # counts — the whole point of the unfolded branch — went missing. This
+    # warned rather than raised until 2026-08-07.
     arrays = make_view_set(n=4)
     arrays.scalars = arrays.scalars.rename(
         columns={"observed_transit_count": "observed_transit_count_x"}
     )
-    with caplog.at_level("WARNING"):
-        metadata = write_viewset_shards(arrays, tmp_path, examples_per_shard=4)
-    assert "observed_transit_count" not in metadata["scalar_columns"]
-    assert "observed_transit_count" in caplog.text
+    with pytest.raises(ValueError, match="observed_transit_count"):
+        write_viewset_shards(arrays, tmp_path, examples_per_shard=4)

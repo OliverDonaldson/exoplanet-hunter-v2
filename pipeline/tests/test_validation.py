@@ -19,12 +19,16 @@ from exoplanet_hunter.validation import (
     check_dv_archive,
     check_views,
     diff_label_catalogues,
+    drop_quarantined,
     evaluate_promotion,
     label_catalogue_schema,
     load_incumbent_summary,
+    load_quarantine,
+    paired_folds,
     promote,
     publishable_cv_dirs,
     quarantine_tics,
+    record_quarantine,
 )
 
 # ------------------------------------------------------------------ schemas --
@@ -266,6 +270,34 @@ def test_diff_and_quarantine_catch_since_confirmed_flip():
     assert quarantine_tics(flips) == {("TESS", 5)}
 
 
+def test_a_quarantined_target_is_removed_from_the_training_index(tmp_path):
+    """The guard's own docstring said `quarantine_tics` "is what the training
+    path applies" — and until 2026-08-07 nothing outside its test called it, so
+    under the 2% flip threshold a since-confirmed row trained happily."""
+    old, new = good_labels(), good_labels()
+    new.loc[4, ["label", "disposition"]] = [1, "CP"]
+    record_quarantine(diff_label_catalogues(old, new), tmp_path)
+
+    index = pd.DataFrame({"mission": ["TESS"] * 6, "tic_id": [1, 2, 3, 4, 5, 6]})
+    kept = drop_quarantined(index, load_quarantine(tmp_path))
+
+    assert 5 not in set(kept["tic_id"])
+    assert len(kept) == 5
+
+
+def test_the_quarantine_accumulates_across_refreshes(tmp_path):
+    """Deriving it from the current pair of catalogues alone would readmit a row
+    that flipped three refreshes ago."""
+    first, second = good_labels(), good_labels()
+    first.loc[4, ["label", "disposition"]] = [1, "CP"]
+    second.loc[3, ["label", "disposition"]] = [1, "CP"]
+
+    record_quarantine(diff_label_catalogues(good_labels(), first), tmp_path)
+    record_quarantine(diff_label_catalogues(good_labels(), second), tmp_path)
+
+    assert load_quarantine(tmp_path) == {("TESS", 5), ("TESS", 4)}
+
+
 def test_assert_refresh_safe_rejects_mass_flip():
     old = good_labels()
     new = good_labels()
@@ -459,48 +491,262 @@ def summary(auc: float, brier: float, ece: float | None = None) -> dict:
     return result
 
 
+def pooled(candidate: dict, incumbent: dict):
+    """A deliberately pooled comparison.
+
+    Summaries built by `summary()` carry no per_mission block, so the gate now
+    refuses them by default — the rows behind each mean are unknowable. These
+    tests exercise the calibration, reliability and shortlist guards that sit
+    behind that check, so they opt in explicitly.
+    """
+    return evaluate_promotion(candidate, incumbent, allow_unmatched_populations=True)
+
+
 def test_first_model_promotes():
     decision = evaluate_promotion(summary(0.90, 0.10), None)
     assert decision.promoted
 
 
 def test_better_auc_with_stable_calibration_promotes():
-    decision = evaluate_promotion(summary(0.93, 0.101), summary(0.92, 0.100))
+    decision = pooled(summary(0.93, 0.101), summary(0.92, 0.100))
     assert decision.promoted
 
 
 def test_worse_auc_rejected():
-    decision = evaluate_promotion(summary(0.91, 0.05), summary(0.92, 0.10))
+    decision = pooled(summary(0.91, 0.05), summary(0.92, 0.10))
     assert not decision.promoted
 
 
 def test_better_auc_but_degraded_calibration_rejected():
-    decision = evaluate_promotion(summary(0.93, 0.12), summary(0.92, 0.10))
+    decision = pooled(summary(0.93, 0.12), summary(0.92, 0.10))
     assert not decision.promoted
     assert any("calibration" in r for r in decision.reasons)
 
 
 def test_better_brier_but_degraded_ece_rejected():
-    decision = evaluate_promotion(summary(0.95, 0.09, ece=0.13), summary(0.87, 0.10, ece=0.03))
+    decision = pooled(summary(0.95, 0.09, ece=0.13), summary(0.87, 0.10, ece=0.03))
     assert not decision.promoted
     assert any("reliability" in r for r in decision.reasons)
 
 
 def test_ece_within_tolerance_promotes():
-    decision = evaluate_promotion(summary(0.93, 0.10, ece=0.035), summary(0.92, 0.10, ece=0.030))
+    decision = pooled(summary(0.93, 0.10, ece=0.035), summary(0.92, 0.10, ece=0.030))
     assert decision.promoted
 
 
 def test_missing_ece_skips_the_guard():
     # Summaries written before the test_ece field must still be comparable.
-    decision = evaluate_promotion(summary(0.93, 0.10, ece=0.13), summary(0.92, 0.10))
+    decision = pooled(summary(0.93, 0.10, ece=0.13), summary(0.92, 0.10))
     assert decision.promoted
     assert any("skipped" in r for r in decision.reasons)
+
+
+# ------------------------------------------- promotion: the gate population --
+
+
+def slices(**missions: dict) -> dict:
+    """A per_mission block; each mission takes auc/brier/ece/recall overrides."""
+    defaults = {"n": 2000, "roc_auc": 0.90, "brier": 0.10, "ece": 0.03, "recall_at_1pct_fpr": 0.30}
+    return {"per_mission": {m: {**defaults, **v} for m, v in missions.items()}}
+
+
+def gated(auc: float, brier: float, **rest) -> dict:
+    """A summary whose pooled means are deliberately hostile to the verdict, so
+    a test that passes can only have read the TESS slice."""
+    return summary(0.10, 0.90, ece=0.90) | slices(TESS={"roc_auc": auc, "brier": brier, **rest})
+
+
+def test_the_gate_reads_tess_not_the_aggregate():
+    decision = evaluate_promotion(gated(0.92, 0.10), gated(0.91, 0.10))
+    assert decision.promoted
+    assert any("gated on TESS" in r for r in decision.reasons)
+
+
+def test_a_tess_regression_rejects_however_good_the_aggregate_is():
+    candidate = summary(0.99, 0.01, ece=0.01) | slices(
+        TESS={"roc_auc": 0.90}, Kepler={"roc_auc": 0.999}
+    )
+    incumbent = summary(0.80, 0.20, ece=0.20) | slices(TESS={"roc_auc": 0.91})
+    decision = evaluate_promotion(candidate, incumbent)
+    assert not decision.promoted
+    assert any("does not beat" in r for r in decision.reasons)
+
+
+def test_the_aggregate_is_reported_and_never_gates():
+    """Kepler is drawn at exactly 1,250/1,250, so the pooled slice is weighted
+    by a sampling decision in a comparison whose consequences are all TESS."""
+    candidate = gated(0.92, 0.10) | slices(
+        TESS={"roc_auc": 0.92, "brier": 0.10}, all={"roc_auc": 0.80}
+    )
+    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, all={"roc_auc": 0.95})
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.promoted
+    assert any("never gates" in r for r in decision.reasons)
+
+
+def test_a_kepler_collapse_alarms_without_blocking():
+    candidate = gated(0.92, 0.10) | slices(
+        TESS={"roc_auc": 0.92, "brier": 0.10}, Kepler={"roc_auc": 0.90}
+    )
+    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, Kepler={"roc_auc": 0.99})
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.promoted
+    assert decision.alarms and "Kepler" in decision.alarms[0]
+    assert "written explanation" in decision.alarms[0]
+
+
+def test_a_k2_drop_inside_the_alarm_threshold_is_quiet():
+    candidate = gated(0.92, 0.10) | slices(
+        TESS={"roc_auc": 0.92, "brier": 0.10}, K2={"roc_auc": 0.90}
+    )
+    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, K2={"roc_auc": 0.915})
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.promoted and not decision.alarms
+
+
+# ---------------------------------------------- promotion: shortlist recall --
+
+
+def test_recall_at_1pct_fpr_can_reject_a_model_that_wins_on_auc():
+    """The stage 2(a) case: TESS AUC within noise, recall @1% FPR 0.307 -> 0.238.
+    AUC scores ranking everywhere; the shortlist lives at one threshold."""
+    candidate = gated(0.9100, 0.1194, recall_at_1pct_fpr=0.238)
+    incumbent = gated(0.9079, 0.1211, recall_at_1pct_fpr=0.307)
+    decision = evaluate_promotion(candidate, incumbent)
+    assert not decision.promoted
+    assert any("shortlist recall" in r for r in decision.reasons)
+
+
+def test_recall_within_tolerance_still_promotes():
+    decision = evaluate_promotion(
+        gated(0.92, 0.10, recall_at_1pct_fpr=0.295), gated(0.91, 0.10, recall_at_1pct_fpr=0.300)
+    )
+    assert decision.promoted
+
+
+def test_a_nan_metric_rejects_instead_of_sailing_through_every_guard():
+    """Every guard is an inequality and NaN loses all of them, so a degenerate
+    run — a single-class fold, an empty slice, a blown-up loss — would promote
+    itself with `ROC-AUC nan vs incumbent 0.9581`."""
+    decision = evaluate_promotion(summary(float("nan"), 0.0, ece=0.0), summary(0.9581, 0.079))
+    assert not decision.promoted
+    assert any("not measurable" in r for r in decision.reasons)
+
+
+def test_a_nan_on_the_incumbent_side_also_rejects():
+    """A corrupt registry entry must not be something a candidate slips past."""
+    decision = evaluate_promotion(summary(0.95, 0.08), summary(float("nan"), 0.079))
+    assert not decision.promoted
+    assert any("incumbent" in r for r in decision.reasons)
+
+
+@pytest.mark.parametrize("metric", ["roc_auc", "brier", "ece", "recall_at_1pct_fpr"])
+def test_a_nan_in_any_gating_metric_rejects(metric):
+    decision = evaluate_promotion(
+        gated(0.92, 0.10) | slices(TESS={"roc_auc": 0.92, "brier": 0.10, metric: float("nan")}),
+        gated(0.91, 0.10),
+    )
+    assert not decision.promoted
+    assert any("not measurable" in r for r in decision.reasons)
+
+
+def test_a_pooled_comparison_over_unmatched_rows_refuses_rather_than_guessing():
+    """The live incumbent `ca906040` carries no per_mission block, so the TESS
+    gate silently degraded to a pooled comparison — its 4,818 rows with zero K2
+    against a current run's 5,426 including 527. That reads as a model
+    difference and is partly a population difference."""
+    decision = evaluate_promotion(summary(0.93, 0.10, ece=0.03), summary(0.92, 0.10, ece=0.03))
+    assert not decision.promoted
+    assert any("predates the per_mission block" in r for r in decision.reasons)
+    assert any("rows behind each mean are unknown" in r for r in decision.reasons)
+    assert any("re-baseline the incumbent" in r for r in decision.reasons)
+
+
+def test_the_unmatched_population_refusal_can_be_overridden_deliberately():
+    decision = evaluate_promotion(
+        summary(0.93, 0.10, ece=0.03),
+        summary(0.92, 0.10, ece=0.03),
+        allow_unmatched_populations=True,
+    )
+    assert decision.promoted
+    assert any("recall guard skipped" in r for r in decision.reasons)
+
+
+def folds(*values: float, seed: int = 42, n_test: int = 100) -> dict:
+    """A summary carrying per-fold scores, so folds can be paired."""
+    return {
+        "folds": [{"test_roc_auc": v, "n_test": n_test} for v in values],
+        "run_config": {"seed": seed, "n_splits": len(values)},
+    }
+
+
+def test_folds_of_different_sizes_pair_but_are_flagged_inexact():
+    """Run 1 and run 2 differ here — three FFI rows arrived between the builds,
+    so fold k is not quite the same row set. Equal sizes cannot prove identical
+    membership, but unequal sizes disprove it."""
+    inexact = paired_folds(folds(0.94, 0.95), folds(0.90, 0.91, n_test=97))
+    assert inexact is not None and not inexact.exact
+    assert "approximately matched" in str(inexact)
+    assert paired_folds(folds(0.94, 0.95), folds(0.90, 0.91)).exact
+
+
+def test_a_candidate_that_wins_on_average_but_loses_most_folds_is_alarmed():
+    """Winning the mean while losing fold by fold is what winning on training
+    noise looks like — one lucky fold carries it."""
+    candidate = gated(0.92, 0.10) | folds(0.99, 0.88, 0.88, 0.88, 0.88)
+    incumbent = gated(0.91, 0.10) | folds(0.90, 0.90, 0.90, 0.90, 0.90)
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.promoted
+    assert any("won only 1/5 folds" in a for a in decision.alarms)
+
+
+def test_a_consistent_fold_by_fold_win_is_reported_without_alarm():
+    candidate = gated(0.92, 0.10) | folds(0.94, 0.96, 0.93, 0.97, 0.95)
+    incumbent = gated(0.91, 0.10) | folds(0.90, 0.91, 0.89, 0.92, 0.90)
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.promoted
+    assert any("won 5/5" in r for r in decision.reasons)
+    assert not decision.alarms
+
+
+def test_folds_from_a_different_split_are_not_paired():
+    """Pairing assumes fold k held out the same rows in both runs."""
+    assert paired_folds(folds(0.9, 0.9, 0.9), folds(0.8, 0.8, 0.8, 0.8)) is None
+    assert paired_folds(folds(0.9, 0.9, seed=1), folds(0.8, 0.8, seed=2)) is None
+
+
+def test_no_p_value_is_reported_where_it_could_never_reach_significance():
+    """Five pairs floor the two-sided Wilcoxon at p=0.0625; printing it invites
+    reading "not significant" as evidence of no effect."""
+    assert paired_folds(folds(*[0.99] * 5), folds(*[0.80] * 5)).p_value is None
+    assert paired_folds(folds(*[0.99] * 6), folds(*[0.80] * 6)).p_value is not None
+
+
+def test_a_mission_only_one_run_scored_alarms_but_does_not_block_the_tess_gate():
+    """Gating on TESS compares a mission both runs scored, so K2 appearing on
+    one side only is worth saying and not worth blocking on."""
+    candidate = gated(0.92, 0.10) | slices(TESS={"roc_auc": 0.92, "brier": 0.10}, K2={})
+    decision = evaluate_promotion(candidate, gated(0.91, 0.10))
+    assert decision.promoted
+    assert any("only the candidate scored K2" in a for a in decision.alarms)
+
+
+def write_folds(run_dir, n: int = 2, *, weights: bool = True, calibrator: bool = True):
+    """The artefacts a run needs to be servable, which is what promotion means."""
+    for i in range(n):
+        fold = run_dir / f"fold_{i}"
+        fold.mkdir(parents=True, exist_ok=True)
+        if weights:
+            (fold / "cnn_branches.keras").write_bytes(b"")
+        if calibrator:
+            (fold / "cnn_calibrator.joblib").write_bytes(b"")
+    return run_dir
 
 
 def test_registry_roundtrip(tmp_path):
     cv_dir = tmp_path / "cv" / "run123"
     cv_dir.mkdir(parents=True)
+    write_folds(cv_dir)
     summary_path = cv_dir / "cv_summary.json"
     summary_path.write_text(json.dumps(summary(0.92, 0.10)))
 
@@ -511,12 +757,29 @@ def test_registry_roundtrip(tmp_path):
     assert incumbent["summary"]["test_roc_auc"]["mean"] == 0.92
 
 
+@pytest.mark.parametrize("missing", ["weights", "calibrator", "folds"])
+def test_a_run_with_nothing_to_serve_cannot_be_promoted(tmp_path, missing):
+    """Stage 2(a) run 1 wrote no checkpoints at all — a metrics-only run that
+    would promote cleanly and fail at serve time, long after the decision."""
+    cv_dir = tmp_path / "cv" / "run123"
+    cv_dir.mkdir(parents=True)
+    if missing != "folds":
+        write_folds(cv_dir, weights=missing != "weights", calibrator=missing != "calibrator")
+    summary_path = cv_dir / "cv_summary.json"
+    summary_path.write_text(json.dumps(summary(0.92, 0.10)))
+
+    with pytest.raises(ValueError, match="serve"):
+        promote(tmp_path, "run123", summary_path)
+    assert load_incumbent_summary(tmp_path) is None
+
+
 # ------------------------------------------------------------------ publish --
 
 
 def cv_run(models_dir, run_id: str, tracked: bool = False, with_summary: bool = True):
     run_dir = models_dir / "cv" / run_id
     run_dir.mkdir(parents=True)
+    write_folds(run_dir)
     if with_summary:
         (run_dir / "cv_summary.json").write_text(json.dumps(summary(0.90, 0.10)))
     if tracked:

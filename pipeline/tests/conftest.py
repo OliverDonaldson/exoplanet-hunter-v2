@@ -18,6 +18,7 @@ def _make_view_set(n: int = 6, *, seed: int = 0) -> ViewSetArrays:
         # A presence channel stuck at 1 is a gate failure the tests look for.
         arr[..., -1] = (rng.random((n, *shape[:-1])) > 0.2).astype(np.float32)
         views[name] = arr
+    dv_usable = np.array([True] * (n - 1) + [False])
     scalars = pd.DataFrame(
         {
             "tic_id": np.arange(1, n + 1),
@@ -31,10 +32,26 @@ def _make_view_set(n: int = 6, *, seed: int = 0) -> ViewSetArrays:
             "transit_completeness": rng.random(n),
             "secondary_phase": rng.random(n) - 0.5,
             "ruwe": rng.normal(1.0, 0.2, n),
-            "dv_usable": [True] * (n - 1) + [False],
+            "dv_usable": dv_usable,
             "has_ruwe": [True] * n,
         }
     )
+    # Every remaining declared scalar comes from the DV report, so it is NaN on
+    # exactly the rows where `dv_usable` is False. A fixture carrying four of
+    # the fifteen let a build that silently drops a column pass its own tests.
+    for column, values in {
+        "max_multiple_event_sigma": rng.uniform(7.0, 60.0, n),
+        "robust_statistic": rng.uniform(0.0, 40.0, n),
+        "bootstrap_significance": 10.0 ** rng.uniform(-140.0, 0.0, n),
+        "ghost_core_statistic": rng.normal(0.0, 3.0, n),
+        "ghost_halo_statistic": rng.normal(0.0, 3.0, n),
+        "odd_even_statistic": rng.uniform(0.0, 5.0, n),
+        "weak_secondary_max_mes": rng.uniform(0.0, 20.0, n),
+        "mean_sky_offset": rng.uniform(0.0, 10.0, n),
+        "control_sky_offset": rng.uniform(0.0, 10.0, n),
+        "summary_quality_fraction": rng.uniform(0.5, 1.0, n),
+    }.items():
+        scalars[column] = np.where(dv_usable, values, np.nan)
     return ViewSetArrays(views=views, scalars=scalars)
 
 

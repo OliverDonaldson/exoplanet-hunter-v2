@@ -1518,3 +1518,545 @@ label-confounded:
 - **The baseline correlation is a reported diagnostic, not a gate.**
 - **The transit-count correlation is reported, not gated** — its zero point is
   −0.048, and the labels sit at −0.073, so there is no defensible target.
+
+## Audit regression sweep + Stage 2(a) close-out (2026-08-06)
+
+**Serving still `ca906040` (9-dim, 2001/201) on Fly — untouched. Nothing
+promoted; the registry is unchanged.** 401 tests green (was 304), ruff and mypy
+clean, seven data gates pass.
+
+### The sweep — every finding from both prior audits
+
+Audit records re-checked: **2026-07-13** (nine targets + two follow-ups) and
+**2026-07-25** (`1431660`..`c41fa62`, security + V1-remnants). Each fix was
+looked for *in the module it belongs to*, not at a call site.
+
+| finding | still closed? | test pinning it |
+|---|---|---|
+| Kepler subsample churn — positional sampling | yes, `catalog._stable_sample` (md5 of `seed:tic_id`) | `test_selection_stable_under_realistic_pool_growth` |
+| Machine-specific paths | yes, `run-api.sh` discovers the env, `$EXO_PYTHON` overrides | — (shell) |
+| Docs drift | yes | — |
+| `/score` latency (unbounded BLS) | yes, ephemeris user > catalogue > BLS, grid capped | `test_search.py` |
+| Serving calibration mismatch — scored weights ≠ shipped file | yes in `train.py:396` ("score what ships"); **REGRESSED in `train_branches.py`** — see below | now `test_every_fold_leaves_a_servable_artefact` |
+| Credentials in the build context | yes, `.dockerignore:28` excludes `.dvc/config.local` | — |
+| `inf` / unbounded ephemeris + `tic_id` | yes, bounds reject non-finite, `t0` at 1e8 keeps the three malformed CTOIs scoring | `test_score_rejects_non_finite_ephemeris`, `test_score_accepts_worst_real_catalogue_ephemeris` |
+| Response-cache race + 128 cap | yes, `_cache_lock` / `_CACHE_MAX` | `test_score_cache_is_bounded_and_thread_safe` |
+| 404 leaked server paths | yes, `_redact_paths` at the boundary | `test_score_404_keeps_path_free_detail` |
+| `render_vetting` read ExoFOP's raw header | yes, reads `disposition` | — |
+| Test-hygiene: shared response cache across tests | yes, autouse fixture clears it | — |
+| `preprocess_only.py` / `score_target.py` could write 9-dim/no-K2 data | yes — both deleted in stage 0 | `test_imports.py` |
+| Promotion gate `--models-dir` half-honoured | yes, resolves against `models_dir.parent` | `test_incumbent_summary_resolves_registry_path_from_any_cwd` |
+| `dvc` as a bare command | yes, `Makefile` uses `$(PYTHON) -m dvc` | — |
+| CI missing the gate jobs its comment promised | yes, `catalogue-gate` + `promotion-gate` jobs exist | — |
+| Observation-baseline covariate (the precedent) | yes, `BASELINE_DAYS` is the default and is derived | `test_baseline_defaults_to_days_not_the_transit_count` |
+
+**One regression, and it is the same class as the precedent.** The 2026-07-14
+fix "reload the checkpoint before scoring, because in-memory weights after
+`fit()` are not the file that ships" lives in `train.py` and **was never carried
+into `train_branches.py`**. Worse than a drift: that trainer wrote **no
+checkpoint at all**. Stage 2(a) run 1 scored weights that existed only in
+memory, and `models/cv/branches-20260805/` has no `fold_*` directories — the
+run cannot be rescored, recalibrated, promoted or served. Fixed in the module:
+per-fold `ModelCheckpoint` + reload before scoring, plus a calibrator bundle
+carrying the Platt fit and the fold's scalar constants.
+
+Fixing it immediately exposed a second defect: **the branch model could not be
+deserialised at all.** Gating used a `Lambda` over a Python lambda, which Keras
+refuses to load without `safe_mode=False`. Replaced with registered
+`PresenceFlag` / `PickColumns` layers, so a promoted checkpoint loads without
+waiving a safety check.
+
+Still open by decision, verified unchanged and *not* regressions: the
+9-dim/13-dim script crashes, `force_download` on the HTTP surface, the
+`_score_lock` timeout, `/candidates.csv` row cap, and `/healthz` trusting
+`registry.json` alone.
+
+Housekeeping applied this session: `chmod 600 .dvc/config.local` (was 0644),
+`DVC_NO_ANALYTICS=1` in `docker/api.Dockerfile`, and the "fetch all branches
+first" warning added to the `dvc gc` recipe in `docs/OPERATING.md`. Not checked
+because it is not visible from here: the Cloudflare R2 Public Development URL.
+
+### Security pass since `c41fa62` — 39 commits, clean
+
+Zero blobs over 1 MB entered git; every new data artefact is a `.dvc` pointer.
+No secret-shaped string in any added line. Every new file lands in
+`pipeline/`, `api/`, `docs/`, `.github/` or as a DVC pointer. The only new
+network calls are `astroquery` to MAST and Gaia inside the fetch modules, and
+no source file carries an absolute path.
+
+### K2 — 9.7% of training, benchmarked for the first time
+
+The incumbent's 4,818 out-of-fold rows contain **zero K2**, so every comparison
+against it inner-joined all 527 rows away in silence:
+
+```
+in_shared    False   True    All
+K2             527      0    527
+Kepler         262   2238   2500
+TESS            29   2367   2396
+```
+
+The legacy shards do carry all 527 at 2001/201, so it was scorable —
+`pipeline/scripts/benchmark_incumbent_k2.py`,
+`results/incumbent_k2_benchmark.json`:
+
+| K2, n=527 (315 pos) | incumbent | branches |
+|---|---:|---:|
+| ROC-AUC | **0.9348** | 0.9189 |
+| PR-AUC | 0.9470 | 0.9176 |
+| Brier | 0.1538 | **0.0957** |
+| ECE | 0.1989 | **0.0500** |
+| recall @1% FPR | **0.190** | 0.089 |
+
+**Not like-for-like, and the asymmetry favours the branch model.** No K2 row
+was in any of the incumbent's training folds, so its numbers are zero-shot
+cross-mission transfer scored by all five checkpoints; the branch model's are
+ordinary out-of-fold with K2 in four folds of five. The incumbent still wins
+ranking by 0.0159. Its Brier and ECE are much worse and should not be read as a
+branch-model win: the Platt scalers were fitted on Kepler+TESS validation rows
+and K2's base rate is 0.598.
+
+Two rebuild details that would otherwise have produced a confident wrong number.
+**The 9-dim and 13-dim aux layouts disagree at index 7** — catalogue SNR versus
+`pink_snr` — so slicing 13 → 9 would feed the model a different feature in a
+lane it learned as something else; the vector is rebuilt instead. And
+**catalogue SNR is absent on all 527 K2 rows**, so that lane imputes to the
+training median, the same path a non-TOI takes at serve time.
+
+`eval/comparison.py` now computes per-mission coverage first and names any
+mission an inner join drops entirely (`MissionCoverage.dropped`,
+`compare_prediction_sets(strict=True)`). It reproduces every recorded stage
+2(a) number from the artefacts on disk: +0.0222 all-mission on 4,605 rows,
+Kepler +0.0348, TESS +0.0021, weights 48.6 / 51.4 / 0.
+
+### Recall @1% FPR is now a gate criterion
+
+AUC scores ranking at every threshold; a shortlist lives at one. On TESS the
+two models are 0.002 apart on AUC and **0.069 apart on recall @1% FPR**
+(0.307 incumbent, 0.238 branches). `evaluate_promotion` now rejects on a
+shortlist-recall drop beyond 0.02, and gates on the **TESS** slice with Kepler
+and K2 as alarmed diagnostics and the all-mission aggregate reported but never
+gating. Summaries without a `per_mission` block — every run before this one,
+including the live incumbent — fall back to pooled means, as the ECE guard does.
+
+### Augmentation for the view set
+
+Run 1 trained without augmentation against an incumbent that had it. `augment_views`
+takes two `(bins, 1)` tensors and cannot be reused, so `datasets/viewset_augment.py`
+reimplements its semantics per view — same ops, same magnitudes, same order.
+
+Two things the view set changes. **The presence channel is never augmented**:
+`_gated` reads `reduce_max(present) > 0`, so noise on an absent branch's zeros
+flips it to "present" and disables the gating for the 3,027 of 5,423 rows where
+`dv_usable` is 0%. Noise is also multiplied by presence, so an unmeasured bin
+keeps the zero that says so. **Not every axis is phase**: the periodogram views
+are period-indexed and take no phase shift, and the unfolded stack shifts within
+each transit rather than reordering transits. `VIEW_KINDS` declares which is
+which and raises on a view that has no entry.
+
+### The resolution fix — running, pre-registered
+
+`GLOBAL_BINS`/`LOCAL_BINS` restored to **2001/201**. Measured before launch:
+**233,617 parameters** (from 192,817), **~669 MB of shards** (126.4 KB/example,
+×5.5 on 122 MB), **~5.4 GB peak RSS** — of which ~4.7 GB is fixed TF/Metal cost,
+measured by running the same fold at 301/31 on the full shard set (4,861 MB).
+
+Note the confound rather than bank it: 233,617 lands *above* the incumbent's
+227,641 and above the 226,711 of the cancelled capacity run, so a Kepler gain
+cannot be attributed to resolution alone.
+
+Two smaller fixes the change forced, both of the "declared twice" family that
+has bitten this project repeatedly. `VIEW_SHAPES` now **derives** from the
+builder's constants instead of restating them, so resolution is one edit. And
+the per-target interim cache is **keyed by resolution** (`g2001l201/`), so a
+rebuild cannot read back arrays at the old bin count — the old 301/31 cache is
+still on disk and still valid.
+
+The pre-registered reading of the result is in `docs/roadmap.md`, written
+before the run finishes.
+
+### Where run 2 stopped, and how to resume it
+
+Stopped deliberately at **889 / 5,703** targets built (all 889 verified
+readable). The build is idempotent and resumable — `_cache_path` skips anything
+already cached, so this picks up where it left off:
+
+```bash
+cd /Users/ollie/Project/v2
+nohup /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python \
+  pipeline/scripts/build_viewset.py > outputs/build-viewset-2001.log 2>&1 &
+```
+
+Measured rate **~49 targets/min**, so the remaining ~4,800 take **~100 min**.
+Then, in order:
+
+```bash
+/opt/anaconda3/envs/exoplanet-hunter-v2/bin/python pipeline/scripts/shard_viewset.py
+/opt/anaconda3/envs/exoplanet-hunter-v2/bin/python pipeline/scripts/train_branches.py
+```
+
+Expect ~669 MB of shards and ~5.4 GB peak RSS during CV. The old 301/31 interim
+cache (5,423 files, `data/interim/viewset/*.npz`) is untouched and still valid,
+so reverting the two constants restores run 1's inputs without a rebuild.
+
+**If the resumed build fails loading a `.npz`**, one file was truncated by the
+stop: delete that file and re-run. A sweep of all 889 found none.
+
+**Read the result against the pre-registered rule in `docs/roadmap.md`, not
+against hope.** Kepler gap under ~0.012 with TESS level means resolution was the
+cause; above ~0.020 falsifies it and makes the capacity run mandatory. Nothing
+is promoted without the gate, and the gate now decides on TESS.
+
+Not yet done, and Ollie's: `git push`, `dvc add` + `dvc push` for the rebuilt
+view set and shards, `fly deploy` (nothing needs deploying — serving is
+unchanged).
+
+### A NaN metric promoted — found by pre-flighting the CV path (2026-08-06)
+
+Running the new CV entry point end to end on a 296-target probe (deliberately
+single-class, so its AUC is undefined) returned:
+
+```
+PROMOTE: ... ROC-AUC nan vs incumbent 0.9581; Brier 0.0000 vs incumbent 0.0791
+```
+
+**Every guard in `evaluate_promotion` is an inequality, and NaN loses all of
+them.** `nan <= 0.9581` is False, so the AUC check passes; `nan > inc + tol` is
+False, so the Brier and ECE checks pass. Any degenerate run — a single-class
+fold, an empty mission slice, a blown-up loss — would have promoted itself with
+a summary that says `nan` in plain text.
+
+`evaluate_promotion` now checks every gating metric is finite *before* any
+comparison and rejects with "not measurable on this run: ...". Pinned by
+`test_a_nan_metric_rejects_instead_of_sailing_through_every_guard` and a
+parametrised case over all four gating metrics.
+
+This is the third instance of the same failure mode in this project: a check
+that returns a plausible answer instead of failing. It was only visible because
+the run was executed rather than reasoned about.
+
+### Pre-flight of run 2's CV path — clean
+
+`pipeline/scripts/train_branches.py` was exercised end to end at 2001/201 before
+committing to the long run. It writes per-fold `cnn_branches.keras` +
+`cnn_calibrator.joblib`, the `per_mission` block the gate reads, and a new
+`run_config` block recording folds, seed, **the augmentation magnitudes and the
+view shapes**. Neither of those two was recoverable from run 1's summary, and
+they are exactly what made its comparison against the incumbent unlike-for-like.
+
+Augmentation is now declared in `conf/model/cnn_branches.yaml` at the same
+magnitudes `conf/preprocess/default.yaml` gives the incumbent, rather than
+being an implicit dataclass default.
+
+### `compare_runs.py` — the reading, as a script rather than a session
+
+Reading run 2 needs the same three measurements that were done ad hoc for run 1,
+so they now live in `pipeline/scripts/compare_runs.py`: per-mission coverage
+first, per-mission metrics with TESS marked as the gate and the aggregate marked
+as never gating, then the AUC gap by quartile of transits actually caught.
+
+Validated against run 1 — every recorded number reproduces from the artefacts:
+
+```
+Kepler     2238   0.9914  0.9566  +0.0348    R@1% 0.799 / 0.383
+TESS       2367   0.9100  0.9079  +0.0021    R@1% 0.307 / 0.238   <- gates
+all        4605   0.9558  0.9337  +0.0222                          <- never gates
+
+Kepler gap by transits caught   Q1 +0.0245  Q2 +0.0335  Q3 +0.0416  Q4 +0.0944
+TESS   gap on the same split    Q1 +0.0045  Q2 +0.0007  Q3 -0.0008  Q4 +0.0055
+trend per quartile              Kepler +0.0218   TESS +0.0002
+```
+
+The TESS row is what makes the resolution reading more than a story: the same
+quartile split on the mission we serve is flat to 0.0002 per step. And the
+Kepler Q4 detail is the whole finding in one line — at a median of **1,035
+transits caught**, the incumbent holds 0.9912 while the 301-bin branch model
+falls to **0.8967**.
+
+### The phase shift was degenerate at 301/31
+
+`time_shift_frac` is a fraction of the bin count and the shift truncates to an
+integer, so at the default 0.005:
+
+```
+global 2001  ->  +-10 bins      global 301  ->  +-1 bin
+local  201   ->  +-1 bin        local   31  ->   0 bins
+```
+
+At 301/31 the coherent phase shift would have been **exactly zero on all six
+local views** — a quarter of the augmentation silently absent on more than half
+the branches. At the restored resolution it does what the incumbent's
+augmentation does, which is the point of matching magnitudes rather than
+copying the number. Noted in `viewset_augment.py` where the truncation happens.
+
+This is not a bug in run 2 — it is a reason run 1 would have been a poor test of
+augmentation even if it had had any.
+
+### The candidate view set is now stale — flagged, not rebuilt
+
+`data/processed/candidates_viewset/` holds **5,347 candidates at 301/31**
+(built 2026-08-05). The resolution change does not touch it, so any branch model
+from run 2 onward **cannot score candidates** until it is rebuilt at 2001/201 —
+the input shapes simply will not match.
+
+Not needed for run 2's promote/reject decision, which is measured entirely on
+the labelled CV set. It *is* needed for:
+
+- the observation-bias measurement on the candidate population
+  (`candidate_bias.py`), where the original +0.211 finding lives;
+- stage 2(b)'s control-arm host-pass rate;
+- any shortlist produced by a promoted branch model.
+
+Rebuilding is the same command with `--include-candidates`, at roughly the same
+~60 targets/min, so budget about two hours. Deliberately deferred: it is wasted
+work if run 2 falsifies the resolution hypothesis and the branch line is
+reconsidered.
+
+The three DVC-tracked artefacts the rebuild replaces —
+`viewset.npz`, `viewset_scalars.parquet`, `viewset_tfrecords/` — already have
+pointers, so they need `dvc add` (mine) then `dvc push` (Ollie's).
+
+### "TESS is flat" was the wrong lesson — the deficit tracks transits, not mission
+
+The within-mission quartile split showed Kepler's gap climbing +0.0245 ->
++0.0944 while TESS held at +0.0002 per step, which reads as "Kepler suffers,
+TESS is immune". It is not. **Quartiles are cut per mission**, so TESS's top
+quartile is a median of 89 transits caught where Kepler's is 1,035 — TESS looks
+flat mostly because it never reaches the regime where the effect lives.
+
+Cut both missions on the same absolute bands:
+
+```
+band        mission     n     inc       br       gap
+0-10        Kepler    101   0.9615   0.9346   +0.0269
+0-10        TESS      557   0.8745   0.8636   +0.0109
+10-30       Kepler    206   0.9834   0.9581   +0.0253
+10-30       TESS      873   0.8972   0.9063   -0.0091
+30-100      Kepler    532   0.9895   0.9652   +0.0243
+30-100      TESS      680   0.9356   0.9322   +0.0034
+100-300     Kepler    629   0.9943   0.9553   +0.0390
+100-300     TESS      195   0.9428   0.9404   +0.0024
+300+        Kepler    770   0.9920   0.9229   +0.0690
+300+        TESS       62   0.9243   0.8377   +0.0866
+```
+
+**Where TESS reaches 300+ transits it shows the largest gap in the table.**
+n=62, so the point estimate is loose — but the direction is unambiguous and it
+is the opposite of mission-immunity.
+
+Two consequences. The mechanism claim is *stronger* than first written: a
+resolution deficit should depend on how much real structure is folded into a
+view, which is transit count, and it does — on both missions. And run 2 gets a
+**second pre-registered test on the deployment mission**: the TESS 300+ band
+must improve, not just Kepler.
+
+Both cuts are now in `compare_runs.py`, so run 2 is read the same way rather
+than re-derived.
+
+The claim in the roadmap has been corrected. Note what was and was not wrong:
+every number was right, and "TESS is flat on this split" was true as stated. The
+error was the implication — that flatness meant TESS was unaffected, when it
+meant TESS was mostly absent from the range. A per-group quantile cut compares
+different populations under the same label.
+
+### The mechanism, measured properly: an interaction, not one variable
+
+The transit-count finding above raised an obvious sharper hypothesis — that what
+matters is how many *bins the transit itself spans* on the coarse grid,
+`duration / period x 301`. Measured on Kepler, that alone points the **wrong
+way**: the gap grows with span (+0.0279 at <1 bin, +0.0624 at 8+). A pure
+"transit too narrow to resolve" story is not what happened.
+
+Span and count correlate (Spearman 0.44), so crossing them separates the two:
+
+```
+Kepler        span   transits     n   med span     inc       br       gap
+               0-4      0-100   690        1.8  0.9835   0.9631   +0.0204
+               0-4      100-+   149        3.1  0.9852   0.8406   +0.1446
+               4-8      0-100   117        5.0  0.9952   0.9639   +0.0313
+               4-8      100-+   413        5.9  0.9942   0.9399   +0.0543
+               8-+      100-+   837       18.4  0.9915   0.9317   +0.0597
+
+TESS           0-4      0-100   417        2.6  0.8899   0.8656   +0.0243
+               4-8      0-100   576        5.9  0.8940   0.9026   -0.0086
+               8-+      0-100  1117       13.0  0.9129   0.9188   -0.0059
+               8-+      100-+   207       18.7  0.9426   0.9001   +0.0425
+```
+
+Within every span band the gap still tracks transit count, and it does so on
+both missions independently — every low-count TESS cell sits at or below zero,
+its one high-count cell at +0.0425.
+
+**The worst cell by a factor of three is narrow-in-phase AND caught many
+times**: 149 Kepler targets, median transit spanning **3.1 of 301 bins**, median
+**134 transits caught**, incumbent 0.9852 against 0.8406. At 2001 bins those
+transits span about 21 bins.
+
+That is a mechanism rather than a story: many folded transits make the per-bin
+median precise enough that real fine structure exists, and a coarse grid then
+destroys it — worst where the feature is narrowest in phase. Both cuts are in
+`compare_runs.py`.
+
+**Pre-registered before the result:** if resolution is the cause, that +0.1446
+cell improves most. A flat improvement across cells would mean the effect is
+something else, whatever the headline Kepler number does.
+
+## Run 2 built — sizing predictions held, and a benign race explained (2026-08-07)
+
+**Serving still `ca906040` — untouched. Nothing promoted.** The 2001/201 view
+set is built and sharded; CV is running.
+
+### The pre-launch predictions, checked against the artefacts
+
+| | predicted | measured |
+|---|---:|---:|
+| shard bytes | ~669 MB | **671 MB** |
+| parameters | 233,617 | 233,617 |
+| peak training RSS | ~5.4 GB | (CV in flight) |
+
+The shard figure was extrapolated from a 296-target probe at 126.4 KB/example
+and came in **0.3% off**. `viewset.npz` is 295 MB against 65 MB at 301/31.
+
+Both shard assertions passed: **15 scalars** (13 was the merge-collision bug)
+and `global_view [2001, 3]` / `local_view [201, 3]`.
+
+### 5,426 examples, not 5,423 — a build that read a cache still being filled
+
+Three more rows than run 1, and no rows lost. All three are TESS positives with
+`lc_source == "ffi"`:
+
+```
+443607377  TESS  label 1  ffi  P=4.02 d   28 transits
+335661164  TESS  label 1  ffi  P=0.84 d  150 transits
+468350765  TESS  label 1  ffi  P=3.89 d   30 transits
+```
+
+The labels catalogue is unchanged (5,703 rows, untouched since 2026-08-01), and
+`missing_fits` fell 273 -> 270 while `missing_ephemeris` held at 7. The cause is
+timing: **run 1's view-set build finished at 00:20 on 2026-08-05, and the FFI
+fetch did not finish writing `data/raw_ffi/` until 01:42** — 82 minutes later.
+Run 1 read a cache another job was still filling and saw 4 FFI light curves
+where 7 were coming.
+
+This is the same class as the 2026-08-01 refresh-during-DV-pull race: a build
+that reads a cache being written elsewhere produces a *silently smaller* data of
+record, with no error anywhere. It cost 3 rows out of 5,423 (0.06%), so nothing
+in run 1's conclusions moves — but the mechanism is worth naming, because
+nothing in the pipeline would have reported it at any size.
+
+**Consequence for the comparison:** run 2 trains on 3 rows run 1 did not have.
+Immaterial to the AUC comparison, and the incumbent comparison runs on shared
+rows regardless — but recorded so the population difference is not rediscovered
+as a surprise.
+
+## Run 2 — the resolution hypothesis is FALSIFIED (2026-08-07)
+
+**Serving still `ca906040` — untouched. Nothing promoted; the registry is
+unchanged.** Artefacts in `models/cv/branches-20260807-2001/`, with per-fold
+checkpoints and calibration bundles this time.
+
+### The result
+
+`promotion_gate` → **REJECT**. Restoring 2001/201 made every slice worse and
+roughly **doubled** the gap it was meant to close.
+
+| slice | incumbent | run 1 (301/31) | run 2 (2001/201) | run 2 gap |
+|---|---:|---:|---:|---:|
+| TESS *(gates)* | 0.9100 | 0.9079 | **0.8944** | **+0.0156** |
+| Kepler | 0.9914 | 0.9566 | **0.9207** | **+0.0707** |
+| all | 0.9558 | 0.9337 | **0.9043** | **+0.0516** |
+| TESS recall @1% FPR | 0.307 | 0.238 | **0.126** | |
+
+Full slices (not just shared rows): TESS 0.8941, Kepler 0.9215, K2 0.8741,
+all 0.9002 ± 0.0128.
+
+The pre-registered rule was "Kepler gap stays above ~0.020 -> FALSIFIED". It
+went from +0.0348 to **+0.0707**. The finer cell test fails the same way and
+more informatively: **Kepler 0–10 transits went from +0.0269 to +0.2038**, so the
+damage concentrates where evidence is *thinnest* — the opposite of what a
+resolution deficit predicts.
+
+**Under the Task 2(a) trigger the capacity run is now MANDATORY**, and per the
+pre-registration this stops here. No tuning.
+
+### The mechanism was a real correlation read causally, and that reading was wrong
+
+Run 1's Kepler gap genuinely rose with transits caught, genuinely reached
++0.1446 in the narrow-transit / many-transit cell, and genuinely reproduced on
+TESS wherever TESS reached that regime. Every one of those measurements survives.
+What does not survive is the inference that 301 bins *caused* it: given more
+bins, the model got worse everywhere, and worst on the sparsest data.
+
+Worth keeping as a lesson about this specific trap: the covariate that predicted
+the gap best (transits caught) is also a proxy for how much evidence a target
+has, and "the model is weaker where evidence is thin" explains the same pattern
+without any reference to bin counts. Run 2 is what distinguished them, and it
+could not have been distinguished by more analysis of run 1.
+
+### Three hypotheses tested and discarded before accepting the result
+
+The result looked wrong (folds ran *faster* on 5.5x the data), so it was
+checked before being believed rather than after.
+
+1. **MC-dropout noise.** `cnn_branches.py` builds head dropout with
+   `training=True` where the dual-view model uses `training=None`, and the
+   comment claims it matches the dual-view model — it does not, and
+   `mc_dropout_predict`'s own docstring specifies `training=None` as the
+   contract. **But scoring is deterministic anyway**: six scorings of the same
+   checkpoint gave 0.8927 with range **0.0000**. The `training=True` is still
+   wrong as documentation and worth fixing, but it is not affecting any number.
+2. **The checkpoint reload I added this session.** In-memory
+   `restore_best_weights` and the reloaded `ModelCheckpoint` file were scored in
+   one process on the same fold: **0.8991 and 0.8991**. The reload is sound.
+3. **Undertraining.** Real but not the explanation — see the noise floor below.
+
+### The noise floor, measured for the first time
+
+Fold 0 re-run five times through `run_fold` with the trainer's own seeding, one
+process each:
+
+```
+0.8927   0.8942   0.8984   0.9083   0.9179
+mean 0.9023    sd 0.0106    range 0.0252
+```
+
+`set_global_seed`'s docstring already says it "doesn't make TF fully
+deterministic on GPU", and nothing sets `enable_op_determinism`, so this is
+known behaviour that had never been quantified. **Single-fold training sd is
+≈ 0.011.**
+
+**It does not overturn the result.** The 5-fold mean averages it down to between
+0.0048 (folds independent) and 0.0106 (fully correlated); run 1 and run 2 differ
+by 0.0313, which is **2.9σ to 6.6σ**. Note also that run 2's fold 0 (0.8927) is
+the *lowest* of the five samples, so if anything run 2's headline is slightly
+unlucky — and it is still 0.03 below run 1.
+
+**But it does change how any `±` in this project should be read.** The std in
+every `cv_summary.json` is the spread *across folds within one run*. It mixes
+genuine fold-to-fold variation with training noise and says nothing about
+whether re-running the same configuration reproduces the headline. **Any future
+decision on a margin under ~0.02 needs repeat runs, not one run's fold std.**
+
+An honest note on how this was reported: mid-investigation the spread was quoted
+as 0.034 and flagged as possibly swamping the effect. That number included two
+diagnostics that never called `set_global_seed`. Measured properly through the
+trainer it is sd 0.0106, and the effect is comfortably outside it. The alarm was
+overstated; the underlying gap in the project's uncertainty accounting was not.
+
+### The one code defect the investigation left behind, now fixed
+
+`cnn_branches.py` built head dropout with `training=True`, overriding the
+call-time flag, with a comment claiming it matched the dual-view model. The
+dual-view model uses `training=None`, and `mc_dropout_predict` documents
+`training=None` as the contract it requires — so the setting was wrong on its
+own terms and bought nothing.
+
+It turned out **not** to affect any recorded number (scoring measured
+deterministic to range 0.0000 over six draws), which is why it survived. Fixed
+to `training=None` and pinned by
+`test_scoring_is_deterministic_but_mc_dropout_still_works`, which asserts both
+halves: `training=False` reproduces exactly, `training=True` varies.
+
+Nothing needs re-running because of it — but a model built from the old code
+scores stochastically under any future call that trusts the flag, which is
+exactly what stage 4's serving parity will do.

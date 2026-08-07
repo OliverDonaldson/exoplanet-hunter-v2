@@ -50,6 +50,15 @@ FEATURE_COLUMNS = (
 )
 #: Presence masks, so a missing branch is never read as a measured zero.
 MASK_COLUMNS = ("dv_usable", "has_ruwe")
+#: How an unmeasured scalar is written. Shards built before 2026-08-07 stored
+#: `0.0`, which normalisation then mapped to a z-value sitting inside the real
+#: distribution — a missing `odd_even_statistic` landed at −0.679 against a real
+#: 5th percentile of −0.68, so "never measured" was indistinguishable from "weak
+#: detection". Since every Kepler and K2 row is missing and only 12.8% of TESS
+#: is, that made the fill value a near-perfect mission indicator, read through
+#: the lane `MASK_COLUMNS` exists to own. NaN is now written through and imputed
+#: to the fitted centre at normalisation time, where it means exactly nothing.
+SCALAR_ENCODING = "nan"
 
 
 def _float_feature(values: np.ndarray) -> tf.train.Feature:
@@ -61,9 +70,18 @@ def _int_feature(value: int) -> tf.train.Feature:
 
 
 def write_viewset_shards(
-    arrays: ViewSetArrays, out_dir: Path, *, examples_per_shard: int = 512
+    arrays: ViewSetArrays, out_dir: Path, *, examples_per_shard: int = 512, shuffle_seed: int = 42
 ) -> dict:
-    """Serialise a `ViewSetArrays` into shards + metadata + index."""
+    """Serialise a `ViewSetArrays` into shards + metadata + index.
+
+    Rows are permuted once, deterministically, before sharding. The catalogue
+    arrives mission-blocked — TESS, then Kepler, then K2 — and a `tf.data`
+    shuffle buffer of 1,024 over a ~3,470-row split never spans that, so every
+    batch held one mission. With a `BatchNormalization` in all 11 conv towers
+    that means batch statistics computed on a single mission, and an epoch that
+    walks the missions in order as an unintended curriculum. The index is
+    permuted with the views, so shard order still matches it row for row.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     # A rebuild with a different example count names its shards differently, so
     # files from the previous set would survive and poison readers with a mixed
@@ -71,7 +89,9 @@ def write_viewset_shards(
     for stale in out_dir.glob("viewset-*.tfrecord"):
         stale.unlink()
 
-    scalars = arrays.scalars.reset_index(drop=True)
+    order = np.random.default_rng(shuffle_seed).permutation(len(arrays.scalars))
+    scalars = arrays.scalars.iloc[order].reset_index(drop=True)
+    views = {name: array[order] for name, array in arrays.views.items()}
     n = len(scalars)
     n_shards = max(1, int(np.ceil(n / examples_per_shard)))
     features = [c for c in FEATURE_COLUMNS if c in scalars.columns]
@@ -81,19 +101,21 @@ def write_viewset_shards(
     # and every gate still passes. That is how the transit counts went missing.
     absent = [c for c in (*FEATURE_COLUMNS, *MASK_COLUMNS) if c not in scalars.columns]
     if absent:
-        log.warning(
-            "[viewset-tfrecords] %d declared scalars absent from the index and NOT written: %s",
-            len(absent),
-            absent,
+        raise ValueError(
+            f"{len(absent)} declared scalars absent from the index and so not written: {absent}. "
+            "A shorter scalar vector still passes every downstream gate — this warned rather "
+            "than raised until 2026-08-07, which is how the transit counts went missing."
         )
     # Hoisted out of the per-example loop: pandas scalar access per row is the
     # slowest part of writing 5,700 examples.
     labels = scalars["label"].to_numpy(dtype=np.int64)
     tic_ids = scalars["tic_id"].to_numpy(dtype=np.int64)
-    # NaN is not a value a dense layer can consume; the mask columns are what
-    # say "this was never measured".
+    # NaN is written through rather than filled here — see SCALAR_ENCODING. The
+    # reader imputes it to the fold's own fitted centre, which is the only value
+    # that carries no information; any constant chosen at this layer is a value
+    # inside the real distribution once normalisation runs.
     feature_values = (
-        np.nan_to_num(scalars[features].to_numpy(dtype=np.float32), nan=0.0)
+        scalars[features].to_numpy(dtype=np.float32)
         if features
         else np.empty((n, 0), dtype=np.float32)
     )
@@ -107,7 +129,7 @@ def write_viewset_shards(
         path = out_dir / f"viewset-{shard_idx:05d}-of-{n_shards:05d}.tfrecord"
         with tf.io.TFRecordWriter(str(path)) as writer:
             for i in range(lo, hi):
-                feature = {name: _float_feature(arrays.views[name][i]) for name in VIEW_SHAPES}
+                feature = {name: _float_feature(views[name][i]) for name in VIEW_SHAPES}
                 feature["label"] = _int_feature(int(labels[i]))
                 feature["tic_id"] = _int_feature(int(tic_ids[i]))
                 if features:
@@ -126,6 +148,7 @@ def write_viewset_shards(
         "view_shapes": {k: list(v) for k, v in VIEW_SHAPES.items()},
         "scalar_columns": features,
         "mask_columns": masks,
+        "scalar_encoding": SCALAR_ENCODING,
     }
     (out_dir / METADATA_NAME).write_text(json.dumps(metadata, indent=2))
     scalars.to_parquet(out_dir / INDEX_NAME, index=False)

@@ -1,4 +1,4 @@
-"""Interchange format for the 301/31 view set.
+"""Interchange format for the view set.
 
 Two files, mirroring the `views.npz` + `index.parquet` split the legacy set
 uses:
@@ -7,8 +7,8 @@ uses:
     viewset_scalars.parquet  one row per example: label, tic_id, mission,
                              transit counts, DV scalars, RUWE, provenance
 
-Kept separate from `views_io.py` so the legacy 2001/201 artefact that feeds the
-live model is untouched while this is built.
+Kept separate from `views_io.py` so the legacy artefact that feeds the live
+model is untouched while this is built.
 """
 
 from __future__ import annotations
@@ -20,19 +20,29 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-#: Every view array, with the per-example shape the schema guarantees.
+from exoplanet_hunter.preprocess.viewset import (
+    GLOBAL_BINS,
+    LOCAL_BINS,
+    MAX_TRANSITS,
+    PERIODOGRAM_BINS,
+)
+
+#: Every view array, with the per-example shape the schema guarantees. Derived
+#: from the builder's own constants rather than restated: two declarations of
+#: the same bin counts is the shape of every silent-shard bug this project has
+#: had, and a resolution change has to be one edit or it is a mismatch waiting.
 VIEW_SHAPES: dict[str, tuple[int, ...]] = {
-    "global_view": (301, 3),
-    "local_view": (31, 3),
-    "odd_view": (31, 3),
-    "even_view": (31, 3),
-    "secondary_view": (31, 3),
-    "trend_view": (301, 3),
-    "centroid_view": (31, 3),
-    "unfolded_view": (20, 31, 3),
-    "gap_view": (301, 2),
-    "periodogram_view": (256, 2),
-    "periodogram_masked_view": (256, 2),
+    "global_view": (GLOBAL_BINS, 3),
+    "local_view": (LOCAL_BINS, 3),
+    "odd_view": (LOCAL_BINS, 3),
+    "even_view": (LOCAL_BINS, 3),
+    "secondary_view": (LOCAL_BINS, 3),
+    "trend_view": (GLOBAL_BINS, 3),
+    "centroid_view": (LOCAL_BINS, 3),
+    "unfolded_view": (MAX_TRANSITS, LOCAL_BINS, 3),
+    "gap_view": (GLOBAL_BINS, 2),
+    "periodogram_view": (PERIODOGRAM_BINS, 2),
+    "periodogram_masked_view": (PERIODOGRAM_BINS, 2),
 }
 
 NPZ_NAME = "viewset.npz"

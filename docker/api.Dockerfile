@@ -41,7 +41,8 @@ ENV MODEL_DIR=/srv/models \
     DATA_RAW_DIR=/srv/data/raw \
     CATALOGUE_PATH=/srv/data/catalogue/candidates.parquet \
     OMP_NUM_THREADS=2 \
-    TF_CPP_MIN_LOG_LEVEL=2
+    TF_CPP_MIN_LOG_LEVEL=2 \
+    DVC_NO_ANALYTICS=1
 
 EXPOSE 8000
 CMD ["api-entrypoint.sh"]

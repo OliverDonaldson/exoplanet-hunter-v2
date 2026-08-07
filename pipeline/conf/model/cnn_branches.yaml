@@ -26,3 +26,14 @@ training:
   learning_rate: 1.0e-3
   # AUC-PR, not loss: it tracks the minority class (ExoMiner papers).
   patience: 8
+
+# Identical magnitudes to conf/preprocess/default.yaml, which is what the
+# incumbent trained with. Run 1 of stage 2(a) had none at all, against an
+# incumbent that did — one of the ways that comparison was not like-for-like.
+# Applied per view; the presence channel is never touched (viewset_augment.py).
+augmentation:
+  enabled: true
+  time_shift_frac: 0.005
+  noise_std: 0.0005
+  scale_range: 0.05
+  mask_prob: 0.02

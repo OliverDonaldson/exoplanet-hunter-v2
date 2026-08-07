@@ -14,8 +14,23 @@ This module decides whether that run replaces the incumbent in
     `ece_tolerance` — Brier alone is blind to this, since a discrimination
     gain can pay for arbitrary miscalibration. Skipped when either summary
     predates the `test_ece` field;
+  * shortlist guard: recall at 1% FPR must not fall by more than
+    `recall_tolerance`. AUC scores ranking at every threshold; the follow-up
+    shortlist this system exists to produce lives at exactly one. The stage
+    2(a) branch model is the case that motivated it — TESS AUC within 0.002
+    of the incumbent while recall at 1% FPR fell 0.307 -> 0.238;
   * the first-ever run promotes automatically (there is no bar yet — the RF
     baseline becomes the incumbent as soon as it's registered).
+
+**Which population decides.** When both summaries carry a `per_mission` block
+the gate reads `GATE_MISSION`, not the aggregate. TESS is 100% of the
+deployment population; the all-mission aggregate's weights are a sampling
+decision (Kepler is drawn at exactly 1,250/1,250 by construction) and it is
+reported but never gates. `DIAGNOSTIC_MISSIONS` are mandatory reported slices:
+a drop beyond `mission_alarm` does not block promotion, but it is surfaced in
+the decision so it cannot be promoted past in silence. Summaries without the
+block fall back to the aggregate, which is what every run before 2026-08-05
+carries.
 
 The registry is a plain JSON pointer, not MLflow state: the serving path and
 the CI gate both read it without a tracking-server dependency.
@@ -24,6 +39,7 @@ the CI gate both read it without a tracking-server dependency.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,15 +47,112 @@ from typing import Any
 
 REGISTRY_NAME = "registry.json"
 
+#: Fewest paired folds at which a signed-rank p-value is worth printing. With
+#: five pairs the two-sided Wilcoxon floor is p=0.0625, so it cannot reach 0.05
+#: however lopsided the result — reporting one there invites reading "not
+#: significant" as evidence of no effect. Below this the paired delta and the
+#: effect size are the honest summary.
+MIN_PAIRS_FOR_P_VALUE = 6
+
+#: The deployment population — every scored candidate is TESS.
+GATE_MISSION = "TESS"
+#: Reported on every run, alarmed, never blocking. K2 is 9.7% of training and
+#: was unbenchmarked until 2026-08-05; Kepler is a balanced draw.
+DIAGNOSTIC_MISSIONS = ("Kepler", "K2")
+#: Pooled slice reported alongside the gate and explicitly excluded from it.
+AGGREGATE_SLICE = "all"
+
+
+@dataclass(frozen=True)
+class PairedFolds:
+    """A candidate against an incumbent on the same folds, fold by fold.
+
+    Comparing two run means asks whether one number exceeds another when each
+    carries ~0.011 of training noise. Pairing on fold index removes fold
+    difficulty from the comparison entirely, which is the larger of the two
+    variance sources and the one that is identical between the runs.
+    """
+
+    deltas: list[float]
+    effect_size: float
+    p_value: float | None
+    #: Whether fold *k* provably held out the same rows in both runs. False when
+    #: a summary predates `run_config` or the folds differ in size — pairing
+    #: still removes most of the fold-difficulty variance, but it is no longer
+    #: exact and the reading should be quoted with that attached.
+    exact: bool = True
+
+    @property
+    def wins(self) -> int:
+        return sum(d > 0 for d in self.deltas)
+
+    @property
+    def mean(self) -> float:
+        return float(sum(self.deltas) / len(self.deltas))
+
+    def __str__(self) -> str:
+        out = (
+            f"paired over {len(self.deltas)} folds: mean {self.mean:+.4f}, "
+            f"won {self.wins}/{len(self.deltas)}, d={self.effect_size:+.2f}"
+        )
+        if self.p_value is not None:
+            out += f", p={self.p_value:.3f}"
+        return out + ("" if self.exact else " (folds only approximately matched)")
+
+
+def paired_folds(
+    candidate: dict[str, Any], incumbent: dict[str, Any], metric: str = "test_roc_auc"
+) -> PairedFolds | None:
+    """Fold-by-fold deltas, or None when the two runs' folds are not comparable.
+
+    Pairing is only meaningful if fold *k* held out the same rows in both runs,
+    so it requires a matching fold count and, where both summaries record one,
+    a matching seed and split count.
+    """
+    import numpy as np
+
+    cand_folds, inc_folds = candidate.get("folds") or [], incumbent.get("folds") or []
+    if not cand_folds or len(cand_folds) != len(inc_folds):
+        return None
+    cand_cfg, inc_cfg = candidate.get("run_config", {}), incumbent.get("run_config", {})
+    if cand_cfg and inc_cfg:
+        keys = ("seed", "n_splits")
+        if any(cand_cfg.get(k) != inc_cfg.get(k) for k in keys if k in cand_cfg or k in inc_cfg):
+            return None
+    # Fold sizes are the only per-fold membership evidence a summary carries.
+    # Equal sizes do not prove the same rows, but unequal sizes disprove it —
+    # run 1 and run 2 differ here because three FFI rows arrived between them.
+    sizes_match = [c.get("n_test") for c in cand_folds] == [i.get("n_test") for i in inc_folds]
+    exact = bool(cand_cfg and inc_cfg and sizes_match)
+
+    deltas = np.array(
+        [float(c[metric]) - float(i[metric]) for c, i in zip(cand_folds, inc_folds, strict=True)]
+    )
+    if not np.isfinite(deltas).all():
+        return None
+    spread = float(deltas.std(ddof=1)) if len(deltas) > 1 else 0.0
+    effect = float(deltas.mean() / spread) if spread > 1e-12 else math.inf * np.sign(deltas.mean())
+
+    p_value = None
+    if len(deltas) >= MIN_PAIRS_FOR_P_VALUE and np.any(deltas != 0):
+        from scipy.stats import wilcoxon
+
+        p_value = float(wilcoxon(deltas).pvalue)
+    return PairedFolds(deltas.tolist(), effect, p_value, exact)
+
 
 @dataclass
 class PromotionDecision:
     promoted: bool
     reasons: list[str] = field(default_factory=list)
+    #: Reported slices whose AUC fell beyond `mission_alarm`. Never blocking —
+    #: each one owes a written explanation in the roadmap before promotion.
+    alarms: list[str] = field(default_factory=list)
 
     def __str__(self) -> str:
         verdict = "PROMOTE" if self.promoted else "REJECT"
-        return f"{verdict}: " + "; ".join(self.reasons)
+        out = f"{verdict}: " + "; ".join(self.reasons)
+        return out + ("\nALARM: " + "; ".join(self.alarms) if self.alarms else "")
 
 
 def _mean(summary: dict[str, Any], metric: str) -> float:
@@ -51,45 +164,189 @@ def _mean_or_none(summary: dict[str, Any], metric: str) -> float | None:
     return float(entry["mean"]) if entry else None
 
 
+def _gate_slice(summary: dict[str, Any]) -> dict[str, float] | None:
+    """The deployment slice's metrics, or None on a summary without the block."""
+    return summary.get("per_mission", {}).get(GATE_MISSION)
+
+
+def _population_mismatch(candidate: dict[str, Any], incumbent: dict[str, Any]) -> str | None:
+    """Why these two summaries may not be measured on comparable rows.
+
+    A cv_summary records metrics over whatever population its run scored, and
+    nothing in the file says which rows those were. The incumbent `ca906040`
+    was scored on 4,818 rows with zero K2; a current run scores 5,426 including
+    527 K2 the incumbent's build predates. Comparing the two pooled means reads
+    as a model difference and is partly a population difference.
+    """
+    cand_missions = set(candidate.get("per_mission", {})) - {AGGREGATE_SLICE}
+    inc_missions = set(incumbent.get("per_mission", {})) - {AGGREGATE_SLICE}
+    if not cand_missions or not inc_missions:
+        return "one summary carries no per_mission block, so the rows behind each mean are unknown"
+    only_candidate = sorted(cand_missions - inc_missions)
+    only_incumbent = sorted(inc_missions - cand_missions)
+    parts = [
+        f"only the candidate scored {', '.join(only_candidate)}" if only_candidate else "",
+        f"only the incumbent scored {', '.join(only_incumbent)}" if only_incumbent else "",
+    ]
+    return "; ".join(p for p in parts if p) or None
+
+
+def _diagnostics(
+    candidate: dict[str, Any], incumbent: dict[str, Any], alarm: float
+) -> tuple[list[str], list[str]]:
+    """Report every non-gating slice; alarm on any AUC drop beyond `alarm`."""
+    reasons, alarms = [], []
+    for mission in (*DIAGNOSTIC_MISSIONS, AGGREGATE_SLICE):
+        cand = candidate.get("per_mission", {}).get(mission)
+        inc = incumbent.get("per_mission", {}).get(mission)
+        if cand is None or inc is None:
+            continue
+        delta = cand["roc_auc"] - inc["roc_auc"]
+        label = "reported, never gates" if mission == AGGREGATE_SLICE else "diagnostic"
+        reasons.append(
+            f"{mission} AUC {cand['roc_auc']:.4f} vs {inc['roc_auc']:.4f} ({delta:+.4f}, {label})"
+        )
+        if mission != AGGREGATE_SLICE and delta < -alarm:
+            alarms.append(
+                f"{mission} AUC fell {delta:+.4f} (>{alarm}) — this does not block "
+                "promotion but requires a written explanation in the roadmap first"
+            )
+    return reasons, alarms
+
+
 def evaluate_promotion(
     candidate: dict[str, Any],
     incumbent: dict[str, Any] | None,
     *,
     brier_tolerance: float = 0.005,
     ece_tolerance: float = 0.01,
+    recall_tolerance: float = 0.02,
+    mission_alarm: float = 0.02,
+    allow_unmatched_populations: bool = False,
 ) -> PromotionDecision:
-    """Compare a candidate cv_summary against the incumbent's."""
+    """Compare a candidate cv_summary against the incumbent's.
+
+    Gates on `GATE_MISSION` when both summaries carry a `per_mission` block.
+    Without it there is no way to check the two means cover the same rows, so
+    the fallback refuses rather than comparing populations that may differ —
+    see `_population_mismatch`. `allow_unmatched_populations` overrides that
+    for a deliberate cross-population read.
+    """
     if incumbent is None:
         return PromotionDecision(True, ["first registered model — becomes the incumbent"])
 
-    cand_auc = _mean(candidate, "test_roc_auc")
-    inc_auc = _mean(incumbent, "test_roc_auc")
-    cand_brier = _mean(candidate, "test_brier")
-    inc_brier = _mean(incumbent, "test_brier")
+    cand_slice, inc_slice = _gate_slice(candidate), _gate_slice(incumbent)
+    cand_recall: float | None = None
+    inc_recall: float | None = None
+    cand_ece: float | None
+    inc_ece: float | None
+    if cand_slice is not None and inc_slice is not None:
+        cand_auc, inc_auc = cand_slice["roc_auc"], inc_slice["roc_auc"]
+        cand_brier, inc_brier = cand_slice["brier"], inc_slice["brier"]
+        cand_ece, inc_ece = cand_slice["ece"], inc_slice["ece"]
+        cand_recall, inc_recall = cand_slice["recall_at_1pct_fpr"], inc_slice["recall_at_1pct_fpr"]
+        header = f"gated on {GATE_MISSION} (n={cand_slice['n']:.0f}), the deployment population"
+    else:
+        cand_auc, inc_auc = _mean(candidate, "test_roc_auc"), _mean(incumbent, "test_roc_auc")
+        cand_brier, inc_brier = _mean(candidate, "test_brier"), _mean(incumbent, "test_brier")
+        cand_ece, inc_ece = (
+            _mean_or_none(candidate, "test_ece"),
+            _mean_or_none(incumbent, "test_ece"),
+        )
+        header = "gated on pooled CV means — a summary here predates the per_mission block"
 
+    mismatch = _population_mismatch(candidate, incumbent)
+    paired = paired_folds(candidate, incumbent)
     reasons = [
+        header,
         f"ROC-AUC {cand_auc:.4f} vs incumbent {inc_auc:.4f}",
         f"Brier {cand_brier:.4f} vs incumbent {inc_brier:.4f}",
     ]
+    diagnostics, alarms = _diagnostics(candidate, incumbent, mission_alarm)
+    reasons += diagnostics
+
+    # Every comparison below is an inequality, and NaN loses all of them — so a
+    # degenerate run (a single-class fold, an empty slice, a blown-up loss)
+    # would sail through every guard and promote itself. Checked first, on both
+    # sides: a NaN incumbent metric is a corrupt registry, and promoting past it
+    # unnoticed is the same failure.
+    unmeasured = [
+        f"{name} ({side})"
+        for name, cand, inc in (
+            ("ROC-AUC", cand_auc, inc_auc),
+            ("Brier", cand_brier, inc_brier),
+            ("ECE", cand_ece, inc_ece),
+            ("recall @1% FPR", cand_recall, inc_recall),
+        )
+        for side, value in (("candidate", cand), ("incumbent", inc))
+        if value is not None and not math.isfinite(value)
+    ]
+    if unmeasured:
+        reasons.append(f"not measurable: {', '.join(unmeasured)}")
+        return PromotionDecision(False, reasons, alarms)
+
+    # Gating on the deployment slice compares one mission the two runs both
+    # scored, so a mission only one of them has is worth reporting but does not
+    # invalidate the comparison. The pooled fallback has no such footing: it
+    # compares each run's mean over its own rows, and this project has been
+    # doing exactly that against an incumbent whose build predates K2.
+    if mismatch:
+        gated_on_slice = cand_slice is not None and inc_slice is not None
+        reasons.append(f"populations differ: {mismatch}")
+        if gated_on_slice:
+            alarms.append(
+                f"populations differ ({mismatch}) — the pooled slice is not like-for-like"
+            )
+        elif not allow_unmatched_populations:
+            reasons.append(
+                "refusing to promote on a pooled comparison whose rows cannot be "
+                "matched — re-baseline the incumbent on the current view set, or "
+                "pass allow_unmatched_populations=True to read it anyway"
+            )
+            return PromotionDecision(False, reasons, alarms)
+
     if cand_auc <= inc_auc:
         reasons.append("does not beat the incumbent's CV score")
-        return PromotionDecision(False, reasons)
+        return PromotionDecision(False, reasons, alarms)
     if cand_brier > inc_brier + brier_tolerance:
         reasons.append(f"calibration degraded beyond tolerance (+{brier_tolerance})")
-        return PromotionDecision(False, reasons)
+        return PromotionDecision(False, reasons, alarms)
 
-    cand_ece = _mean_or_none(candidate, "test_ece")
-    inc_ece = _mean_or_none(incumbent, "test_ece")
     if cand_ece is not None and inc_ece is not None:
         reasons.append(f"ECE {cand_ece:.4f} vs incumbent {inc_ece:.4f}")
         if cand_ece > inc_ece + ece_tolerance:
             reasons.append(f"reliability degraded beyond tolerance (+{ece_tolerance})")
-            return PromotionDecision(False, reasons)
+            return PromotionDecision(False, reasons, alarms)
     else:
         reasons.append("ECE guard skipped — summary predates the test_ece field")
 
-    reasons.append("beats incumbent with calibration intact")
-    return PromotionDecision(True, reasons)
+    if cand_recall is not None and inc_recall is not None:
+        reasons.append(f"recall @1% FPR {cand_recall:.3f} vs incumbent {inc_recall:.3f}")
+        if cand_recall < inc_recall - recall_tolerance:
+            reasons.append(f"shortlist recall degraded beyond tolerance (-{recall_tolerance})")
+            return PromotionDecision(False, reasons, alarms)
+    else:
+        reasons.append("recall guard skipped — summary predates the per_mission block")
+
+    if paired is not None:
+        reasons.append(str(paired))
+        # The mean can clear the incumbent while the candidate loses most folds,
+        # which is what winning on training noise looks like. Alarmed rather than
+        # blocking: at five folds the signed-rank test cannot reach p<0.05, so
+        # refusing on it would refuse every real improvement too.
+        if paired.wins * 2 <= len(paired.deltas):
+            alarms.append(
+                f"the candidate won only {paired.wins}/{len(paired.deltas)} folds head to head "
+                "— the mean improvement is not reproduced fold by fold"
+            )
+        elif abs(paired.effect_size) < 1.0:
+            alarms.append(
+                f"paired effect size d={paired.effect_size:+.2f} is inside the fold-to-fold "
+                "spread — repeat the run before reading this as an improvement"
+            )
+
+    reasons.append("beats incumbent with calibration and shortlist recall intact")
+    return PromotionDecision(True, reasons, alarms)
 
 
 # ------------------------------------------------------------------ registry --
@@ -134,8 +391,31 @@ def publishable_cv_dirs(models_dir: Path) -> list[Path]:
     return dirs
 
 
+def assert_servable(cv_dir: Path) -> None:
+    """Every fold must hold weights and a calibrator before the registry names it.
+
+    Stage 2(a) run 1 wrote no checkpoints at all — a metrics-only run that would
+    promote cleanly here and fail at serve time, long after the decision. The
+    registry is a pointer to something that has to exist.
+    """
+    folds = sorted(cv_dir.glob("fold_*"))
+    if not folds:
+        raise ValueError(f"{cv_dir} holds no fold_* directories — nothing to serve")
+    incomplete = [
+        fold.name
+        for fold in folds
+        if not any(fold.glob("*.keras")) or not any(fold.glob("*calibrator*.joblib"))
+    ]
+    if incomplete:
+        raise ValueError(
+            f"{cv_dir}: {incomplete} lack weights or a calibrator bundle — "
+            "this run cannot be served and must not be promoted"
+        )
+
+
 def promote(models_dir: Path, run_id: str, cv_summary_path: Path) -> dict[str, Any]:
     """Point the registry at a new best run. Caller decides via evaluate_promotion."""
+    assert_servable(cv_summary_path.parent)
     summary = json.loads(cv_summary_path.read_text())
     registry = {
         "run_id": run_id,

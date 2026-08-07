@@ -9,13 +9,18 @@ unit tests; the orchestrator branch wires them into the live DAG.
 from exoplanet_hunter.validation.leakage import (
     assert_refresh_safe,
     diff_label_catalogues,
+    drop_quarantined,
+    load_quarantine,
     quarantine_tics,
+    record_quarantine,
 )
 from exoplanet_hunter.validation.promotion import (
+    PairedFolds,
     PromotionDecision,
     evaluate_promotion,
     load_incumbent_summary,
     load_registry,
+    paired_folds,
     promote,
     publishable_cv_dirs,
 )
@@ -30,6 +35,7 @@ from exoplanet_hunter.validation.shrink import check_catalogue_shrink
 from exoplanet_hunter.validation.trigger import RefreshDecision, evaluate_refresh
 
 __all__ = [
+    "PairedFolds",
     "PromotionDecision",
     "RefreshDecision",
     "assert_refresh_safe",
@@ -39,12 +45,16 @@ __all__ = [
     "check_view_set",
     "check_views",
     "diff_label_catalogues",
+    "drop_quarantined",
     "evaluate_promotion",
     "evaluate_refresh",
     "label_catalogue_schema",
     "load_incumbent_summary",
+    "load_quarantine",
     "load_registry",
+    "paired_folds",
     "promote",
     "publishable_cv_dirs",
     "quarantine_tics",
+    "record_quarantine",
 ]
