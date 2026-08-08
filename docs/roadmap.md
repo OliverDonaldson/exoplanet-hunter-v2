@@ -93,7 +93,7 @@ in HANDOVER.md.
 | **3** *(old A)* re-baselined incumbent summary | **done** 2026-08-08 | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`; the gate returns decisions again instead of refusing |
 | **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
-| **6** recall variance + re-baseline | **in progress** — built and pre-registered 2026-08-08, run pending | `recall @1% FPR` has rejected all four arms and had no variance estimate at all. Now recorded per member and per pooled-member draw; `recall_*`, `gate_recall_*` and `pooled_gate_recall_seed_sd` join the AUC pair in `summary.variance`. The re-baseline run is the control for every stage after it |
+| **6** recall variance + re-baseline | **done** 2026-08-09 | `pooled_gate_recall_seed_sd` **0.0292** → **a recall @1% FPR margin under ~0.034 is not a decision**. Run 3's rejection is sound at 4.8× the floor; the capacity arm's 0.145 → 0.236 was **real, not noise**, and stays unactionable. `models/cv/branches-20260808-rebaseline` is the control for every stage after it |
 | **7** *(old D)* branch attribution | not started | absorbs the unfolded-flux branch (old 2(b)), trend + periodogram (old 2(c)) and the training half of stage 11's occlusion |
 | **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9** | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
@@ -1049,6 +1049,13 @@ the control run is explained by the artefact rather than guessed at later. Run 3
 recorded no provenance at all and the capacity arm recorded `dirty: True` with
 no explanation; this is the first branch run whose flag means something specific.
 
+*(Outcome: the run recorded `git_dirty=False`, not True. The stated reason for
+predicting True stopped holding between writing this and launching — a broad
+`git add docs/` in `6005506` swept that untracked file into the commit, so the
+tree really was clean. The provenance claim is stronger than pre-registered, but
+it is stronger by accident, and the prediction was wrong for a reason worth
+recording rather than quietly benefiting from.)*
+
 **Nothing promotes.** The re-baseline is a control. `models/registry.json` is
 untouched, `ca906040` stays served, and a favourable number here does not reopen
 stage 4 — only stage 7's leave-one-out runs, read against this re-baseline, can
@@ -1076,6 +1083,97 @@ If the re-baseline's TESS AUC lands outside ±0.009 of 0.9119 in either directio
 that is a **falsified prediction** and is reported as one. It is not re-read as
 an improvement or a regression: one run of a control cannot carry that, and stage
 7 re-baselines again anyway.
+
+### Stage 6 result — the recall noise floor, measured (2026-08-09)
+
+`models/cv/branches-20260808-rebaseline`, HEAD `6005506`, `git_dirty=False`,
+5,426 rows, `--n-models-per-fold 3`. **Every pre-registered prediction landed
+within its band**, and the outcome is **branch 1** of the three fixed before the
+first launch.
+
+**The deliverable.** Recall @1% FPR now has the error bar AUC has had since
+2026-08-08:
+
+```
+pooled gate draws (n=2,399 TESS rows):  0.1857  0.1842  0.2355
+pooled_gate_recall_seed_sd = 0.0292          <- the primary estimate
+```
+
+| floor | seed_sd | fold_sd |
+|---|---:|---:|
+| AUC *(existing; run 3 had 0.0081 / 0.0094)* | 0.0060 | 0.0101 |
+| recall, all missions | 0.0485 | 0.0547 |
+| recall, gate slice, **per fold** | 0.0689 | 0.0888 |
+| recall, gate slice, **pooled** | **0.0292** | — |
+
+The fold-level estimate is **2.4× the pooled one**, exactly as pre-registered —
+a fold's TESS slice carries ~215 negatives and a 1% FPR cut of two rows, so it
+was only ever an upper bound. Using it would have overstated the noise by more
+than a factor of two.
+
+**The threshold this yields**, by the same rule AUC's came from
+(`2 × seed_sd / √n_models`):
+
+> **A recall @1% FPR margin under ~0.034 is not a decision.**
+
+**The two pre-registered questions, answered.**
+
+| question | margin | vs 0.0337 | verdict |
+|---|---:|---|---|
+| Is run 3's 0.145-vs-0.307 rejection sound? | 0.162 | **4.8×** the floor | **sound** |
+| Was the capacity arm's 0.145 → 0.236 noise? | 0.091 | **2.7×** the floor | **not noise** |
+
+The capacity arm's recall jump was a **real effect**, not the artefact this
+project feared. Per the pre-registration it stays **unactionable regardless** —
+`init_filters=22` was measured on an architecture that is not on HEAD — so it is
+recorded as a lead for stage 7 and nothing is built on it.
+
+**The re-baseline itself** *(its own `per_mission` block, n=2,399 on TESS — not
+the n=2,367 gate slice)*:
+
+| slice | n | AUC | Brier | ECE | R@1% FPR |
+|---|---:|---:|---:|---:|---:|
+| K2 | 527 | 0.9351 | 0.1000 | 0.1141 | 0.1683 |
+| Kepler | 2,500 | 0.9547 | 0.0839 | 0.0275 | 0.5328 |
+| **TESS** *(gates)* | 2,399 | **0.9202** | 0.1108 | **0.0159** | **0.2196** |
+| all | 5,426 | 0.9365 | 0.0973 | 0.0108 | 0.2855 |
+
+Against the two runs on the identical shard set:
+
+| | TESS AUC | TESS R@1% FPR |
+|---|---:|---:|
+| run 3 | 0.9119 | 0.1434 |
+| capacity arm | 0.9076 | 0.2332 |
+| **re-baseline** | **0.9202** | **0.2196** |
+
+**Shortlist recall rose 0.1434 → 0.2196 against run 3 — a margin of 0.0762, or
+2.3× the floor measured in the same run.** Read with pre-registered caveat 1:
+reseeding noise is *necessary, not sufficient* for a cross-run margin, and this
+one spans three training-path changes at once (unfolded rebuild, stratified inner
+split, augmentation masking), so it attributes to none of them. It is also still
+well below the incumbent's 0.307.
+
+**Gate: REJECT**, run as a reported diagnostic and not a decision, exactly as
+pre-registered. TESS AUC 0.9202 vs 0.9100 and ECE 0.0159 vs 0.0438 both favour
+the candidate; **shortlist recall 0.220 vs 0.307 rejects it**, which is the same
+criterion that closed stage 4 and it is now the first time that rejection is
+backed by a measured floor. `ca906040` stays served; the registry is untouched.
+
+**The Kepler alarm, explained as the pre-commitment requires.** Kepler fell
+−0.0367 against the incumbent, past the 0.02 alarm. It is not a regression: at
+0.9547 this is the **best Kepler any branch model has reached** (run 3 0.9464,
+capacity 0.9449), so the gap narrowed rather than widened. The branch line has
+lost on Kepler since run 1 and the cause is unresolved — the narrow-span,
+high-count cell that three architectures have not moved.
+
+**Two readings that are not decisions, recorded because they will be tempting.**
+The +0.0083 TESS AUC over run 3 sits at 92% of its own pre-registered band and
+just under the AUC floor's 2σ (~0.007 at this run's `seed_sd 0.0060`) — **level
+is the honest reading**, not an improvement. And observation baseline sensitivity
+rose to **+0.3025** (run 3: +0.2901), now *above* the +0.278 label correlation
+itself; transit sensitivity moved further from zero at **−0.1467** (run 3:
+−0.1249). Both are reported diagnostics, both point at stage 8, and neither gates
+anything.
 
 **Stage 7 *(old D)* — branch attribution.** Which of the eleven branches earn
 their place, now that the unfolded one can actually see a transit. A branch-drop
