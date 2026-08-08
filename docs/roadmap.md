@@ -711,13 +711,18 @@ run so far is a baseline for the rebuilt model. The direction is the opposite of
 the capacity arm's (+19%, paired d = −0.44, nothing), which is weak evidence
 that −21.3% is not decisive on its own. Weak evidence, not a measurement.
 
-**Deferred deliberately: the inner validation split is unstratified.**
-`GroupShuffleSplit` does not guarantee both classes reach the Platt fit, which
-calibration requires. `StratifiedGroupKFold` is the fix, and it changes the
-inner partition and therefore the numbers — so it waits until the current
-experiment series closes rather than landing between a run and its own control.
-Production is safe meanwhile (~868 validation rows); it is the 4-row test
-fixtures that exposed it.
+**The inner validation split is now stratified (2026-08-08).** It was
+`GroupShuffleSplit`, which is group-aware but guarantees nothing about class
+balance — and the Platt fit downstream requires both classes, or it converges
+happily on a scaler that maps every score to one end. Both affected sites now
+call `training/splits.py`'s `stratified_inner_split`; the random-forest holdout
+at `train.py:132` is a test split and is untouched.
+
+This changes the inner partition and therefore the numbers, which is why it had
+been deferred to "between experiments". It landed here because the unfolded
+rebuild already forces a fresh baseline — **one re-baseline absorbs both changes
+instead of two**. Production was never at risk (~868 validation rows); it was
+the tiny test fixtures that exposed it.
 
 ### The one cell three architectures have not moved
 

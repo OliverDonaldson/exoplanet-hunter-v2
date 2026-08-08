@@ -4,14 +4,31 @@
 zero-shot scores across one population is a comparability defect. That invariant
 was enforced nowhere until 2026-08-08, which is the class of defect this project
 keeps finding: a stated rule with no code behind it.
+
+`score_run` — the model-loading half — was itself untested until later the same
+day, while `summarise_scored` had coverage. Its tests are at the bottom.
 """
 
 from __future__ import annotations
 
+import joblib
+import numpy as np
 import pandas as pd
 import pytest
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
-from exoplanet_hunter.eval.scoring import Protocol, summarise_scored
+from exoplanet_hunter.datasets.tfrecords import ShardMetadata, load_index, write_tfrecord_shards
+from exoplanet_hunter.datasets.views_io import ViewArrays
+from exoplanet_hunter.eval.scoring import (
+    Protocol,
+    legacy_aux,
+    read_views,
+    score_run,
+    summarise_scored,
+)
+from exoplanet_hunter.training.calibration import PlattScaler
 
 
 def scored(**overrides) -> pd.DataFrame:
@@ -104,3 +121,199 @@ def test_no_folds_block_so_pairing_reports_nothing_rather_than_something_wrong()
     result = summarise_scored(scored(), source="test")
     assert "folds" not in result
     assert paired_folds({"folds": [{"test_roc_auc": 0.9}]}, result) is None
+
+
+# ------------------------------------------------------------- score_run --
+#
+# Every guard below stands between a plausible number and a wrong one, which is
+# the only reason any of them exists.
+
+GLOBAL_BINS, LOCAL_BINS, AUX_DIM = 64, 16, 13
+N_ROWS = 12
+
+
+def views_and_labels(n: int = N_ROWS, *, seed: int = 0):
+    """A legacy dual-view shard set plus the catalogue rows it joins against."""
+    rng = np.random.default_rng(seed)
+    tic_ids = np.arange(1, n + 1, dtype=np.int64)
+    views = ViewArrays(
+        global_views=rng.normal(size=(n, GLOBAL_BINS)).astype(np.float32),
+        local_views=rng.normal(size=(n, LOCAL_BINS)).astype(np.float32),
+        labels=np.array([1, 0] * (n // 2), dtype=np.int8),
+        tic_ids=tic_ids,
+        aux_features=rng.normal(size=(n, AUX_DIM)).astype(np.float32),
+    )
+    labels = pd.DataFrame({"tic_id": tic_ids, "snr": rng.uniform(5.0, 50.0, n)})
+    return views, labels
+
+
+def constant_model(probability: float):
+    """A dual-view model that ignores its inputs and emits one value.
+
+    Constant on purpose: it makes the *routing* observable. Which fold scored a
+    row is otherwise invisible in the output, and routing is what `OUT_OF_FOLD`
+    has to get right.
+    """
+    import tensorflow as tf
+
+    g = tf.keras.Input(shape=(GLOBAL_BINS,), name="global_view")
+    lo = tf.keras.Input(shape=(LOCAL_BINS,), name="local_view")
+    aux = tf.keras.Input(shape=(9,), name="aux_features")
+    out = tf.keras.layers.Dense(1, activation="sigmoid", name="prediction")(
+        tf.keras.layers.Concatenate()([g, lo, aux])
+    )
+    model = tf.keras.Model([g, lo, aux], out)
+    dense = model.get_layer("prediction")
+    kernel, _ = dense.get_weights()
+    logit = float(np.log(probability / (1.0 - probability)))
+    dense.set_weights([np.zeros_like(kernel), np.array([logit], dtype=np.float32)])
+    return model
+
+
+def write_run(run_dir, aux, fold_probabilities: dict[int, float]):
+    """A run directory: one checkpoint and calibrator bundle per fold."""
+    for fold, probability in fold_probabilities.items():
+        fold_dir = run_dir / f"fold_{fold}"
+        fold_dir.mkdir(parents=True, exist_ok=True)
+        constant_model(probability).save(fold_dir / "cnn_dualview.keras")
+        pipeline = make_pipeline(SimpleImputer(strategy="median"), StandardScaler()).fit(aux)
+        joblib.dump(
+            {"aux_pipeline": pipeline, "calibrator": PlattScaler(1.0, 0.0)},
+            fold_dir / "cnn_calibrator.joblib",
+        )
+    return run_dir
+
+
+@pytest.fixture
+def scoring_fixture(tmp_path):
+    """Shards, catalogue and a two-fold run, wired the way `score_run` expects."""
+    views, labels = views_and_labels()
+    shard_dir = tmp_path / "shards"
+    write_tfrecord_shards(views, shard_dir, examples_per_shard=8)
+    aux = legacy_aux(load_index(shard_dir), labels, AUX_DIM)
+    run_dir = write_run(tmp_path / "run", aux, {0: 0.25, 1: 0.75})
+    return shard_dir, run_dir, labels, views
+
+
+def test_legacy_aux_rebuilds_index_seven_rather_than_slicing():
+    """The 9-dim and 13-dim layouts disagree at index 7 — catalogue SNR there,
+    `pink_snr` in the shards. Slicing 13 -> 9 feeds one lane into the other and
+    returns a confident wrong number."""
+    index = pd.DataFrame(
+        {"tic_id": [1, 2], **{f"aux_{k}": [float(k), float(k) + 100] for k in range(AUX_DIM)}}
+    )
+    labels = pd.DataFrame({"tic_id": [1, 2], "snr": [11.0, 22.0]})
+
+    aux = legacy_aux(index, labels, AUX_DIM)
+    assert aux.shape == (2, 9)
+    np.testing.assert_array_equal(aux[:, 7], [11.0, 22.0])
+    assert aux[0, 7] != index.loc[0, "aux_7"], "index 7 was taken from the shard, not the catalogue"
+    np.testing.assert_array_equal(aux[:, :7], index[[f"aux_{k}" for k in range(7)]].to_numpy())
+    np.testing.assert_array_equal(aux[:, 8], index["aux_8"].to_numpy())
+
+
+def test_legacy_aux_leaves_a_missing_catalogue_snr_as_nan():
+    """All 527 K2 rows have no catalogue SNR. NaN lets the fold's own pipeline
+    impute it, which is the path a non-TOI already takes at serve time; a zero
+    would be a measurement."""
+    index = pd.DataFrame(
+        {"tic_id": [1, 2], **{f"aux_{k}": [float(k), float(k)] for k in range(AUX_DIM)}}
+    )
+    labels = pd.DataFrame({"tic_id": [1], "snr": [11.0]})
+    aux = legacy_aux(index, labels, AUX_DIM)
+    assert aux[0, 7] == 11.0
+    assert np.isnan(aux[1, 7])
+
+
+@pytest.mark.parametrize(
+    ("protocol", "fold_of"),
+    [(Protocol.OUT_OF_FOLD, None), (Protocol.ZERO_SHOT, pd.Series({1: 0}))],
+)
+def test_the_protocol_and_fold_map_must_agree(tmp_path, protocol, fold_of):
+    """Supplying `fold_of` under ZERO_SHOT is refused rather than ignored: the
+    caller clearly meant one thing and asked for the other."""
+    with pytest.raises(ValueError, match="needs fold_of"):
+        score_run(tmp_path, tmp_path, labels=pd.DataFrame(), protocol=protocol, fold_of=fold_of)
+
+
+def test_a_run_with_no_folds_raises(tmp_path, scoring_fixture):
+    shard_dir, _, labels, _ = scoring_fixture
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError, match=r"no fold_\* directories"):
+        score_run(empty, shard_dir, labels=labels, protocol=Protocol.ZERO_SHOT)
+
+
+def test_out_of_fold_scores_each_row_with_the_fold_that_held_it_out(scoring_fixture):
+    """The protocol's whole content. Each fold's model emits its own constant,
+    so the returned score names the fold that produced it."""
+    shard_dir, run_dir, labels, views = scoring_fixture
+    assignment = {int(t): int(i % 2) for i, t in enumerate(views.tic_ids)}
+    fold_of = pd.Series(assignment)
+
+    result = score_run(
+        run_dir, shard_dir, labels=labels, protocol=Protocol.OUT_OF_FOLD, fold_of=fold_of
+    )
+    assert result.protocol is Protocol.OUT_OF_FOLD
+    assert len(result.predictions) == len(views.tic_ids)
+    expected = {0: 0.25, 1: 0.75}
+    for row in result.predictions.itertuples():
+        assert row.fold == assignment[row.tic_id]
+        assert row.score == pytest.approx(expected[row.fold], abs=1e-4)
+
+
+def test_a_row_whose_fold_has_no_checkpoint_raises_rather_than_scoring(scoring_fixture):
+    """`fold_of` comes from predictions.parquet and `folds` from globbing the
+    directory; nothing ties them together. Uninitialised memory returned as a
+    calibrated probability is the failure this replaced."""
+    shard_dir, run_dir, labels, views = scoring_fixture
+    fold_of = pd.Series({int(t): 7 for t in views.tic_ids})  # no fold_7 on disk
+    with pytest.raises(RuntimeError, match="no checkpoint"):
+        score_run(run_dir, shard_dir, labels=labels, protocol=Protocol.OUT_OF_FOLD, fold_of=fold_of)
+
+
+def test_zero_shot_refuses_a_run_whose_trained_rows_are_unknown(scoring_fixture):
+    """Averaging every fold over a row one of them trained on is not a held-out
+    measurement, and nothing downstream could tell."""
+    shard_dir, run_dir, labels, _ = scoring_fixture
+    with pytest.raises(ValueError, match="contamination filter cannot run"):
+        score_run(run_dir, shard_dir, labels=labels, protocol=Protocol.ZERO_SHOT)
+
+
+def test_zero_shot_proceeds_when_the_caller_takes_responsibility(scoring_fixture):
+    shard_dir, run_dir, labels, views = scoring_fixture
+    result = score_run(
+        run_dir,
+        shard_dir,
+        labels=labels,
+        protocol=Protocol.ZERO_SHOT,
+        allow_untracked_rows=True,
+    )
+    assert result.protocol is Protocol.ZERO_SHOT
+    assert len(result.predictions) == len(views.tic_ids)
+    # The mean of the two folds' constants, and the fold column says "no fold".
+    assert result.predictions["score"].to_numpy() == pytest.approx(0.5, abs=1e-4)
+    assert (result.predictions["fold"] == -1).all()
+
+
+def test_zero_shot_drops_the_rows_the_run_trained_on(scoring_fixture):
+    """The contamination filter, from the run's own predictions.parquet."""
+    shard_dir, run_dir, labels, views = scoring_fixture
+    trained_on = views.tic_ids[:5]
+    pd.DataFrame({"tic_id": trained_on, "score": 0.5}).to_parquet(run_dir / "predictions.parquet")
+
+    result = score_run(run_dir, shard_dir, labels=labels, protocol=Protocol.ZERO_SHOT)
+    assert not set(result.predictions["tic_id"]) & set(trained_on.tolist())
+    assert len(result.predictions) == len(views.tic_ids) - len(trained_on)
+
+
+def test_read_views_refuses_a_stream_that_does_not_match_the_index(scoring_fixture):
+    """Scores are joined back positionally, so a reordered stream would attach
+    every probability to the wrong star."""
+    shard_dir, _, _, _ = scoring_fixture
+    index = load_index(shard_dir)
+    metadata = ShardMetadata.load(shard_dir)
+    read_views(shard_dir, metadata, index)  # the honest ordering is fine
+
+    with pytest.raises(RuntimeError, match="does not match the index"):
+        read_views(shard_dir, metadata, index.iloc[::-1].reset_index(drop=True))

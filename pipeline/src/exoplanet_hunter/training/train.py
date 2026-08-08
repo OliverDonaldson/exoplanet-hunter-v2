@@ -74,6 +74,7 @@ from exoplanet_hunter.training.mlflow_utils import (
     start_root_run,
 )
 from exoplanet_hunter.training.precision import apply_precision_policy
+from exoplanet_hunter.training.splits import stratified_inner_split
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
 
 log = get_logger(__name__)
@@ -180,7 +181,7 @@ def _train_rf(cfg: DictConfig, paths: ProjectPaths) -> float:
 def _train_cnn_cv(cfg: DictConfig, paths: ProjectPaths) -> float:
     """Stratified group k-fold CV over the shard set. Group = tic_id.
 
-    Per fold: outer split -> fold-test; inner GroupShuffleSplit -> train/val
+    Per fold: outer split -> fold-test; `stratified_inner_split` -> train/val
     (val drives EarlyStopping, the threshold sweep, and the calibrator fit).
     Returns mean test ROC-AUC across folds.
     """
@@ -219,9 +220,9 @@ def _train_cnn_cv(cfg: DictConfig, paths: ProjectPaths) -> float:
         idx = np.arange(len(y))
         for fold_idx, (trainval_idx, test_idx) in enumerate(sgkf.split(idx, y, groups)):
             inner_seed = int(cfg.seed) * 1000 + fold_idx
-            inner = GroupShuffleSplit(n_splits=1, test_size=val_frac, random_state=inner_seed)
-            tr_rel, va_rel = next(inner.split(trainval_idx, y[trainval_idx], groups[trainval_idx]))
-            train_idx, val_idx = trainval_idx[tr_rel], trainval_idx[va_rel]
+            train_idx, val_idx = stratified_inner_split(
+                trainval_idx, y, groups, val_frac=val_frac, seed=inner_seed
+            )
 
             fold_dir = cv_root / f"fold_{fold_idx}"
             fold_dir.mkdir(parents=True, exist_ok=True)

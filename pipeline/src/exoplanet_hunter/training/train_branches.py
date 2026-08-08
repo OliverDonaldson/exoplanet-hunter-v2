@@ -1,7 +1,7 @@
 """Cross-validated training for the per-diagnostic branch model.
 
 Same evaluation contract as `train.py`: StratifiedGroupKFold with group =
-tic_id, an inner GroupShuffleSplit for early stopping and the Platt fit, and a
+tic_id, a `stratified_inner_split` for early stopping and the Platt fit, and a
 `cv_summary.json` in the schema the promotion gate reads. Reusing that schema
 matters — two implementations of it would drift, and the gate is what decides
 whether a run is better than the incumbent.
@@ -27,7 +27,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold
 
 from exoplanet_hunter.datasets.viewset_pipeline import (
     AugmentConfig,
@@ -43,6 +43,7 @@ from exoplanet_hunter.eval.metrics import classification_metrics
 from exoplanet_hunter.eval.observation_bias import measure_observation_bias
 from exoplanet_hunter.models.cnn_branches import build_cnn_branches
 from exoplanet_hunter.training.calibration import PlattScaler, expected_calibration_error
+from exoplanet_hunter.training.splits import stratified_inner_split
 from exoplanet_hunter.utils.logging import get_logger
 from exoplanet_hunter.utils.provenance import git_provenance
 from exoplanet_hunter.validation.leakage import drop_quarantined, load_quarantine
@@ -373,16 +374,15 @@ def run_cv(
     predictions: list[pd.DataFrame] = []
     positions = np.arange(len(y))
     for fold, (trainval, test_idx) in enumerate(splitter.split(positions, y, groups)):
-        inner = GroupShuffleSplit(
-            n_splits=1, test_size=config.val_frac, random_state=config.seed * 1000 + fold
+        train_idx, val_idx = stratified_inner_split(
+            trainval, y, groups, val_frac=config.val_frac, seed=config.seed * 1000 + fold
         )
-        tr_rel, va_rel = next(inner.split(trainval, y[trainval], groups[trainval]))
         metrics, fold_predictions = run_fold(
             shard_dir,
             index,
             metadata,
-            train_idx=trainval[tr_rel],
-            val_idx=trainval[va_rel],
+            train_idx=train_idx,
+            val_idx=val_idx,
             test_idx=test_idx,
             config=config,
             model_cfg=model_cfg,
