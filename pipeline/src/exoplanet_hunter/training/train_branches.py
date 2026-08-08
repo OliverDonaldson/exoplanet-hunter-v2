@@ -9,8 +9,8 @@ whether a run is better than the incumbent.
 Also the same *artefact* contract, which it did not have until 2026-08-06: a
 per-fold checkpoint and calibration bundle, and every metric measured on the
 reloaded checkpoint rather than on whatever `fit()` left in memory. Run 1 of
-stage 2(a) wrote no checkpoint at all, so the model behind its numbers no
-longer exists.
+stage 4 (old 2(a)) wrote no checkpoint at all, so the model behind its numbers
+no longer exists.
 
 Nothing here promotes anything. It writes a summary; comparing it to the
 incumbent is `promotion_gate.py`'s job.
@@ -38,7 +38,7 @@ from exoplanet_hunter.datasets.viewset_pipeline import (
     parse_viewset_shards,
 )
 from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_index, load_metadata
-from exoplanet_hunter.eval.comparison import SliceMetrics
+from exoplanet_hunter.eval.comparison import MISSION_COLUMN, SliceMetrics, recall_at_fpr
 from exoplanet_hunter.eval.metrics import classification_metrics
 from exoplanet_hunter.eval.observation_bias import measure_observation_bias
 from exoplanet_hunter.models.cnn_branches import build_cnn_branches
@@ -54,6 +54,38 @@ log = get_logger(__name__)
 SUMMARY_KEYS = ("test_roc_auc", "test_pr_auc", "test_f1", "test_brier", "test_ece")
 CHECKPOINT_NAME = "cnn_branches.keras"
 BUNDLE_NAME = "cnn_calibrator.joblib"
+
+#: The false-positive rate the shortlist operates at. `recall_at_fpr` is called
+#: with it here and in `SliceMetrics`; the two must not drift, because one is the
+#: gate's number and the other is the noise floor that number is read against.
+GATE_FPR = 0.01
+
+#: Per-member statistics whose spread `summary.variance` decomposes, as
+#: `(per-member key in each fold row, prefix on the reported sd)`.
+#:
+#: AUC was the only one until 2026-08-08, and the omission mattered: **recall
+#: @1% FPR is the criterion that rejected all four arms of stage 4** — run 3 on
+#: 0.145 against the incumbent's 0.307 — while having no variance estimate at
+#: all. AUC's floor was measured (`seed_sd 0.0081`, `fold_sd 0.0094`) and "a
+#: margin under ~0.009 is not a decision" adopted from it; the statistic doing
+#: the actual rejecting never got the same treatment, so the capacity arm's
+#: 0.145 -> 0.236 could be neither believed nor dismissed.
+#:
+#: Two recall entries rather than one. `model_recall_at_1pct_fpr` mirrors the
+#: AUC exactly — the whole fold, every mission — and `model_gate_recall_...` is
+#: the same statistic over that fold's `GATE_MISSION` rows alone. They are not
+#: interchangeable: the gate reads TESS, which is ~44% of the rows, so the
+#: all-mission floor is measured on a population no decision is taken over.
+VARIANCE_COMPONENTS = (
+    ("model_roc_auc", ""),
+    ("model_recall_at_1pct_fpr", "recall_"),
+    ("model_gate_recall_at_1pct_fpr", "gate_recall_"),
+)
+
+#: Column prefix for each member's own uncalibrated score in
+#: `predictions.parquet`. They exist so the pooled out-of-fold statistic can be
+#: re-formed one member at a time — see `_pooled_member_draws`.
+MEMBER_SCORE_PREFIX = "member_score_"
 
 
 def _checkpoint_name(index: int, n_models: int) -> str:
@@ -71,6 +103,108 @@ class _MemberRun(NamedTuple):
     test_tics: np.ndarray
 
 
+def _format_sd(value: float | None) -> str:
+    """`None` is "nobody measured this", which must not print as a number."""
+    return "  n/a " if value is None else f"{value:.4f}"
+
+
+def _component_sds(rows: list[dict], key: str) -> tuple[float | None, float | None]:
+    """`(fold_sd, seed_sd)` for one per-member statistic.
+
+    A fold that recorded nothing for `key` — an empty list, which is how a fold
+    with no rows in the population reports itself — contributes to neither, so a
+    statistic nobody could measure comes back None rather than as a number
+    computed over the folds that happened to have data.
+
+    A fold that recorded a *non-finite* value raises instead. NaN loses every
+    inequality, so a `recall_seed_sd` of NaN would read as "this margin is not
+    inside the noise" in exactly the comparison the number exists to arbitrate —
+    the same shape as the NaN that once promoted a degenerate run.
+    """
+    per_fold = [list(r.get(key) or []) for r in rows]
+    for fold, members in enumerate(per_fold):
+        if members and not np.all(np.isfinite(members)):
+            raise ValueError(
+                f"fold {fold} recorded a non-finite {key}: {members}. A single-class "
+                f"slice cannot yield this statistic; the fold's population is degenerate."
+            )
+    fold_means = [float(np.mean(m)) for m in per_fold if m]
+    within = [float(np.std(m, ddof=1)) for m in per_fold if len(m) > 1]
+    return (
+        float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else None,
+        float(np.mean(within)) if within else None,
+    )
+
+
+def _pooled_member_draws(predictions: pd.DataFrame) -> dict[str, Any]:
+    """Independent draws of the *pooled* gate statistic, one per ensemble member.
+
+    `gate_recall_seed_sd` is measured on a fold's TESS slice — ~215 negatives, so
+    a 1% FPR cut of two rows, and a statistic set by where the third-highest
+    negative lands. The gate reads the pooled out-of-fold set instead: ~1,074
+    negatives, a cut of ten rows, and a materially better-conditioned number.
+    Bounding the second with the first only ever overstates the noise.
+
+    Member `i`'s score column is filled by whichever fold held each row, so
+    stacking them re-forms a complete out-of-fold prediction set for member `i`
+    alone — the same protocol as the ensemble, one seed instead of three. Their
+    spread is the run-level reseeding sd directly, with no `sqrt(n)` argument in
+    the way. Three draws is a thin sd and it is reported with its `n`.
+    """
+    # Sorted on the integer, not the string: `member_score_10` sorts before
+    # `member_score_2` lexicographically, which would reorder the draws. The
+    # order does not change their sd, but it changes which draw is which in the
+    # recorded list, and that list is read against the folds' own members.
+    columns = sorted(
+        (c for c in predictions.columns if c.startswith(MEMBER_SCORE_PREFIX)),
+        key=lambda c: int(c.removeprefix(MEMBER_SCORE_PREFIX)),
+    )
+    gate = (
+        predictions[predictions[MISSION_COLUMN] == GATE_MISSION]
+        if (MISSION_COLUMN in predictions.columns)
+        else predictions.iloc[:0]
+    )
+    if not columns or gate.empty:
+        # The same keys either way. A summary whose schema depends on whether a
+        # measurement succeeded is one where a missing key and a null mean the
+        # same thing to a reader and different things to a program.
+        return {
+            "pooled_gate_recall": [],
+            "pooled_gate_recall_seed_sd": None,
+            "pooled_gate_recall_n_draws": 0,
+            "pooled_gate_n": len(gate),
+        }
+    labels = gate["label"].to_numpy()
+    draws = []
+    for column in columns:
+        scores = gate[column].to_numpy(dtype=float)
+        if not np.all(np.isfinite(scores)):
+            # A fold that trained fewer members leaves NaN here rather than a
+            # short column, and a NaN score silently sinks those rows to the
+            # bottom of the ranking — a plausible number over a population that
+            # is not the one named.
+            raise ValueError(
+                f"{column} is not finite on every gate-mission row; the folds did "
+                f"not all train the same number of members"
+            )
+        draws.append(float(recall_at_fpr(labels, scores, GATE_FPR)))
+    if not np.all(np.isfinite(draws)):
+        # `recall_at_fpr` returns NaN on a single-class slice rather than
+        # raising, and an sd over NaN is NaN — which loses every inequality it
+        # would later be compared with. Empty was handled above; this is the
+        # other way the statistic can fail to exist.
+        raise ValueError(
+            f"the pooled {GATE_MISSION} slice yielded non-finite recall {draws} over "
+            f"{len(labels)} rows with {int(labels.sum())} positives; it is single-class"
+        )
+    return {
+        "pooled_gate_recall": draws,
+        "pooled_gate_recall_seed_sd": float(np.std(draws, ddof=1)) if len(draws) > 1 else None,
+        "pooled_gate_recall_n_draws": len(draws),
+        "pooled_gate_n": len(labels),
+    }
+
+
 def _variance_decomposition(rows: list[dict]) -> dict[str, float | None]:
     """Split the run's spread into seed variance and fold difficulty.
 
@@ -80,15 +214,20 @@ def _variance_decomposition(rows: list[dict]) -> dict[str, float | None]:
     draw wanders, and only the second says anything about whether a rerun would
     land in the same place. `seed` is None until a fold trains more than one
     model, because with one draw per fold there is nothing to measure it from.
+
+    Reported for every entry in `VARIANCE_COMPONENTS`, so recall @1% FPR — the
+    criterion that has done all the rejecting — carries the error bar AUC has
+    had since 2026-08-08. Purely additive: the promotion gate reads named keys
+    and the AUC pair keeps its unprefixed names.
     """
-    per_fold = [r.get("model_roc_auc") or [] for r in rows]
-    fold_means = [float(np.mean(m)) for m in per_fold if m]
-    within = [float(np.std(m, ddof=1)) for m in per_fold if len(m) > 1]
-    return {
-        "fold_sd": float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else None,
-        "seed_sd": float(np.mean(within)) if within else None,
-        "n_models_per_fold": len(per_fold[0]) if per_fold and per_fold[0] else 1,
-    }
+    decomposition: dict[str, float | None] = {}
+    for key, prefix in VARIANCE_COMPONENTS:
+        fold_sd, seed_sd = _component_sds(rows, key)
+        decomposition[f"{prefix}fold_sd"] = fold_sd
+        decomposition[f"{prefix}seed_sd"] = seed_sd
+    members = [r.get("model_roc_auc") or [] for r in rows]
+    decomposition["n_models_per_fold"] = len(members[0]) if members and members[0] else 1
+    return decomposition
 
 
 @dataclass
@@ -113,7 +252,7 @@ class CVConfig:
     #: shrinks it by ~sqrt(n), and each model's own metrics are recorded so
     #: seed variance and fold difficulty can finally be told apart.
     n_models_per_fold: int = 1
-    #: None disables augmentation. Run 1 of stage 2(a) trained without it while
+    #: None disables augmentation. Run 1 of stage 4 trained without it while
     #: the incumbent it was compared against had it — one of the ways that
     #: comparison was not like-for-like.
     augment: AugmentConfig | None = field(default_factory=AugmentConfig)
@@ -196,7 +335,7 @@ def run_fold(
 
     With `fold_dir`, the best epoch is checkpointed there and reloaded before
     scoring — `train.py`'s "score what ships" rule, which this trainer did not
-    have. Without it there is no artefact: run 1 of stage 2(a) scored weights
+    have. Without it there is no artefact: run 1 of stage 4 scored weights
     that existed only in memory, so its model cannot be rescored, recalibrated,
     promoted or served.
     """
@@ -285,9 +424,6 @@ def run_fold(
     # actually ships rather than one of its members.
     val_scores = np.mean([r.val_scores for r in runs], axis=0)
     test_scores = np.mean([r.test_scores for r in runs], axis=0)
-    # Each member's own test AUC, which is what makes seed variance measurable
-    # separately from fold difficulty.
-    per_model = [float(classification_metrics(test_labels, r.test_scores).roc_auc) for r in runs]
 
     calibrator = PlattScaler.from_validation(val_scores, val_labels)
     calibrated = calibrator.predict(test_scores)
@@ -306,10 +442,21 @@ def run_fold(
 
     metrics = classification_metrics(test_labels, calibrated)
     # Test rows in stream order, which is index order — the observation-bias
-    # measurement needs a score per row, and without it stage 2(b)'s success
+    # measurement needs a score per row, and without it stage 7's success
     # criterion cannot be evaluated at all.
     predictions = index.iloc[np.sort(test_idx)].copy()
     predictions["score"] = calibrated
+    # Each member's own uncalibrated score per row, so the *pooled* out-of-fold
+    # statistic can be re-formed one member at a time after the run. That is the
+    # only way to get the reseeding spread of the number the gate actually reads:
+    # a fold's TESS slice holds ~215 negatives, so its 1% FPR cut is two rows and
+    # the fold-level statistic is far coarser than the pooled one it is used to
+    # bound. Costs three float columns; no extra training and no extra inference.
+    # Uncalibrated on purpose — the Platt fit was fitted on the ensemble mean, so
+    # applying it to a single member would describe a calibrator that never
+    # existed, and every statistic taken from these is rank-based anyway.
+    for i, member in enumerate(runs):
+        predictions[f"{MEMBER_SCORE_PREFIX}{i}"] = member.test_scores
     # The stream yields test rows in ascending index position, so they line up
     # with sorted(test_idx). Asserted rather than assumed: a silent
     # misalignment would attach every score to the wrong target and still
@@ -317,6 +464,34 @@ def run_fold(
     # over ~1,085 rows, so any permutation within a label block passes.
     if not np.array_equal(predictions["tic_id"].to_numpy(), test_tics.astype(np.int64)):
         raise RuntimeError("test predictions are not aligned with the index rows")
+
+    # Per member, and only past the alignment assertion above — the gate mask is
+    # taken from the index rows, so it is only a valid mask over the score
+    # arrays once those rows are known to be the ones that were scored.
+    #
+    # Uncalibrated. The spread across these *within* a fold is seed variance;
+    # the spread of fold means across folds is fold difficulty. The reported ±
+    # has always conflated the two. Platt is monotone, so both recall figures
+    # are identical calibrated or not; the AUC is too, and it always was.
+    gate_rows = (
+        (predictions[MISSION_COLUMN].to_numpy() == GATE_MISSION)
+        if (MISSION_COLUMN in predictions.columns)
+        else np.zeros(len(test_labels), dtype=bool)
+    )
+    per_model_auc = [
+        float(classification_metrics(test_labels, r.test_scores).roc_auc) for r in runs
+    ]
+    per_model_recall = [float(recall_at_fpr(test_labels, r.test_scores, GATE_FPR)) for r in runs]
+    # `[]` rather than NaN when the fold holds no gate-mission rows: unmeasured
+    # and degenerate are different claims, and `_component_sds` treats them so.
+    per_model_gate_recall = (
+        [
+            float(recall_at_fpr(test_labels[gate_rows], r.test_scores[gate_rows], GATE_FPR))
+            for r in runs
+        ]
+        if gate_rows.any()
+        else []
+    )
     return {
         "test_roc_auc": metrics.roc_auc,
         "test_pr_auc": metrics.pr_auc,
@@ -324,10 +499,13 @@ def run_fold(
         "test_brier": metrics.brier,
         "test_ece": float(expected_calibration_error(test_labels, calibrated)),
         "n_test": len(test_labels),
-        # Uncalibrated, per member. The spread across these *within* a fold is
-        # seed variance; the spread of fold means across folds is fold
-        # difficulty. The reported ± has always conflated the two.
-        "model_roc_auc": per_model,
+        "n_test_gate_mission": int(gate_rows.sum()),
+        "model_roc_auc": per_model_auc,
+        # The gate's own statistic, which until 2026-08-08 had no error bar at
+        # all while rejecting every arm of stage 4. Note `classification_metrics`
+        # cannot supply it: its `.recall` is recall at threshold 0.5.
+        "model_recall_at_1pct_fpr": per_model_recall,
+        "model_gate_recall_at_1pct_fpr": per_model_gate_recall,
     }, predictions
 
 
@@ -402,6 +580,16 @@ def run_cv(
             metrics["n_test"],
         )
 
+    # Written before anything is summarised. Every guard downstream of here can
+    # raise, and a run whose summary refuses to compute should not also lose the
+    # hour of training behind it — the predictions are what the summary is
+    # derived from, so `evaluate.py summarise` can rebuild it once the reason is
+    # understood. Every row is tested exactly once across folds, so this is a
+    # full out-of-fold prediction set — what the observation-bias metric reads.
+    all_predictions = pd.concat(predictions, ignore_index=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    all_predictions.to_parquet(out_dir / "predictions.parquet", index=False)
+
     summary: dict[str, Any] = {
         key: {
             "mean": float(np.mean([r[key] for r in rows])),
@@ -409,13 +597,10 @@ def run_cv(
         }
         for key in SUMMARY_KEYS
     }
-    summary["variance"] = _variance_decomposition(rows)
-
-    # Every row is tested exactly once across folds, so this is a full
-    # out-of-fold prediction set — what the observation-bias metric reads.
-    all_predictions = pd.concat(predictions, ignore_index=True)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    all_predictions.to_parquet(out_dir / "predictions.parquet", index=False)
+    summary["variance"] = {
+        **_variance_decomposition(rows),
+        **_pooled_member_draws(all_predictions),
+    }
 
     per_mission = per_mission_summary(all_predictions)
     payload = {
@@ -469,5 +654,26 @@ def run_cv(
         summary["test_ece"]["mean"],
         summary["test_ece"]["std"],
         out_dir / "cv_summary.json",
+    )
+    # The noise floors, in the log rather than only in the JSON: they are what
+    # every margin in this run has to clear, and reading a margin without them
+    # is how four arms were decided on unquantified deltas.
+    variance = summary["variance"]
+    for _, prefix in VARIANCE_COMPONENTS:
+        log.info(
+            "[train-branches] %-18s seed_sd %s  fold_sd %s  (n_models_per_fold=%s)",
+            f"{prefix or 'auc_'}floor",
+            _format_sd(variance[f"{prefix}seed_sd"]),
+            _format_sd(variance[f"{prefix}fold_sd"]),
+            variance["n_models_per_fold"],
+        )
+    log.info(
+        "[train-branches] %-18s seed_sd %s  over %s pooled draws on n=%s %s rows: %s",
+        "pooled gate floor",
+        _format_sd(variance["pooled_gate_recall_seed_sd"]),
+        variance["pooled_gate_recall_n_draws"],
+        variance["pooled_gate_n"],
+        GATE_MISSION,
+        [round(v, 4) for v in variance["pooled_gate_recall"]],
     )
     return payload
