@@ -1054,6 +1054,24 @@ untouched, `ca906040` stays served, and a favourable number here does not reopen
 stage 4 — only stage 7's leave-one-out runs, read against this re-baseline, can
 move anything.
 
+#### First launch failed on fold 0; the pre-registration is unchanged — 2026-08-09
+
+The run died ~15 minutes in, in `fit_platt`, on the convergence guard added
+2026-08-08. The guard was right: `nll` clipped `p` while the analytic gradient
+did not, so BFGS's line search failed on an inconsistency between `f` and `jac`.
+Fixed by the stable `softplus(z) - y·z` form; the guard is untouched. Full
+detail, including what it implies for runs predating the guard, in the audit.
+
+**None of the pre-registered numbers move, and this is why.** Every quantity the
+thresholds above are read against is **rank-based**, and Platt is monotone:
+`pooled_gate_recall` is computed from the *uncalibrated* `member_score_*`
+columns and never touches a calibrator at all, and per-mission ROC-AUC and
+recall @1% FPR are invariant to any monotone rescaling. The calibration fix
+moves **Brier and ECE only**. The 0.1403 and 0.0788 thresholds, the three-way
+outcome table and the predictions stand exactly as written before the first
+launch — they are not being re-specified after a failure, and nothing about the
+failure touched a result.
+
 If the re-baseline's TESS AUC lands outside ±0.009 of 0.9119 in either direction,
 that is a **falsified prediction** and is reported as one. It is not re-read as
 an improvement or a regression: one run of a control cannot carry that, and stage
