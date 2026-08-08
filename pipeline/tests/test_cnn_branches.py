@@ -11,13 +11,17 @@ import tensorflow as tf
 from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES
 from exoplanet_hunter.datasets.viewset_tfrecords import FEATURE_COLUMNS, MASK_COLUMNS
 from exoplanet_hunter.models.cnn_branches import (
+    BRANCH_FAMILIES,
+    BRANCH_NAMES,
     BRANCH_SCALARS,
+    CONTRAST_BRANCH,
     CONTRAST_SCALARS,
     SCALAR_BRANCHES,
     SHARED_LOCAL_VIEWS,
     SPREAD_EPSILON,
     MaskedTransitPool,
     build_cnn_branches,
+    resolve_dropped_branches,
 )
 
 SCALARS = list(FEATURE_COLUMNS)
@@ -406,3 +410,136 @@ def test_model_trains_one_step(model):
     before = model.evaluate(batch, labels, verbose=0)
     model.fit(batch, labels, epochs=3, verbose=0)
     assert model.evaluate(batch, labels, verbose=0) < before
+
+
+# ------------------------------------- stage 7: dropping a branch, declared --
+
+
+def test_the_families_partition_every_branch():
+    """`BRANCH_FAMILIES` is the unit stage 7's leave-one-out runs drop. A branch
+    in no family would never be attributed; a branch in two would be dropped
+    twice and its delta double-counted. Both are silent, so this is the check."""
+    covered = [name for names in BRANCH_FAMILIES.values() for name in names]
+    assert sorted(covered) == sorted(set(covered)), "a branch appears in two families"
+    assert set(covered) == set(BRANCH_NAMES)
+
+
+def test_every_named_branch_is_actually_built(model):
+    """`BRANCH_NAMES` is derived from the constants, but "derived" is not
+    "present" — a name that no layer answers to would make an ablation a no-op
+    that still trains to a plausible AUC.
+
+    Asserted on the branch's `_fc` head, not on a name prefix: a view branch's
+    `Input` is named after the view and is retained even when the branch is
+    dropped, so a prefix check passes on the input alone and proves nothing."""
+    built = {layer.name for layer in model.layers}
+    for branch in BRANCH_NAMES:
+        assert f"{branch}_fc" in built, f"{branch} builds no head"
+
+
+@pytest.mark.parametrize("family", sorted(BRANCH_FAMILIES))
+def test_dropping_a_family_removes_its_branches_and_keeps_the_input_signature(family):
+    """The shard stream always yields all eleven views, so an ablation that also
+    changed the input contract would not be a controlled comparison — the
+    dropped branch's `Input` stays, unused."""
+    full = build_cnn_branches(SimpleNamespace(), scalar_columns=SCALARS, mask_columns=MASKS)
+    ablated = build_cnn_branches(
+        SimpleNamespace(drop_branches=[family]), scalar_columns=SCALARS, mask_columns=MASKS
+    )
+    assert {t.name.split(":")[0] for t in ablated.inputs} == {
+        t.name.split(":")[0] for t in full.inputs
+    }
+    assert ablated.count_params() < full.count_params(), "dropping cost no parameters"
+
+    dropped = resolve_dropped_branches([family])
+    fused = next(layer for layer in ablated.layers if layer.name == "fusion")
+    assert len(fused.input) == len(
+        next(layer for layer in full.layers if layer.name == "fusion").input
+    ) - len(dropped)
+
+    out = ablated(make_batch())
+    assert np.all(np.isfinite(out.numpy()))
+
+
+def test_an_unrecognised_branch_raises_rather_than_dropping_nothing():
+    """An ablation that quietly ablated nothing reports a delta of zero, which
+    reads as "this branch does not matter" — the opposite of what happened."""
+    with pytest.raises(ValueError, match="unknown branch or family"):
+        resolve_dropped_branches(["periodogram_veiw"])
+    with pytest.raises(ValueError, match="unknown branch or family"):
+        build_cnn_branches(
+            SimpleNamespace(drop_branches=["not_a_branch"]),
+            scalar_columns=SCALARS,
+            mask_columns=MASKS,
+        )
+
+
+def test_a_bare_scalar_spec_raises():
+    """`drop_branches: 3` in the YAML is a typo, not an instruction. Without
+    this it reaches the resolver as something that is neither a name nor a
+    sequence of them."""
+    with pytest.raises(ValueError, match="must be a name or a list of names"):
+        resolve_dropped_branches(3)
+
+
+def test_dropping_every_branch_raises():
+    """With nothing left, the model scores every row from the presence masks
+    alone and still returns a probability."""
+    with pytest.raises(ValueError, match="no branch feeding fusion"):
+        resolve_dropped_branches(sorted(BRANCH_FAMILIES))
+
+
+def test_no_drop_is_the_main_line(model):
+    """The default has to be untouched, or every run since stage 4 is ablated."""
+    assert resolve_dropped_branches(()) == frozenset()
+    assert resolve_dropped_branches(None) == frozenset()
+    declared = build_cnn_branches(
+        SimpleNamespace(drop_branches=[]), scalar_columns=SCALARS, mask_columns=MASKS
+    )
+    assert declared.count_params() == model.count_params()
+
+
+def test_dropping_the_flux_family_removes_the_shared_tower_too():
+    """The tower exists only to serve that family; leaving it built would make
+    the ablation cost parameters it does not use and muddy a capacity reading."""
+    ablated = build_cnn_branches(
+        SimpleNamespace(drop_branches=["flux"]), scalar_columns=SCALARS, mask_columns=MASKS
+    )
+    assert not any(layer.name.startswith("local_shared") for layer in ablated.layers)
+    assert np.all(np.isfinite(ablated(make_batch()).numpy()))
+
+
+def test_a_single_branch_can_be_dropped_by_name():
+    """Families are the experiment's unit, but the mechanism is not limited to
+    them — a follow-up that suspects one half of a pair should not need a code
+    edit either."""
+    ablated = build_cnn_branches(
+        SimpleNamespace(drop_branches=["gap_view"]), scalar_columns=SCALARS, mask_columns=MASKS
+    )
+    built = {layer.name for layer in ablated.layers}
+    assert "gap_view_fc" not in built
+    assert "periodogram_view_fc" in built
+    # The input survives the branch: the shard stream still yields `gap_view`.
+    assert "gap_view" in {t.name.split(":")[0] for t in ablated.inputs}
+
+
+def test_the_dropped_set_is_recorded_in_the_resolved_config():
+    """`run_config.model_config` is what makes the ablation recoverable from the
+    artefact. Stage 4 produced four runs whose architecture was not."""
+    from exoplanet_hunter.training.train_branches import _resolved_model_config
+
+    cfg = SimpleNamespace(drop_branches=["periodogram"], init_filters=16)
+    assert _resolved_model_config(cfg)["drop_branches"] == ["periodogram"]
+
+
+def test_dropping_the_contrast_keeps_its_two_halves_measurable():
+    """`odd_even` is the pair's *difference*; dropping it must not take
+    `local_view` or `secondary_view` with it, since they share the tower."""
+    ablated = build_cnn_branches(
+        SimpleNamespace(drop_branches=[CONTRAST_BRANCH]),
+        scalar_columns=SCALARS,
+        mask_columns=MASKS,
+    )
+    assert not any(layer.name.startswith("odd_even") for layer in ablated.layers)
+    assert any(layer.name.startswith("local_shared") for layer in ablated.layers)
+    assert np.all(np.isfinite(ablated(make_batch()).numpy()))

@@ -24,6 +24,7 @@ a target happened to catch — which correlates with the label. See
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import keras
@@ -68,6 +69,9 @@ SHARED_LOCAL_VIEWS: tuple[str, ...] = ("local_view", "odd_view", "even_view", "s
 #: rather than the two embeddings: an eclipsing binary shows alternating depths,
 #: and a subtraction is only meaningful under tied weights.
 CONTRAST_PAIR: tuple[str, str] = ("odd_view", "even_view")
+#: The fusion branch the pair produces. Named rather than spelled inline because
+#: `BRANCH_NAMES` and the drop mechanism both have to refer to it.
+CONTRAST_BRANCH = "odd_even"
 #: Scoped onto the contrast branch rather than either half of the pair.
 CONTRAST_SCALARS: tuple[str, ...] = ("odd_even_statistic",)
 
@@ -87,6 +91,91 @@ SCALAR_BRANCHES: dict[str, tuple[str, ...]] = {
 #: 12.8% of TESS — so without a gate they emit `relu(bias)`, a learned constant,
 #: into fusion for 56% of the training set.
 SCALAR_BRANCH_MASK: dict[str, str] = {"detection": "dv_usable", "ghost": "dv_usable"}
+
+#: Every branch that reaches fusion, **derived** from the constants that build
+#: them rather than listed. A hand-written list is one more literal to drift out
+#: of step with `VIEW_SHAPES`, and the drop mechanism validates against this: a
+#: name that silently fell out would turn a declared ablation into a no-op that
+#: still trains to a plausible AUC.
+BRANCH_NAMES: frozenset[str] = frozenset(
+    [name for name in SHARED_LOCAL_VIEWS if name not in CONTRAST_PAIR]
+    + [CONTRAST_BRANCH]
+    + [name for name in VIEW_SHAPES if name not in SHARED_LOCAL_VIEWS]
+    + list(SCALAR_BRANCHES)
+)
+
+#: How stage 7's leave-one-out attribution groups those branches. A family is
+#: dropped as a unit where its members are the same measurement and a partial
+#: drop would answer no clean question: the periodogram pair is one diagnostic
+#: masked two ways, and the flux family shares a conv tower, so removing
+#: `local_view` alone would also change what `odd - even` is measured against.
+#:
+#: `global_view` is kept apart from the flux family despite being folded flux —
+#: it is 2001 bins through its own tower, so it is separately attributable and
+#: separating it costs one run.
+#:
+#: These partition `BRANCH_NAMES` exactly; `test_the_families_partition_every_
+#: branch` is what keeps that true as branches are added.
+BRANCH_FAMILIES: dict[str, tuple[str, ...]] = {
+    "flux": ("local_view", CONTRAST_BRANCH, "secondary_view"),
+    "global": ("global_view",),
+    "unfolded": ("unfolded_view",),
+    "trend": ("trend_view",),
+    "periodogram": ("periodogram_view", "periodogram_masked_view"),
+    "centroid": ("centroid_view",),
+    "gap": ("gap_view",),
+    "scalar_only": tuple(SCALAR_BRANCHES),
+}
+
+
+def resolve_dropped_branches(spec: object) -> frozenset[str]:
+    """Branch names to leave out of fusion, from a family or branch spec.
+
+    Leaving a branch out has to be a *declared experiment* rather than a code
+    edit: `run_config.model_config` records whatever `model_cfg` carries, so a
+    run's own summary states which branches it was missing. Editing
+    `build_cnn_branches` to comment one out records nothing, and stage 4 already
+    produced four runs whose architecture was not recoverable from the artefact.
+
+    Accepts family names (`"periodogram"`) and individual branch names
+    (`"gap_view"`). Both raise on anything unrecognised rather than silently
+    dropping nothing — an ablation that quietly ablated nothing would report a
+    delta of zero and read as "this branch does not matter", which is the
+    opposite of what happened.
+    """
+    if spec is None or isinstance(spec, bool):
+        return frozenset()
+    if isinstance(spec, str):
+        items: list[str] = [spec]
+    elif isinstance(spec, Iterable):
+        items = [str(item) for item in spec]
+    else:
+        # A bare scalar — `drop_branches: 3` in the YAML — would otherwise reach
+        # the loop below as a one-element sequence or not at all.
+        raise ValueError(f"drop_branches must be a name or a list of names, got {spec!r}")
+
+    dropped: set[str] = set()
+    unknown: list[str] = []
+    for item in items:
+        name = str(item)
+        if name in BRANCH_FAMILIES:
+            dropped.update(BRANCH_FAMILIES[name])
+        elif name in BRANCH_NAMES:
+            dropped.add(name)
+        else:
+            unknown.append(name)
+    if unknown:
+        raise ValueError(
+            f"unknown branch or family {sorted(unknown)}; "
+            f"families are {sorted(BRANCH_FAMILIES)}, branches are {sorted(BRANCH_NAMES)}"
+        )
+    if dropped >= BRANCH_NAMES:
+        raise ValueError(
+            f"dropping {sorted(dropped)} leaves no branch feeding fusion — the model would "
+            f"score every row from the presence masks alone"
+        )
+    return frozenset(dropped)
+
 
 #: Slots a target must have measured before its transit-to-transit spread is a
 #: measurement rather than an artefact of having one transit.
@@ -509,45 +598,57 @@ def build_cnn_branches(
 
     embeddings: list[tf.Tensor] = []
 
+    # A declared experiment, not a code edit — and it lands in
+    # `run_config.model_config`, so the run's own summary says what it was
+    # missing. Every `Input` stays in the signature whether or not its branch is
+    # built: the shard stream always yields all eleven views, and an ablation
+    # that also changed the input contract would not be a controlled comparison.
+    dropped = resolve_dropped_branches(getattr(model_cfg, "drop_branches", ()))
+
     # One tower over the whole phase-folded-flux family. Four independent towers
     # meant an odd-versus-even difference was partly a difference between two
     # sets of kernels, which is the one comparison this branch exists to make.
-    shared = _conv_tower_model(
-        VIEW_SHAPES[SHARED_LOCAL_VIEWS[0]],
-        blocks=blocks,
-        filters=filters,
-        kernel_size=kernel_size,
-        pool_size=pool_size,
-        name="local_shared",
-    )
-    encoded = layers.TimeDistributed(shared, name="local_shared_td")(
-        StackViews(name="local_stack")([inputs[v] for v in SHARED_LOCAL_VIEWS])
-    )
-    features = {
-        view: PickView(i, name=f"{view}_features")(encoded)
-        for i, view in enumerate(SHARED_LOCAL_VIEWS)
-    }
+    shared_branches = [
+        name for name in (*SHARED_LOCAL_VIEWS, CONTRAST_BRANCH) if name not in CONTRAST_PAIR
+    ]
+    if any(name not in dropped for name in shared_branches):
+        shared = _conv_tower_model(
+            VIEW_SHAPES[SHARED_LOCAL_VIEWS[0]],
+            blocks=blocks,
+            filters=filters,
+            kernel_size=kernel_size,
+            pool_size=pool_size,
+            name="local_shared",
+        )
+        encoded = layers.TimeDistributed(shared, name="local_shared_td")(
+            StackViews(name="local_stack")([inputs[v] for v in SHARED_LOCAL_VIEWS])
+        )
+        features = {
+            view: PickView(i, name=f"{view}_features")(encoded)
+            for i, view in enumerate(SHARED_LOCAL_VIEWS)
+        }
 
-    for name in SHARED_LOCAL_VIEWS:
-        if name in CONTRAST_PAIR:
-            continue
-        head = _head(features[name], _slice(BRANCH_SCALARS.get(name, ())), name)
-        embeddings.append(_gated(head, inputs[name], name))
+        for name in SHARED_LOCAL_VIEWS:
+            if name in CONTRAST_PAIR or name in dropped:
+                continue
+            head = _head(features[name], _slice(BRANCH_SCALARS.get(name, ())), name)
+            embeddings.append(_gated(head, inputs[name], name))
 
-    odd, even = CONTRAST_PAIR
-    contrast = _head(
-        layers.Subtract(name="odd_even_difference")([features[odd], features[even]]),
-        _slice(CONTRAST_SCALARS),
-        "odd_even",
-    )
-    # Both halves have to be measured for their difference to mean anything, so
-    # the contrast is gated on each in turn.
-    embeddings.append(
-        _gated(_gated(contrast, inputs[odd], f"{odd}_pair"), inputs[even], "odd_even")
-    )
+        if CONTRAST_BRANCH not in dropped:
+            odd, even = CONTRAST_PAIR
+            contrast = _head(
+                layers.Subtract(name="odd_even_difference")([features[odd], features[even]]),
+                _slice(CONTRAST_SCALARS),
+                CONTRAST_BRANCH,
+            )
+            # Both halves have to be measured for their difference to mean
+            # anything, so the contrast is gated on each in turn.
+            embeddings.append(
+                _gated(_gated(contrast, inputs[odd], f"{odd}_pair"), inputs[even], CONTRAST_BRANCH)
+            )
 
     for name in VIEW_SHAPES:
-        if name in SHARED_LOCAL_VIEWS:
+        if name in SHARED_LOCAL_VIEWS or name in dropped:
             continue
         view = inputs[name]
         embedding = _branch(
@@ -564,6 +665,8 @@ def build_cnn_branches(
 
     mask_index = {name: i for i, name in enumerate(mask_columns)}
     for name, columns in SCALAR_BRANCHES.items():
+        if name in dropped:
+            continue
         picked = _slice(columns)
         if picked is None:
             continue

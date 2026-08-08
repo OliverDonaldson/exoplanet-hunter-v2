@@ -14,6 +14,14 @@ branch_units: 32
 head_units: [256, 128]
 dropout: 0.3
 
+# Stage 7 attribution: branches or families to leave out of fusion. Empty is the
+# main line. Set it per experiment (`--drop-branches periodogram`) rather than
+# editing the model — the resolved value is recorded in
+# run_config.model_config, so a run's own summary states what it was missing.
+# Families: flux, global, unfolded, trend, periodogram, centroid, gap,
+# scalar_only. An unrecognised name raises rather than dropping nothing.
+drop_branches: []
+
 cross_validation:
   n_splits: 5
   val_frac_within_fold: 0.2

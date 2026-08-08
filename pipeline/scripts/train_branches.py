@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from exoplanet_hunter.datasets.viewset_augment import AugmentConfig
+from exoplanet_hunter.models.cnn_branches import resolve_dropped_branches
 from exoplanet_hunter.training.train_branches import CVConfig, run_cv
 from exoplanet_hunter.utils import get_logger, set_global_seed
 
@@ -68,6 +69,13 @@ def main() -> None:
         help="override the declared per-branch filter count. This is the capacity arm, so "
         "that capacity is tested within one architecture rather than across two",
     )
+    parser.add_argument(
+        "--drop-branches",
+        default=None,
+        help="comma-separated branches or families to leave out of fusion (stage 7 "
+        "attribution), e.g. 'periodogram' or 'gap_view,centroid_view'. Recorded in "
+        "run_config.model_config; an unrecognised name raises",
+    )
     args = parser.parse_args()
 
     if not args.model_config.exists():
@@ -95,6 +103,12 @@ def main() -> None:
         # declared architecture on disk stays the main line's.
         raw["init_filters"] = args.init_filters
         log.info("[train-branches] init_filters overridden to %d", args.init_filters)
+    if args.drop_branches is not None:
+        raw["drop_branches"] = [n.strip() for n in args.drop_branches.split(",") if n.strip()]
+        # Resolved here as well as in the model so an unrecognised name fails
+        # before an hour of training rather than after it.
+        resolved = resolve_dropped_branches(raw["drop_branches"])
+        log.info("[train-branches] dropping %d branch(es): %s", len(resolved), sorted(resolved))
 
     log.info("[train-branches] %s -> %s  (%s)", args.shards, args.out, config)
     run_cv(args.shards, args.out, config=config, model_cfg=_Config(raw))
