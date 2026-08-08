@@ -4,7 +4,7 @@ One conv tower per view, each with its own scoped scalars, then a late-fusion
 head. Reimplemented from the ExoMiner/ExoMiner++ papers; their branch structure
 is credited, their code is not vendored (NASA NOSA licence).
 
-Two things are structural rather than stylistic:
+Three things are structural rather than stylistic:
 
 **Presence masks gate their branch.** Every view carries a `present` channel
 and the DV/RUWE scalars carry a mask. A branch with no data contributes zero to
@@ -14,6 +14,12 @@ branch poisoning every row of a mission.
 **Scoped scalars join after their own tower.** A scalar concatenated into a
 global feature vector is the 13-dim aux null again; attached to the branch it
 qualifies, it can modulate that branch's evidence.
+
+**Pooling across transits is masked.** The unfolded stack is zero-padded to
+`MAX_TRANSITS` and 30.4% of the training set carries at least one padded slot,
+so an unmasked pool would make the branch's output scale with how many transits
+a target happened to catch — which correlates with the label. See
+`_unfolded_branch` and `MaskedTransitPool`.
 """
 
 from __future__ import annotations
@@ -82,6 +88,16 @@ SCALAR_BRANCHES: dict[str, tuple[str, ...]] = {
 #: into fusion for 56% of the training set.
 SCALAR_BRANCH_MASK: dict[str, str] = {"detection": "dv_usable", "ghost": "dv_usable"}
 
+#: Slots a target must have measured before its transit-to-transit spread is a
+#: measurement rather than an artefact of having one transit.
+MIN_TRANSITS_FOR_SPREAD = 2
+#: Added under the spread's square root. `sqrt` has an infinite derivative at
+#: zero, and a masked variance is *exactly* zero — not merely small — whenever
+#: fewer than two slots are measured: 17 training rows have one filled slot and
+#: 5 have none. Without it those rows return NaN gradients, and a NaN gradient
+#: takes the fold, not the batch.
+SPREAD_EPSILON = 1.0e-6
+
 
 def _conv_tower(
     x: tf.Tensor,
@@ -142,20 +158,94 @@ def _branch(
 ) -> tf.Tensor:
     """One diagnostic's tower: conv over the view, then its scoped scalars."""
     if len(view.shape) == 4:
-        # Unfolded view is (transits, bins, channels): convolve each transit
-        # with shared weights, then pool across transits, so the branch sees
-        # transit-to-transit variation rather than an average.
-        transits = view.shape[1]
-        x = layers.Reshape((transits, view.shape[2] * view.shape[3]), name=f"{name}_flatten")(view)
-    else:
-        x = view
+        return _unfolded_branch(
+            view,
+            scalars,
+            blocks=blocks,
+            filters=filters,
+            kernel_size=kernel_size,
+            pool_size=pool_size,
+            units=units,
+            name=name,
+        )
+    if len(view.shape) != 3:
+        # A view of an unhandled rank would otherwise reach Conv1D and either
+        # fail somewhere unrecognisable or convolve the wrong axis, which is the
+        # defect this function was rebuilt to remove.
+        raise ValueError(
+            f"branch {name!r} got a rank-{len(view.shape)} view; a branch takes "
+            "(bins, channels) or (transits, bins, channels)"
+        )
     x = _conv_tower(
-        x, blocks=blocks, filters=filters, kernel_size=kernel_size, pool_size=pool_size, name=name
+        view,
+        blocks=blocks,
+        filters=filters,
+        kernel_size=kernel_size,
+        pool_size=pool_size,
+        name=name,
     )
     if scalars is not None:
         x = layers.Concatenate(name=f"{name}_with_scalars")([x, scalars])
     x = layers.Dense(units, activation="relu", name=f"{name}_fc")(x)
     return x
+
+
+def _unfolded_branch(
+    view: tf.Tensor,
+    scalars: tf.Tensor | None,
+    *,
+    blocks: int,
+    filters: int,
+    kernel_size: int,
+    pool_size: int,
+    units: int,
+    name: str,
+) -> tf.Tensor:
+    """Per-transit tower under `TimeDistributed`, then a masked pool across transits.
+
+    What the branch was always documented to do, and did not. Until 2026-08-08
+    it reshaped `(transits, bins, channels)` to `(transits, bins * channels)`
+    and convolved along the **transit** axis, so the 201 phase bins became 603
+    unordered channels, the transit shape was destroyed before the first
+    convolution, and no weights were shared across phase. The branch could not
+    see what a single transit looks like — only how flattened transit vectors
+    varied down the sequence. It also spent **48,256 of the model's 215,281
+    parameters** on that one 603-channel convolution.
+
+    **Its own tower, not the shared flux one.** ExoMiner stacks the unfolded
+    transits into the same `TimeDistributed` call as the folded local family,
+    and the shapes here would allow it. `BatchNormalization` under
+    `TimeDistributed` computes its statistics over batch × stack entries, so
+    twenty low-SNR single transits would set the normalisation for the four
+    high-SNR folded views as well — moving `local_view`, the odd/even contrast
+    and `secondary_view` in the same change that fixes this branch, and
+    confounding the attribution stage D exists to do.
+
+    **Three statistics, not an average.** A mean across transits is the folded
+    view again, which is the thing this branch exists to avoid. `mean` is the
+    reference, `max` catches a single anomalous transit, and the spread is the
+    transit-to-transit variation an eclipsing binary or a background blend
+    shows and a planet does not.
+    """
+    _, bins, channels = view.shape[1:]
+    tower = _conv_tower_model(
+        (bins, channels),
+        blocks=blocks,
+        filters=filters,
+        kernel_size=kernel_size,
+        pool_size=pool_size,
+        name=f"{name}_tower",
+    )
+    encoded = layers.TimeDistributed(tower, name=f"{name}_td")(view)
+    measured = TransitPresence(name=f"{name}_transits_present")(view)
+    parts = [
+        MaskedTransitPool(name=f"{name}_pool")([encoded, measured]),
+        SpreadMeasurable(name=f"{name}_spread_measurable")(measured),
+    ]
+    if scalars is not None:
+        parts.append(scalars)
+    x = layers.Concatenate(name=f"{name}_with_scalars")(parts)
+    return layers.Dense(units, activation="relu", name=f"{name}_fc")(x)
 
 
 @keras.saving.register_keras_serializable(package="exoplanet_hunter")
@@ -225,6 +315,117 @@ class PickColumns(layers.Layer):
 
     def get_config(self) -> dict[str, Any]:
         return {**super().get_config(), "indices": self.indices}
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class TransitPresence(layers.Layer):
+    """Which transit slots hold at least one measured bin.
+
+    `preprocess.viewset._unfolded` allocates `zeros((MAX_TRANSITS, bins, 3))`
+    and fills only the epochs that caught a cadence, so an unused slot is all
+    zeros — presence channel included. Nothing downstream can tell a padded
+    slot from a measured one unless it reads that channel, and padding is
+    neither rare nor label-neutral: **30.4% of the training set carries at
+    least one padded slot**, 16% have fewer than ten of twenty filled, and on
+    TESS the 25th percentile of occupancy is 0.50. On K2 planet hosts average
+    12.4 filled slots against 17.2 for false positives.
+
+    So an unmasked pool would divide by twenty regardless and make the branch's
+    output scale with occupancy — reintroducing the observation-baseline
+    confound (roadmap, stage 3) through the one branch built to measure
+    transits rather than hosts.
+    """
+
+    def call(self, view: tf.Tensor) -> tf.Tensor:
+        return tf.cast(tf.reduce_max(view[..., -1], axis=-1) > 0.0, tf.float32)
+
+    def compute_output_shape(self, input_shape: tuple) -> tuple:
+        return (input_shape[0], input_shape[1])
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class MaskedTransitPool(layers.Layer):
+    """Mean, max and spread of the per-transit embeddings, over measured slots only.
+
+    Takes `[encoded, measured]` — `(batch, transits, width)` embeddings and the
+    `(batch, transits)` flags from `TransitPresence` — and returns
+    `(batch, 3 * width)`.
+
+    Every statistic stays finite when nothing is measured. The branch is gated
+    on the view's presence channel downstream, and a gate multiplies: `NaN * 0`
+    is `NaN`, so a pool that returned NaN on an empty stack would poison the
+    whole model rather than contributing nothing. Five training rows have zero
+    filled slots.
+    """
+
+    def __init__(self, epsilon: float = SPREAD_EPSILON, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.epsilon = float(epsilon)
+
+    def call(self, inputs: list[tf.Tensor]) -> tf.Tensor:
+        encoded, measured = inputs
+        mask = measured[..., None]
+        count = tf.reduce_sum(mask, axis=1)
+        divisor = tf.maximum(count, 1.0)
+
+        mean = tf.reduce_sum(encoded * mask, axis=1) / divisor
+        # Masked *after* subtracting, so an unmeasured slot cannot contribute
+        # its distance from the mean. Summing squared deviations keeps the
+        # variance non-negative by construction — `E[x²] - E[x]²` goes slightly
+        # negative in float32 and returns NaN from the sqrt.
+        deviation = (encoded - mean[:, None, :]) * mask
+        variance = tf.reduce_sum(tf.square(deviation), axis=1) / divisor
+        spread = tf.sqrt(variance + self.epsilon)
+
+        # Lowest representable rather than zero: `max` over `encoded * mask`
+        # would be correct only while the tower ends in a ReLU, and would go
+        # silently wrong the day it does not.
+        #
+        # A *scalar* `lowest`, broadcast by `tf.where`, rather than a
+        # `tf.fill(tf.shape(encoded), ...)`: filling from a dynamic shape leaves
+        # the result with no static shape, the concat below inherits that, and
+        # `_ConcatGradV2` then aborts the process — not an exception — when the
+        # gradient runs.
+        lowest = tf.constant(encoded.dtype.min, dtype=encoded.dtype)
+        largest = tf.reduce_max(tf.where(mask > 0.0, encoded, lowest), axis=1)
+        largest = tf.where(count > 0.0, largest, tf.zeros_like(largest))
+
+        return tf.concat([mean, largest, spread], axis=-1)
+
+    def compute_output_shape(self, input_shape: list[tuple]) -> tuple:
+        encoded = input_shape[0]
+        return (encoded[0], 3 * encoded[2])
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "epsilon": self.epsilon}
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class SpreadMeasurable(layers.Layer):
+    """1.0 when enough transit slots were measured for a spread to mean anything.
+
+    A spread of zero from one transit and a spread of zero from twenty
+    identical transits are the same float with opposite meanings — the first is
+    *unmeasured*, the second is the strongest evidence the branch can offer. On
+    its own that is this project's recurring defect: a plausible number where
+    the honest answer is "no measurement". The head cannot recover the
+    distinction from the scoped scalars either, because `observed_transit_count`
+    is the true count and the stack is capped at `MAX_TRANSITS`.
+    """
+
+    def __init__(self, minimum: int = MIN_TRANSITS_FOR_SPREAD, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.minimum = int(minimum)
+
+    def call(self, measured: tf.Tensor) -> tf.Tensor:
+        count = tf.reduce_sum(measured, axis=1, keepdims=True)
+        return tf.cast(count >= float(self.minimum), tf.float32)
+
+    def compute_output_shape(self, input_shape: tuple) -> tuple:
+        return (input_shape[0], 1)
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "minimum": self.minimum}
 
 
 def _gated(x: tf.Tensor, view: tf.Tensor, name: str) -> tf.Tensor:

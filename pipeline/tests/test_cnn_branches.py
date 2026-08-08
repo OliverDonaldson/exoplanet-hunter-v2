@@ -15,6 +15,8 @@ from exoplanet_hunter.models.cnn_branches import (
     CONTRAST_SCALARS,
     SCALAR_BRANCHES,
     SHARED_LOCAL_VIEWS,
+    SPREAD_EPSILON,
+    MaskedTransitPool,
     build_cnn_branches,
 )
 
@@ -222,6 +224,172 @@ def test_the_contrast_needs_both_halves_measured(model, absent):
     batch[absent] = batch[absent].copy()
     batch[absent][..., -1] = 0.0
     assert np.abs(probe(batch, training=False).numpy()).sum() == pytest.approx(0.0)
+
+
+# ------------------------------------------------ the unfolded branch -----
+
+TRANSITS, BINS, CHANNELS = VIEW_SHAPES["unfolded_view"]
+
+
+def unfolded_stack(measured: int, *, seed: int = 0, n: int = 1) -> np.ndarray:
+    """An unfolded stack with `measured` slots filled and the rest padded.
+
+    Padding is what the builder writes: `np.zeros`, presence channel included.
+    """
+    rng = np.random.default_rng(seed)
+    stack = np.zeros((n, TRANSITS, BINS, CHANNELS), dtype=np.float32)
+    stack[:, :measured, :, :-1] = rng.normal(size=(n, measured, BINS, CHANNELS - 1))
+    stack[:, :measured, :, -1] = 1.0
+    return stack
+
+
+def probe_of(model, layer: str):
+    return tf.keras.Model(model.inputs, model.get_layer(layer).output)
+
+
+def embedding_width(model) -> int:
+    """Per-transit embedding width, read off the tower rather than restated."""
+    return int(model.get_layer("unfolded_view_td").output.shape[-1])
+
+
+def test_each_transit_is_encoded_by_the_same_weights(model):
+    """The branch's whole claim. Before 2026-08-08 it convolved along the
+    transit axis with the 201 phase bins flattened into 603 unordered channels,
+    so there was no weight sharing across phase at all."""
+    batch = make_batch(seed=31)
+    stack = unfolded_stack(4, seed=31)
+    stack[:, 2] = stack[:, 0]  # the same transit in two different slots
+    batch["unfolded_view"] = np.repeat(stack, 4, axis=0)
+
+    encoded = probe_of(model, "unfolded_view_td")(batch, training=False).numpy()
+    np.testing.assert_allclose(encoded[:, 0], encoded[:, 2], rtol=1e-6, atol=1e-6)
+
+
+def test_the_tower_reads_phase_and_the_pool_ignores_transit_order(model):
+    """The two halves of finding #23, stated as properties.
+
+    Reordering *transits* must not change the pooled statistics — they are
+    summaries of a set. Reordering the *phase bins inside* a transit must
+    change the embedding, because that is the transit shape. The old
+    implementation had neither property the right way round.
+    """
+    batch = make_batch(seed=32)
+    batch["unfolded_view"] = unfolded_stack(TRANSITS, seed=32, n=4)
+    pool = probe_of(model, "unfolded_view_pool")
+    before = pool(batch, training=False).numpy()
+
+    shuffled = dict(batch)
+    shuffled["unfolded_view"] = batch["unfolded_view"][:, ::-1]
+    np.testing.assert_allclose(before, pool(shuffled, training=False).numpy(), rtol=1e-5, atol=1e-5)
+
+    rephased = dict(batch)
+    rephased["unfolded_view"] = batch["unfolded_view"][:, :, ::-1]
+    assert not np.allclose(before, pool(rephased, training=False).numpy(), atol=1e-5)
+
+
+def test_padded_slots_do_not_dilute_the_pool(model):
+    """`_unfolded` zero-fills unreached slots and 30.4% of the training set
+    carries at least one. An unmasked mean divides by twenty regardless, so the
+    branch output would scale with occupancy — and occupancy tracks the label
+    (K2: 12.4 filled slots on planet hosts against 17.2 on false positives)."""
+    one = unfolded_stack(1, seed=33)
+    ten = np.repeat(one[:, :1], 10, axis=1)
+    ten = np.concatenate([ten, np.zeros_like(one[:, 10:])], axis=1)
+
+    batch = make_batch(n=1, seed=33)
+    pool = probe_of(model, "unfolded_view_pool")
+    batch["unfolded_view"] = one
+    with_one = pool(batch, training=False).numpy()
+    batch["unfolded_view"] = ten
+    np.testing.assert_allclose(with_one, pool(batch, training=False).numpy(), rtol=1e-5, atol=1e-5)
+
+
+def test_the_pooled_mean_is_the_mean_over_measured_slots_only(model):
+    batch = make_batch(n=1, seed=34)
+    batch["unfolded_view"] = unfolded_stack(3, seed=34)
+    encoded = probe_of(model, "unfolded_view_td")(batch, training=False).numpy()
+    pooled = probe_of(model, "unfolded_view_pool")(batch, training=False).numpy()
+
+    width = encoded.shape[-1]
+    np.testing.assert_allclose(pooled[:, :width], encoded[:, :3].mean(axis=1), rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(pooled[:, width : 2 * width], encoded[:, :3].max(axis=1), atol=1e-5)
+
+
+def test_the_spread_separates_identical_transits_from_varying_ones(model):
+    """The statistic the branch exists for: an eclipsing binary and a
+    background blend vary transit to transit, a planet does not. A mean alone
+    returns the folded view again, which is what this branch is meant to add to."""
+    width = embedding_width(model)
+    pool = probe_of(model, "unfolded_view_pool")
+    batch = make_batch(n=1, seed=35)
+
+    same = unfolded_stack(1, seed=35)
+    same[:, :6] = same[:, :1]
+    batch["unfolded_view"] = same
+    flat = pool(batch, training=False).numpy()[:, 2 * width :]
+
+    batch["unfolded_view"] = unfolded_stack(6, seed=36)
+    varying = pool(batch, training=False).numpy()[:, 2 * width :]
+
+    assert flat.max() == pytest.approx(np.sqrt(SPREAD_EPSILON), abs=1e-5)
+    assert varying.max() > flat.max()
+
+
+@pytest.mark.parametrize(("measured", "expected"), [(0, 0.0), (1, 0.0), (2, 1.0), (9, 1.0)])
+def test_a_spread_from_one_transit_is_flagged_unmeasured(model, measured, expected):
+    """Zero spread from one transit and zero spread from twenty identical ones
+    are the same float with opposite meanings, and `observed_transit_count` is
+    uncapped so the head cannot recover the distinction from it."""
+    batch = make_batch(n=1, seed=37)
+    batch["unfolded_view"] = unfolded_stack(measured, seed=37)
+    flag = probe_of(model, "unfolded_view_spread_measurable")(batch, training=False).numpy()
+    assert flag.item() == expected
+
+
+def test_an_empty_stack_pools_to_finite_numbers(model):
+    """The branch is gated downstream and a gate multiplies, so a NaN here
+    would not be zeroed — it would propagate into fusion for every row of a
+    mission. Five training rows have no measured transit at all."""
+    batch = make_batch(n=2, seed=38)
+    batch["unfolded_view"] = unfolded_stack(0, seed=38, n=2)
+    pooled = probe_of(model, "unfolded_view_pool")(batch, training=False).numpy()
+    assert np.isfinite(pooled).all()
+    assert np.isfinite(model(batch, training=False).numpy()).all()
+
+
+def pool_gradients(epsilon: float, *, width: int = 8) -> list:
+    """Gradients through the pool on a batch whose masked variance is exactly zero.
+
+    A trainable layer sits *before* the pool deliberately: with only a head
+    above it, every gradient would stop at the pooled values — which are finite
+    either way — and the test could not fail.
+    """
+    rng = np.random.default_rng(39)
+    encoded = rng.normal(size=(4, TRANSITS, width)).astype(np.float32)
+    measured = np.zeros((4, TRANSITS), dtype=np.float32)
+    measured[:, 0] = 1.0  # one measured slot, so every deviation is zero
+
+    encoded_in = tf.keras.layers.Input(shape=(TRANSITS, width))
+    measured_in = tf.keras.layers.Input(shape=(TRANSITS,))
+    hidden = tf.keras.layers.Dense(width)(encoded_in)
+    pooled = MaskedTransitPool(epsilon=epsilon)([hidden, measured_in])
+    model = tf.keras.Model([encoded_in, measured_in], tf.keras.layers.Dense(1)(pooled))
+
+    with tf.GradientTape() as tape:
+        loss = tf.reduce_sum(model([encoded, measured], training=True))
+    return [g for g in tape.gradient(loss, model.trainable_variables) if g is not None]
+
+
+def test_a_single_measured_transit_gives_finite_gradients():
+    """`sqrt` has an infinite derivative at zero, and a masked variance is
+    exactly zero whenever one slot is measured — 17 rows of the training set.
+    Without the epsilon the fold dies on a NaN gradient rather than the batch.
+
+    The second assertion is the point: it shows the guard is load-bearing. A
+    constant that cannot be observed to matter is one nobody can safely remove.
+    """
+    assert all(np.isfinite(g.numpy()).all() for g in pool_gradients(SPREAD_EPSILON))
+    assert not all(np.isfinite(g.numpy()).all() for g in pool_gradients(0.0))
 
 
 def test_every_branch_scalar_name_exists_in_the_feature_vector():

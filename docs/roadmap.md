@@ -58,9 +58,9 @@ in HANDOVER.md.
 | **1** ExoMiner-grade inputs | **done** 2026-08-05 | 5,423 examples × 11 branches, 3.6 GB DV archive, DV scalars, Gaia RUWE, FFI recovery, seventh gate |
 | **A** re-baselined incumbent summary | **done** 2026-08-08 | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`; the gate returns decisions again instead of refusing |
 | **2(a)** per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
-| **2(b)** unfolded-flux branch | **built, unmeasured** | the branch has shipped in every run since run 1. What is left is *attribution*, not construction — and its criterion needs the candidate view set rebuilt |
+| **2(b)** unfolded-flux branch | **rebuilt 2026-08-08, unmeasured** | the branch that shipped in runs 1–3 convolved along the transit axis and could not see a transit at all (audit finding #23). Now a `TimeDistributed` per-transit tower with a masked mean/max/spread pool. What is left is *attribution* — and its criterion needs the candidate view set rebuilt |
 | **2(c)** trend + periodogram | **built, unmeasured** | same: `trend_view_fc`, `periodogram_view_fc`, `periodogram_masked_view_fc` are all in run 2's saved config |
-| **C** leakage key + candidate rebuild | `_cache_path` **done** 2026-08-08; rebuild not started | the ephemeris key invalidated 5,426 cached targets (309 MB) at 2001/201, so the rebuild is now cold — budget well past the old ~2 h; unblocks the control arm |
+| **C** leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
 | **D** branch attribution | not started | absorbs 2(b), 2(c) and the training half of stage 4's occlusion |
 | **3** labels and negatives | not started, **moved ahead of 2(d)** | owns the observation-selection problem; its interventions change the training distribution, so 2(d) measured before it would need re-measuring |
 | **2(d)** difference-image branch | not started | the only genuine *build* left in stage 2; needs the 11–17 px stamps re-gridded to a fixed size |
@@ -126,11 +126,12 @@ TESS rows join `labels.parquet`, of which 2,367 survive the shared join against 
 candidate's predictions. `evaluate.py compare` already reports the coverage and
 names any mission the join drops.)*
 
-**3. The candidate view set is at the wrong resolution.**
-`candidates_viewset/viewset.npz` is 301/31 against training's 2001/201, so no
-post-run-1 model can score it. Resolution is baked into the npz, so the
-five-minute `shard_viewset.py` path does not apply — this is the ~2 h
-`build_viewset.py` rebuild. It blocks 2(b)'s only surviving criterion, the
+**3. The candidate view set is at the wrong resolution.** *(Fixed 2026-08-08 —
+see "The candidate view set, rebuilt" below.)*
+`candidates_viewset/viewset.npz` was 301/31 against training's 2001/201, so no
+post-run-1 model could score it. Resolution is baked into the npz, so the
+five-minute `shard_viewset.py` path did not apply — this was the
+`build_viewset.py` rebuild. It blocked 2(b)'s only surviving criterion, the
 candidate-population bias measurement, and any candidate catalogue refresh.
 
 **Sequencing consequence.** `_cache_path` keys on `(mission, tic)` with no planet
@@ -678,7 +679,7 @@ incumbent-parity test it was designed as**. That makes the falsification
 stronger, not weaker: if 19% more capacity does not close a +0.045 Kepler gap,
 capacity is not the binding constraint.
 
-### Two training-path changes that break comparability going forward
+### Three training-path changes that break comparability going forward
 
 Recorded here because this project's recurring injury is a comparison that is
 not like-for-like and does not say so.
@@ -695,6 +696,20 @@ measured. Three of eleven views were being fed a confident false claim on
 before the change — so the comparison that decides the capacity question is
 still internally consistent. **Every run after them is not comparable to run 3
 on this axis** and needs its own baseline. Stage D re-baselines anyway.
+
+**The unfolded branch was rebuilt (2026-08-08).** Audit finding #23: it
+convolved along the transit axis with the 201 phase bins flattened into 603
+unordered channels, so it never saw a transit. It now runs a per-transit conv
+tower under `TimeDistributed` and pools with a masked mean + max + spread. The
+model drops **215,281 → 169,361 parameters (−21.3%)**, almost all of it the
+48,256-parameter convolution that was doing the damage.
+
+Runs 1, 2, 3 and the capacity arm all carried the broken branch, so **stage
+2(a)'s rejections stand** — nothing about this changes what those runs measured,
+and a branch that could not see a transit is one more reason they lost. But no
+run so far is a baseline for the rebuilt model. The direction is the opposite of
+the capacity arm's (+19%, paired d = −0.44, nothing), which is weak evidence
+that −21.3% is not decisive on its own. Weak evidence, not a measurement.
 
 **Deferred deliberately: the inner validation split is unstratified.**
 `GroupShuffleSplit` does not guarantee both classes reach the Platt fit, which
@@ -778,6 +793,48 @@ conflate them:
 401 MB total is reclaimable, but only the 309 MB is attributable to the
 ephemeris key. Both are under the old `{mission}_{tic}.npz` naming and nothing
 reads either.)*
+
+**Both deleted 2026-08-08: 10,849 files, 395.9 MB** (312.5 + 83.4; the 401 MB
+above was MB-vs-MiB, not a different set). `data/interim/` is gitignored and
+carries no DVC pointer, so this is derived data with no artefact behind it.
+
+**The delete had a trap in it worth recording.** By then `g2001l201/` held *two*
+generations side by side — the 5,426 orphaned training-target entries under
+`{mission}_{tic}.npz`, and the **5,346 ephemeris-keyed candidate entries the
+rebuild had just written**, 326.8 MB of them. A glob over the directory would
+have taken both. The two were separated by regex, asserted to be disjoint before
+anything was unlinked, and `_cache_path` was then re-run over 3,000 catalogue
+rows to confirm the survivors are still addressable: **2,995 hits, 5 misses.**
+
+Note the asymmetry this leaves: what survives covers **candidates**, not
+training targets. A future *training* view set rebuild is still cold — it was
+already, since those entries were unfindable — so the cache on disk now helps a
+candidate re-run and not a training one.
+
+### The candidate view set, rebuilt — 2026-08-08
+
+Done, cold, as budgeted: **5,346 rows at 2001/201, 309 MB, 95 minutes** for
+7,174 catalogue rows. `ViewSetArrays.validate()` reports it well-formed, every
+view matches training's `VIEW_SHAPES`, and **run 3's fold-0 checkpoint scores it**
+— which is the whole point, since no post-run-1 model could touch the old set.
+The 401 MB of orphaned cache was left in place; nothing reads it, and deleting
+it is not this task.
+
+Every one of the 7,174 rows is accounted for: 5,346 built, 1,803 no FITS, 17
+preprocess errors, 8 with no ephemeris. Sources are 3,929 SPOC 2-minute, 719
+FFI, 698 Kepler; DV usable on 64%, RUWE on 85%.
+
+**The row count moved 5,347 → 5,346, and the three rows reconcile exactly
+against the refresh.** TIC 60520371 and TIC 160476088 were dispositioned **FP**
+on 2026-08-08 and so left `candidates.parquet` for `labels.parquet` — they are
+precisely the two rows behind the catalogue's 5,703 → 5,705 growth. TIC
+443534757 is a new **PC**. Net −2 +1.
+
+Stated rather than assumed, because a candidate set that quietly changed size is
+indistinguishable from one built over a population nobody chose — and per the
+handover a rebuilt set **will** trip the gate's row-count alarm against run 3
+and the capacity arm, which were measured on the previous catalogue. That alarm
+is correct and should not be silenced.
 
 **Stage 2(b)'s success criterion, re-specified 2026-08-05.** It read
 *"corr(prob, n_transits) must leave zero and the 26.4% control-arm host-pass
