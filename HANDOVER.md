@@ -1,5 +1,12 @@
 # Exoplanet Hunter V2 — Handover (2026-07-10)
 
+> **2026-08-08 — this file is SUPERSEDED. Start at `docs/handover-2026-08-08.md`,
+> then `docs/roadmap.md` and `docs/audit-2026-08-07.md`.** Stages were also
+> renumbered that day to consecutive integers in execution order
+> (`0, 1, A, 2(a), 2(b), 2(c), C, D, 3, 2(d), G, 4, 5` → `1`–`12`); **every stage
+> label in the 2,000 lines below is an old one**, and the permanent mapping table
+> is at the top of `docs/roadmap.md`. This file is deliberately not renumbered.
+
 > **2026-08-07 — read `docs/audit-2026-08-07.md` before trusting any number
 > below.** A full audit of the model and every recorded metric found the figures
 > arithmetically correct but the comparisons behind them invalid: the incumbent

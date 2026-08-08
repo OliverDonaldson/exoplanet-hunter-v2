@@ -22,7 +22,8 @@ Config: `pipeline/conf/preprocess/default.yaml`.
 
 **Known gap.** ExoMiner uses 301/31 bins and pairs every view with a variance
 channel; ours are ~7× oversampled with no variance, so per-bin noise is higher
-and the model cannot see bin dispersion. Stage 1 of the roadmap addresses both.
+and the model cannot see bin dispersion. Stage 2 of the roadmap *(old stage 1)*
+addresses both.
 
 ## Auxiliary vector
 

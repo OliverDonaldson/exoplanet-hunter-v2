@@ -20,7 +20,7 @@ Its branches target pathologies we have *measured*, not guessed:
 **The baseline correlation is no longer on this list.** It was, at +0.211, read as
 the model scoring observation time rather than transit evidence. Measured
 properly it is label structure, not a model pathology — see *Observation
-baseline* under stage 3. The transit-count row above is also restated: the
+baseline* under stage 8. The transit-count row above is also restated: the
 original **−0.003** was measured against `expected_transit_count`, the transits
 the ephemeris *predicts*; against the transits actually *captured* it is
 **−0.048**. The conclusion survives the correction, the number does not.
@@ -47,6 +47,40 @@ own Optuna campaign rejected focal. Their static train/test split — our
 injection-recovery, control arm and since-confirmed holdout are a stronger
 evaluation than they publish, and remain the gate.
 
+## Stage numbering — the mapping, kept permanently
+
+Stages were inserted as they were discovered, so the scheme grew into `0, 1, A,
+2(a), 2(b), 2(c), C, D, 3, 2(d), G, 4, 5` — neither consecutive nor in execution
+order. Renumbered 2026-08-08 to **flat consecutive integers in execution order**.
+
+**This table is permanent.** Run directories on disk (`branches-20260807-shared`,
+`branches-20260808-capacity`) and every commit message carry the old labels and
+cannot be rewritten, so the mapping is the only thing that keeps them findable.
+
+| new | old | stage |
+|---|---|---|
+| **1** | 0 | housekeeping, landmines |
+| **2** | 1 | ExoMiner-grade inputs |
+| **3** | A | re-baselined incumbent summary |
+| **4** | 2(a) | per-diagnostic branches |
+| **5** | C | leakage key + candidate rebuild |
+| **6** | *(new)* | recall variance + re-baseline |
+| **7** | D, absorbing 2(b) + 2(c) | branch attribution |
+| **8** | 3 | labels and negatives |
+| **9** | 2(d) | difference-image branch |
+| **10** | G | Optuna re-tune |
+| **11** | 4 | serving parity + explainability |
+| **12** | 5 | UI redesign |
+
+**Two conventions, so a reader can tell an edit from the record.** Headings and
+prose cross-references are renumbered, with the old label in parentheses on first
+mention. **Blocks that are the verbatim record of a pre-registration are not
+renumbered** — the pre-commitments of 2026-08-06, the re-derived trigger, run 2's
+"how the result will be read" table, and stage 2(b)'s re-specified criterion say
+what was committed to at the time. Where one of those blocks points forward to a
+stage, the new number is added in **square brackets** — `stage 3 [now 8]` — which
+is an editorial insertion, not a rewrite.
+
 ## Where the project stands
 
 One table, kept current. Detail for each row is in the stage sections below and
@@ -54,22 +88,26 @@ in HANDOVER.md.
 
 | stage | status | what closed it, or what is left |
 |---|---|---|
-| **0** housekeeping, landmines | **done** | 71 GB staging reclaimed; two scripts that could silently write bad data deleted; four audit items fixed; TRICERATOPS vendored |
-| **1** ExoMiner-grade inputs | **done** 2026-08-05 | 5,423 examples × 11 branches, 3.6 GB DV archive, DV scalars, Gaia RUWE, FFI recovery, seventh gate |
-| **A** re-baselined incumbent summary | **done** 2026-08-08 | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`; the gate returns decisions again instead of refusing |
-| **2(a)** per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
-| **2(b)** unfolded-flux branch | **rebuilt 2026-08-08, unmeasured** | the branch that shipped in runs 1–3 convolved along the transit axis and could not see a transit at all (audit finding #23). Now a `TimeDistributed` per-transit tower with a masked mean/max/spread pool. What is left is *attribution* — and its criterion needs the candidate view set rebuilt |
-| **2(c)** trend + periodogram | **built, unmeasured** | same: `trend_view_fc`, `periodogram_view_fc`, `periodogram_masked_view_fc` are all in run 2's saved config |
-| **C** leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
-| **D** branch attribution | not started | absorbs 2(b), 2(c) and the training half of stage 4's occlusion |
-| **3** labels and negatives | not started, **moved ahead of 2(d)** | owns the observation-selection problem; its interventions change the training distribution, so 2(d) measured before it would need re-measuring |
-| **2(d)** difference-image branch | not started | the only genuine *build* left in stage 2; needs the 11–17 px stamps re-gridded to a fixed size |
-| **G** Optuna re-tune | not started | on the winner, after the distribution is settled |
-| **4** serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
-| **5** UI redesign | locked last | |
+| **1** *(old 0)* housekeeping, landmines | **done** | 71 GB staging reclaimed; two scripts that could silently write bad data deleted; four audit items fixed; TRICERATOPS vendored |
+| **2** *(old 1)* ExoMiner-grade inputs | **done** 2026-08-05 | 5,423 examples × 11 branches, 3.6 GB DV archive, DV scalars, Gaia RUWE, FFI recovery, seventh gate |
+| **3** *(old A)* re-baselined incumbent summary | **done** 2026-08-08 | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`; the gate returns decisions again instead of refusing |
+| **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
+| **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
+| **6** recall variance + re-baseline | **in progress** | `recall @1% FPR` has rejected all four arms and has no variance estimate at all. Record it per member, report `recall_seed_sd` / `recall_fold_sd`, then re-baseline HEAD at `--n-models-per-fold 3` |
+| **7** *(old D)* branch attribution | not started | absorbs the unfolded-flux branch (old 2(b)), trend + periodogram (old 2(c)) and the training half of stage 11's occlusion |
+| **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9** | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
+| **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
+| **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
+| **11** *(old 4)* serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
+| **12** *(old 5)* UI redesign | locked last | |
+
+Two rows the old table carried separately are gone by absorption, not by
+cancellation: **old 2(b)** (unfolded-flux branch, rebuilt 2026-08-08) and **old
+2(c)** (trend + periodogram, built) were never separate build steps — see the
+audit finding below — so what is left of both is attribution, which is stage 7.
 
 **Serving is unchanged throughout: `ca906040` (9-dim, 2001/201) on Fly.** Nothing
-in stage 1 or 2 has been promoted, and the registry has not been touched since
+in stages 1–5 has been promoted, and the registry has not been touched since
 2026-07-19.
 
 ### What the 2026-08-07 audit changed about this table — 2026-08-08
@@ -77,21 +115,22 @@ in stage 1 or 2 has been promoted, and the registry has not been touched since
 Three findings from reading the code rather than the plan. Each one invalidated a
 row above.
 
-**1. Stages 2(b) and 2(c) were never separate build steps.**
+**1. The unfolded-flux and trend/periodogram steps (old 2(b), 2(c)) were never
+separate build steps.**
 `build_cnn_branches` iterates `for name in VIEW_SHAPES` and builds a branch for
 every one of the eleven views. Run 2's saved config carries
 `unfolded_view_fc`, `trend_view_fc`, `periodogram_view_fc` and
 `periodogram_masked_view_fc`. So **every branch model ever trained here carried
-all eleven branches at once**, and stage 2's "each sub-step gated" design was
-never the implementation path. Both stage-2(a) rejections were rejections of the
-whole eleven-branch model. What remains for 2(b) and 2(c) is ablation — does this
-branch earn its place — which is why they collapse into stage D.
+all eleven branches at once**, and the old stage 2's "each sub-step gated" design
+was never the implementation path. Both stage 4 rejections were rejections of the
+whole eleven-branch model. What remains for the two sub-steps is ablation — does
+this branch earn its place — which is why they collapse into stage 7.
 
 **2. The gate cannot engage against the incumbent.**
 `_gate_slice` needs a `per_mission` block. `ca906040`'s summary has none, and the
 re-baseline exists only as `results/incumbent_rebaselined.parquet` — there is no
 re-baselined `cv_summary.json`, and `promotion_gate.py` has no flag to point at
-one. Every stage-2 decision from here is blocked until stage A produces it.
+one. Every branch-model decision from here is blocked until stage 3 produces it.
 `per_mission_summary()` already exists in `train_branches.py`, so this is small
 work, but it is on the critical path.
 
@@ -131,17 +170,18 @@ see "The candidate view set, rebuilt" below.)*
 `candidates_viewset/viewset.npz` was 301/31 against training's 2001/201, so no
 post-run-1 model could score it. Resolution is baked into the npz, so the
 five-minute `shard_viewset.py` path did not apply — this was the
-`build_viewset.py` rebuild. It blocked 2(b)'s only surviving criterion, the
-candidate-population bias measurement, and any candidate catalogue refresh.
+`build_viewset.py` rebuild. It blocked the only surviving criterion of the
+unfolded-flux step — now stage 7's — the candidate-population bias measurement,
+and any candidate catalogue refresh.
 
 **Sequencing consequence.** `_cache_path` keys on `(mission, tic)` with no planet
 identifier. `labels.parquet` is 5,703 rows across 5,703 unique TICs with zero
 duplicates, so the grouped-CV guard is currently degenerate and the cache
 collision is dormant — but **a catalogue refresh is precisely what introduces
 multi-planet hosts**. The key must be fixed before the next refresh, and before
-the candidate rebuild, which is why stage C is ordered fix-then-rebuild.
+the candidate rebuild, which is why stage 5 is ordered fix-then-rebuild.
 
-### Uncovered, fixed, and improved since stage 1 closed
+### Uncovered, fixed, and improved since stage 2 closed
 
 Findings, not features — each one is something that was silently wrong, or
 silently unmeasured, and is now neither.
@@ -159,10 +199,10 @@ silently unmeasured, and is now neither.
 | Bin counts were declared twice — in the builder and in the shard schema | restoring 2001/201 would have needed two edits that could disagree | `VIEW_SHAPES` derives from the builder's constants |
 | The per-target view cache was not keyed by resolution, so a rebuild would read back old shapes | same change | `_cache_path` keys on `g{GLOBAL_BINS}l{LOCAL_BINS}` |
 | Run 1 trained **without augmentation** against an incumbent that had it | audit of what made the comparison unlike-for-like | `datasets/viewset_augment.py`, on by default |
-| **The training noise floor had never been measured**, and the `±` in every `cv_summary.json` was being read as the run's uncertainty when it is the spread across folds within one run | run 2's fold 0 not reproducing in a diagnostic | quantified: single-fold sd **0.0106** over 5 repeats; recorded under stage 2(a) |
+| **The training noise floor had never been measured**, and the `±` in every `cv_summary.json` was being read as the run's uncertainty when it is the spread across folds within one run | run 2's fold 0 not reproducing in a diagnostic | quantified: single-fold sd **0.0106** over 5 repeats; recorded under stage 4 |
 
-| **The incumbent had never been scored on the current view set**, so every stage-2 comparison ran against a 2026-07-19 baseline whose 4,818 rows predate K2, the DV scalars and the merge-collision fix | auditing which rows each `cv_summary.json` mean was computed over | `eval/scoring.py`, re-baselined set at `results/incumbent_rebaselined.parquet` |
-| **The TESS gate never actually engaged.** `_gate_slice` returns `None` for a summary without a `per_mission` block, and the live incumbent has none — so every stage-2 decision silently fell back to comparing pooled means over different populations | regenerating the gate's decision from the real artefacts | `_population_mismatch` refuses the unmatched pooled comparison in `validation/promotion.py` |
+| **The incumbent had never been scored on the current view set**, so every branch-model comparison ran against a 2026-07-19 baseline whose 4,818 rows predate K2, the DV scalars and the merge-collision fix | auditing which rows each `cv_summary.json` mean was computed over | `eval/scoring.py`, re-baselined set at `results/incumbent_rebaselined.parquet` |
+| **The TESS gate never actually engaged.** `_gate_slice` returns `None` for a summary without a `per_mission` block, and the live incumbent has none — so every stage 4 decision silently fell back to comparing pooled means over different populations | regenerating the gate's decision from the real artefacts | `_population_mismatch` refuses the unmatched pooled comparison in `validation/promotion.py` |
 
 | **Odd and even transits went through separate conv towers**, so the depth difference the head reads was partly a difference between two independently-learned sets of kernels — in the branch this model exists to make | reviewing ExoMiner's `build_joint_local_conv_branches` | one `TimeDistributed` tower over the flux family; fusion takes `odd - even` |
 | A fold's score was a single seed draw, and the `±` in every summary mixed seed variance with fold difficulty with no way to separate them | the 0.0106 noise floor having no home in the artefact | `CVConfig.n_models_per_fold`; `summary.variance` reports `seed_sd` and `fold_sd` apart |
@@ -237,14 +277,14 @@ the incumbent had none.
 
 ## Stages
 
-**Stage 0 — housekeeping, landmines, vendoring.** *(done)*
+**Stage 1 *(old 0)* — housekeeping, landmines, vendoring.** *(done)*
 71 GB of stitched-and-forgotten staging deleted and auto-cleanup added;
 `preprocess_only.py` and `score_target.py` deleted (both could silently write
 9-dim/no-K2 data or break on a non-9-dim model); the four remaining audit items
 fixed (gate cwd, `dvc` resolution, MLflow run naming, the CI gate jobs
 `ci.yml` had promised); patched TRICERATOPS vendored.
 
-**Stage 1 — ExoMiner-grade inputs.** *(done 2026-08-05)*
+**Stage 2 *(old 1)* — ExoMiner-grade inputs.** *(done 2026-08-05)*
 A 5,423-example view set with eleven branches — global/local flux with variance
 and presence channels, odd/even, weak-secondary, centroid, flux-trend, unfolded
 per-transit with transit counts, cadence-gap, and the periodogram pair — plus a
@@ -269,19 +309,30 @@ Two things could not be built as specified. The **momentum-dump branch** reads
 `QUALITY` bit 5, which lightkurve's default bitmask strips at download — the
 flag is zero on every cadence in the cache — so it measures the hole a dump
 leaves instead. And **difference-image stamps are 11-17 px, not a fixed
-33x33**; that is Kepler's size, and stage 2(d) must re-grid.
+33x33**; that is Kepler's size, and stage 9 must re-grid.
 
 Full detail, and the merge collision that silently dropped the transit counts
 past all seven gates, in HANDOVER.md (2026-08-05).
 
-**Stage 2 — the model, incrementally, each sub-step gated.**
-(a) per-diagnostic branches + scoped scalars + variance channels + joint local
-conv; (b) unfolded-flux branch; (c) trend + periodogram branches;
-(d) difference-image branch with quality attention. Optuna re-tune on the
-winner. Every sub-step passes the promotion gate on CV AUC/Brier/ECE, the TESS
-slice, and injection-recovery completeness.
+**Stage 3 *(old A)* — the re-baselined incumbent summary.** *(done 2026-08-08)*
+`evaluate.py summarise` writes `models/cv/incumbent-rebaselined/cv_summary.json`
+with a `per_mission` block computed from out-of-fold rows only, so the gate
+returns a decision instead of falling through to pooled means. Detail in "The
+gate cannot engage against the incumbent" above, including the trap in the fix.
 
-### Stage 2(a) run 1 — REJECTED (2026-08-05)
+**Stage 4 *(old 2(a))* — the model, incrementally.** *(closed — all four arms
+rejected)*
+Originally specified as one stage with four gated sub-steps: (a) per-diagnostic
+branches + scoped scalars + variance channels + joint local conv; (b)
+unfolded-flux branch; (c) trend + periodogram branches; (d) difference-image
+branch with quality attention, then an Optuna re-tune on the winner. **The
+sub-step design was never the implementation path** — `build_cnn_branches` builds
+all eleven branches at once — so what survives of it is: (a) is stage 4 and is
+closed, (b) and (c) become attribution and are stage 7, (d) is still a genuine
+build and is stage 9, and the re-tune is stage 10. Every arm passes the promotion
+gate on CV AUC/Brier/ECE, the TESS slice, and injection-recovery completeness.
+
+### Stage 4 *(old 2(a))* run 1 — REJECTED (2026-08-05)
 
 **The stop condition fired.** Ollie's third pre-committed case, recorded before
 the run: the branch model's all-mission gap is **+0.0222 in the incumbent's
@@ -376,11 +427,16 @@ was a first pass at 193k params, two conv blocks, **no augmentation and no
 tuning**. Augmentation now exists for the view set (`viewset_augment.py`) and is
 declared in `conf/model/cnn_branches.yaml` at the same magnitudes the incumbent
 trained with. Tuning stays out of run 2 deliberately — it would confound the
-resolution test, and it is the Optuna step at the end of stage 2.
+resolution test, and it is the Optuna step at the end of the old stage 2 — now
+stage 10.
 
 ### Pre-commitments recorded before the next result exists
 
 Written down first so they cannot be adjusted to fit an outcome.
+
+*(Not renumbered — this block is the verbatim record of what was committed to on
+2026-08-06. New stage numbers appear in square brackets where a reference would
+otherwise be unresolvable; the mapping table is at the top of this file.)*
 
 **(a) The capacity re-run is CANCELLED, not deferred.** Recorded prediction:
 `init_filters=22` — 226,711 parameters, 0.4% from the incumbent's 227,641 —
@@ -468,7 +524,7 @@ The branch model is better *calibrated* on TESS and worse where it is used.
 **(d) Queued, not built: injection-recovery on matched hosts with observation
 baseline held CONSTANT.** It is the only causal measure of detection
 performance available here, and it is immune to the label-selection confound
-that moved to stage 3. Build it when 2(b) is actually run.
+that moved to stage 3 [now 8]. Build it when 2(b) [now stage 7] is actually run.
 
 ### K2 was unbenchmarked for 9.7% of training — now it is not
 
@@ -503,7 +559,7 @@ absent on **all 527** K2 rows, so that lane imputes.
 sets are compared, and names any mission an inner join drops entirely. A mission
 falling out of a comparison cannot be silent again.
 
-### Stage 2(a) run 2 — the resolution fix, pre-registered 2026-08-06
+### Stage 4 *(old 2(a))* run 2 — the resolution fix, pre-registered 2026-08-06
 
 **One change, both halves together: global 301 → 2001, local 31 → 201.** They
 are the same mechanism testing the same hypothesis; splitting them costs two
@@ -535,7 +591,7 @@ finishes:
 
 | outcome | reading |
 |---|---|
-| Kepler gap closes to **under ~0.012** and TESS does not regress | resolution was the cause. Proceed to 2(b) |
+| Kepler gap closes to **under ~0.012** and TESS does not regress | resolution was the cause. Proceed to 2(b) [now stage 7] |
 | Kepler gap roughly **halves** | plausible, unproven. Report as-is, proceed |
 | Kepler gap stays **above ~0.020** | resolution hypothesis **FALSIFIED**. The capacity run becomes mandatory under the trigger above. Say so and **stop; do not tune** |
 
@@ -569,7 +625,7 @@ Kepler 0–10 transits went from +0.0269 to **+0.2038**, so the damage is
 concentrated where evidence is *thinnest* — the opposite of what a resolution
 deficit predicts.
 
-**Under the Task 2(a) trigger the capacity run is now MANDATORY**, and per the
+**Under the stage 4 trigger the capacity run is now MANDATORY**, and per the
 pre-registration this stops here rather than tuning.
 
 *(The trigger stands and the falsification holds — the Kepler gap is +0.0685 even
@@ -695,7 +751,8 @@ measured. Three of eleven views were being fed a confident false claim on
 **Run 3 and the capacity arm are unaffected** — both had the module loaded
 before the change — so the comparison that decides the capacity question is
 still internally consistent. **Every run after them is not comparable to run 3
-on this axis** and needs its own baseline. Stage D re-baselines anyway.
+on this axis** and needs its own baseline. Stage 6 produces exactly that
+re-baseline, and stage 7 re-baselines again anyway.
 
 **The unfolded branch was rebuilt (2026-08-08).** Audit finding #23: it
 convolved along the transit axis with the 201 phase bins flattened into 603
@@ -704,8 +761,8 @@ tower under `TimeDistributed` and pools with a masked mean + max + spread. The
 model drops **215,281 → 169,361 parameters (−21.3%)**, almost all of it the
 48,256-parameter convolution that was doing the damage.
 
-Runs 1, 2, 3 and the capacity arm all carried the broken branch, so **stage
-2(a)'s rejections stand** — nothing about this changes what those runs measured,
+Runs 1, 2, 3 and the capacity arm all carried the broken branch, so **stage 4's
+rejections stand** — nothing about this changes what those runs measured,
 and a branch that could not see a transit is one more reason they lost. But no
 run so far is a baseline for the rebuilt model. The direction is the opposite of
 the capacity arm's (+19%, paired d = −0.44, nothing), which is weak evidence
@@ -771,12 +828,13 @@ Two things follow, and they point in opposite directions:
   measured for the first time" above, where `--n-models-per-fold 3` finally
   split `seed_sd 0.0081` from `fold_sd 0.0094`. That threshold is **AUC only**;
   recall @1% FPR still has no variance estimate, which is precisely why the
-  capacity arm's recall jump cannot be acted on as it stands.)*
+  capacity arm's recall jump cannot be acted on as it stands. **That gap is
+  stage 6**, below.)*
 
 **One knock-on, deferred deliberately.** The candidate view set
 (`data/processed/candidates_viewset/`, 5,347 rows) is still at 301/31, so a
 run-2 model cannot score candidates until it is rebuilt — about two hours. That
-blocks the candidate-population bias measurement and stage 2(b)'s control arm,
+blocks the candidate-population bias measurement and stage 7's control arm,
 but not run 2's own promote/reject decision, and it is wasted work if the
 resolution hypothesis is falsified.
 
@@ -816,7 +874,7 @@ training targets. A future *training* view set rebuild is still cold — it was
 already, since those entries were unfindable — so the cache on disk now helps a
 candidate re-run and not a training one.
 
-### The candidate view set, rebuilt — 2026-08-08
+### Stage 5 *(old C)* — the candidate view set, rebuilt — 2026-08-08
 
 Done, cold, as budgeted: **5,346 rows at 2001/201, 309 MB, 95 minutes** for
 7,174 catalogue rows. `ViewSetArrays.validate()` reports it well-formed, every
@@ -841,7 +899,8 @@ handover a rebuilt set **will** trip the gate's row-count alarm against run 3
 and the capacity arm, which were measured on the previous catalogue. That alarm
 is correct and should not be silenced.
 
-**Stage 2(b)'s success criterion, re-specified 2026-08-05.** It read
+**Stage 7's success criterion — recorded as stage 2(b)'s, re-specified
+2026-08-05, and not renumbered inside.** It read
 *"corr(prob, n_transits) must leave zero and the 26.4% control-arm host-pass
 rate must fall"*, with a companion requirement that the baseline correlation
 fall from +0.211. That criterion is now split, because its two halves are not
@@ -853,7 +912,7 @@ the same kind of measurement:
   can explain it away. **26.4% must fall.**
 - **The baseline correlation is retired as a gate** and kept only as a reported
   diagnostic. Driving it to zero would move the model away from its own labels
-  — see stage 3.
+  — see stage 3 [now 8].
 - **The transit-count correlation is reported, not gated.** Its zero point is
   **−0.048** against transits captured, not the −0.003 that was measured against
   transits predicted; and the labels themselves sit at −0.073, so there is no
@@ -861,25 +920,75 @@ the same kind of measurement:
 
 The clean test of the unfolded branch is **injection-recovery on matched hosts
 with observation baseline held constant**, which removes the label confound
-entirely. Build that harness when 2(b) is run.
+entirely. Build that harness when 2(b) [now stage 7] is run.
 
-**Stage 3 — labels and negatives.** EB-catalogue and brown-dwarf negatives,
-the ephemeris-match test, and scrambled/inverted synthetic negatives built with
-our existing injection machinery. Plus the observation-selection problem below,
-which arrived here from stage 2.
+**Stage 6 — recall variance + re-baseline.** *(next)*
+`recall @1% FPR` is the criterion that has rejected all four arms of stage 4 —
+run 3 on **0.145 vs 0.307** — and it has **no variance estimate at all**. AUC's
+noise floor was measured (`seed_sd 0.0081`, `fold_sd 0.0094`) and "a margin under
+~0.009 is not a decision" adopted from it; the statistic that does the actual
+rejecting never got the same treatment.
 
-**Moved ahead of stage 2(d) on 2026-08-08.** Two reasons. Stage 3's
+`_variance_decomposition` reads only `model_roc_auc`, and the per-member metrics
+recorded beside it come from `classification_metrics`, whose `.recall` is recall
+at threshold 0.5 — **not** the gate's statistic. The gate's `recall_at_1pct_fpr`
+lives in `SliceMetrics` (`eval/comparison.py`), verified exact against sklearn
+and a brute-force threshold sweep. So each member records its own
+`recall_at_1pct_fpr` alongside its AUC, and the summary reports `recall_seed_sd`
+/ `recall_fold_sd` beside the existing pair. **Purely additive to
+`cv_summary.json`** — the promotion gate reads named keys and is unaffected.
+
+Then the re-baseline itself: HEAD, `--n-models-per-fold 3`, 5 folds, clean tree.
+It is the control for every subsequent stage — three training-path changes have
+landed since run 3, so nothing measured before 2026-08-08 is a baseline — and it
+returns the recall noise floor for free.
+
+**This replaces the queued capacity repeat**, which was specified against the
+capacity arm's architecture. That architecture no longer exists on HEAD, so
+running it now would measure the rebuilt unfolded branch rather than the capacity
+arm — the same trap as `init_filters=22` being re-derived against run 3. This
+measures the thing underneath instead, on the architecture that exists, for one
+run instead of three.
+
+**Stage 7 *(old D)* — branch attribution.** Which of the eleven branches earn
+their place, now that the unfolded one can actually see a transit. A branch-drop
+mechanism driven by config rather than by editing `build_cnn_branches` — leaving
+a branch out must be a declared experiment, not a code edit — plus the harness
+owed since old 2(b) was specified: **injection-recovery on matched hosts with
+observation baseline held constant**, the only causal measure available here and
+immune to the label-selection confound that moved to stage 8. Eleven branches
+group into ~7 families, one leave-one-out CV run each at `--n-models-per-fold 3`.
+**Its criterion is already specified and is not AUC**: the control-arm host-pass
+rate, 26.4%, must fall.
+
+**Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
+negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
+built with our existing injection machinery. Plus the observation-selection
+problem below, which arrived here from the branch-model work.
+
+**Moved ahead of stage 9 on 2026-08-08.** Two reasons. Stage 8's
 interventions change the training distribution, so anything measured before it
-has to be re-measured after — and 2(d) is the expensive one, so the roadmap
+has to be re-measured after — and stage 9 is the expensive one, so the roadmap
 order paid for it twice. And on the evidence, two architecture runs have now
 been rejected while the largest measured defect sits at **+0.278 in the labels
 themselves, +0.387 on TESS** — above every model, and somewhere no architecture
 can reach. The original ordering was set before either of those facts existed.
 
-One knock-on to expect: changing the label distribution invalidates the
-re-baselined incumbent summary from stage A, which will need regenerating. That
-is one command once stage A exists, and it is a reason to build stage A as a
-repeatable path rather than a one-off artefact.
+Two knock-ons to expect: changing the label distribution invalidates the
+re-baselined incumbent summary from stage 3, which will need regenerating — one
+command, and a reason to keep stage 3 a repeatable path rather than a one-off
+artefact — and it invalidates stage 7's attribution numbers, which is exactly why
+stage 8 sits ahead of stage 9.
+
+**Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
+left in the model, with quality attention. Blocked on a known problem: the stamps
+are **11–17 px, not the fixed 33×33** the design assumed — that is Kepler's size
+— so they must be re-gridded to a fixed size first.
+
+**Stage 10 *(old G)* — Optuna re-tune.** On the winner, after the distribution is
+settled. `conf/train/tune.yaml` sets `timeout: 7200` **per invocation** and the
+study resumes, so this is several invocations rather than one. The existing
+campaign already rejected focal loss; do not re-litigate it without a reason.
 
 ### Observation baseline — a real problem architecture cannot fix
 
@@ -889,7 +998,7 @@ Measured 2026-08-05, baseline as a span in **days**:
 |---|---:|
 | incumbent, 3,908 scored candidates | **+0.208** (+0.187 controlling period) |
 | incumbent, labelled CV set | +0.238 |
-| stage 2(a) branches, labelled CV set | +0.239 |
+| stage 4 branches, labelled CV set | +0.239 |
 | **the ground-truth label itself** | **+0.278**, and **+0.387** on TESS alone |
 
 Every model sits *below* the labels. The correlation survives inside every TESS
@@ -911,12 +1020,12 @@ baseline**, **baseline-stratified negative sampling**, and **synthetic negatives
 that break the correlation by construction. All three are label-distribution
 interventions, and all three belong here.
 
-**Stage 4 — serving parity and explainability.** `TargetScorer` computes every
+**Stage 11 *(old 4)* — serving parity and explainability.** `TargetScorer` computes every
 branch live; `/score` returns per-branch contributions via branch-occlusion.
 ExoMiner's explainability story, made interactive — which their batch pipeline
 cannot do.
 
-**Stage 5 — the UI redesign.** Unchanged and last. Mission Control aesthetic,
+**Stage 12 *(old 5)* — the UI redesign.** Unchanged and last. Mission Control aesthetic,
 manus north star. It will have per-branch vetting evidence to display.
 
 ## Considered and deferred
@@ -952,7 +1061,7 @@ What is missing is survey scale, which is a different engineering problem:
 over all 2-minute data — that is where TOIs come from — so re-detecting what it
 has already detected is unlikely to add anything. More importantly, the
 measured weaknesses are all on the vetting side (the 26.4% control-arm host
-pass rate; probability tracking transits captured at −0.048), and stages 1–3
+pass rate; probability tracking transits captured at −0.048), and stages 2–8
 have a falsifiable test for fixing them. Switching
 to a harder, more crowded problem mid-solve would abandon a well-posed one.
 
@@ -983,7 +1092,7 @@ useful local model is several GB of weights before its KV cache.
 Adjacent uses that are *not* the pipeline: literature cross-referencing for a
 shortlisted target is genuinely useful and belongs in a separate tool.
 Natural-language verdict summaries are already produced deterministically from
-the structured diagnostics. For explainability, stage 4's per-branch occlusion
+the structured diagnostics. For explainability, stage 11's per-branch occlusion
 contributions are quantitative and faithful to what the model computed;
 narrating them with an LLM would add a layer that can be wrong about our own
 model, which is the opposite of the goal.
