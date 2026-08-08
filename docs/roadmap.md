@@ -1067,7 +1067,17 @@ The run died ~15 minutes in, in `fit_platt`, on the convergence guard added
 2026-08-08. The guard was right: `nll` clipped `p` while the analytic gradient
 did not, so BFGS's line search failed on an inconsistency between `f` and `jac`.
 Fixed by the stable `softplus(z) - y·z` form; the guard is untouched. Full
-detail, including what it implies for runs predating the guard, in the audit.
+detail in the audit.
+
+**It implied nothing for run 3, and that was checked rather than assumed.** It
+was recorded here first that runs predating the guard had "calibrated on a
+stalled fit" — an inference from the guard's absence, not a measurement.
+Regenerating run 3's calibration from its own checkpoints reproduces its stored
+scores at **max |delta| = 0.0**, and refitting with the converged optimiser
+returns the same parameters: **run 3's Brier and ECE stand exactly as recorded**
+(TESS 0.1150 / 0.0171). The defect needs validation rows saturating past `_EPS`,
+and run 3 had **2 in 4,344** against a score of exactly 1.0 in the fold that
+stalled. See the audit for the per-fold table and for what remains unmeasured.
 
 **None of the pre-registered numbers move, and this is why.** Every quantity the
 thresholds above are read against is **rank-based**, and Platt is monotone:
