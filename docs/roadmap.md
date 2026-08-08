@@ -1271,15 +1271,20 @@ only obtainable at stage 11.
 **Also settled: the sweep's control is valid.** The re-baseline predates the
 branch-drop refactor, so its checkpoints could in principle have been built by
 different code. Checked rather than assumed — `branches-20260808-rebaseline`'s
-fold-0 checkpoint against HEAD's no-drop build:
+`fold_0/model_0_cnn_branches.keras` against HEAD's no-drop build:
 
 ```
-params 169,361   layers 134   inputs 13   layer-name/class signature d4956bb3eec61829
+params 169,361   layers 134   inputs 13
+ordered (layer name, layer class) sequence: IDENTICAL
 ```
 
-Identical on both, so creation order — and therefore the initialiser RNG draw
-order — survived the refactor. The six hours of sweep are not carrying an
-uncontrolled architecture difference.
+Identical creation order means an identical initialiser RNG draw order, so the
+six hours of sweep are not carrying an uncontrolled architecture difference.
+
+*(Stated as the ordered sequence rather than as a digest of it. A digest is only
+a fact if the function that produced it is recorded too — two correct checks of
+this ran and returned different hashes because they hashed differently, which is
+exactly the trap. The comparison above is reproducible from this repo.)*
 
 **Stage 7 *(old D)* — branch attribution.** Which of the twelve branches earn
 their place, now that the unfolded one can actually see a transit. A branch-drop
