@@ -1212,11 +1212,74 @@ Separately, `select_hosts` filters on mission, label, depth and cache only:
 **the baseline-matched harness owed since old 2(b) does not exist**, so even with
 serving parity the hosts would not be matched on observation baseline.
 
-Three ways out, none taken unilaterally: pull stage 11's serving parity forward;
-build an **offline** injection/control harness over `preprocess/viewset.py` and
-`eval/scoring.py` (no `/score`, no registry — plausibly much cheaper than full
-parity, and it is what the criterion actually needs); or re-scope stage 7's
-criterion and record that the control arm is deferred. **Ollie's call.**
+Three ways out were put to Ollie: pull stage 11's serving parity forward; build
+an **offline** injection/control harness; or re-scope and defer.
+
+#### Decided 2026-08-09: the offline harness, with the incumbent re-measured on it
+
+**Why not pull serving parity forward.** Stage 8 already invalidates stage 7's
+attribution numbers — that is why stage 8 was moved ahead of stage 9 — so
+spending 10–15 h on serving parity to obtain a stage-7 number stage 8 obsoletes
+is paying for it twice, the same argument in the same direction. And serving
+parity earns its keep in stage 11 by *shipping*; pulled forward it does the same
+work under another stage's pressure and ships nothing. What attribution actually
+needs is cross-ablation comparability on **one fixed protocol**, which the
+offline harness gives directly.
+
+**It is cheaper than it first looked, because the chain is existing parts.**
+`build_view_set(lc, *, period, t0, duration, trend_lc=None, raw_lc=None)` builds
+all eleven views from a light curve and an ephemeris with **no DV products**. So:
+`clean_lightcurve` / `flatten_lightcurve` (already composed in `host_baseline`) →
+`inject_box_transit` (model-independent, already tested) → `build_view_set` →
+`write_viewset_shards` → `make_viewset_dataset` → the run directory's fold
+members and calibrator, loaded exactly as `train_branches.py` does. New code is a
+baseline matcher, a driver and the pass-rate report: one script, one test file.
+Compute is forward passes over cached FITS — trivial beside a 2 h CV run.
+
+Writing a shard and reading it back through `make_viewset_dataset` is the
+construction rather than a shortcut: it puts the control arm through the same
+parse and scalar-normalisation path training used.
+
+**Two things pre-registered now, before the harness exists.**
+
+1. **The offline control arm measures the model minus its DV path.** It injects
+   at a synthetic ephemeris with depth 0, so no DV report exists for that
+   ephemeris and the `detection` / `ghost` branches run masked
+   (`dv_usable=False`). The model handles that by design — it is what the gating
+   is for — but it is a real difference from how 56% of training rows were built,
+   and it is a property of the measurement, not a defect to discover later.
+
+2. **This does NOT restore comparability with 26.4%, and "must fall" is
+   re-specified.** The 26.4% came through the live **dual-view** path: different
+   model, different view builder, different preprocessing. An offline
+   branch-model control arm is a **new baseline, not a continuation**. For "must
+   fall" to be a test rather than a slogan, the **dual-view model is re-measured
+   through the same offline harness** and the comparison is made within protocol.
+   That is cheap — its checkpoints are on disk.
+
+   This is a criterion being re-specified, and the reason is attached
+   deliberately: it is re-specified as **unmeasurable as written**, *before any
+   result exists*, rather than adjusted after seeing one. Those are different
+   acts and only the second is the thing pre-registration exists to prevent.
+
+**The honest limit, recorded so the number is not over-read later.** This can
+never support "the serving defect is fixed" — only "the branch architecture has a
+lower control-arm rate than the incumbent **on a common offline protocol**". If
+the offline and live protocols disagree, that gap is itself a finding, and it is
+only obtainable at stage 11.
+
+**Also settled: the sweep's control is valid.** The re-baseline predates the
+branch-drop refactor, so its checkpoints could in principle have been built by
+different code. Checked rather than assumed — `branches-20260808-rebaseline`'s
+fold-0 checkpoint against HEAD's no-drop build:
+
+```
+params 169,361   layers 134   inputs 13   layer-name/class signature d4956bb3eec61829
+```
+
+Identical on both, so creation order — and therefore the initialiser RNG draw
+order — survived the refactor. The six hours of sweep are not carrying an
+uncontrolled architecture difference.
 
 **Stage 7 *(old D)* — branch attribution.** Which of the twelve branches earn
 their place, now that the unfolded one can actually see a transit. A branch-drop
