@@ -1355,6 +1355,30 @@ signal could show ≈0 because the capacity it freed was reused.
 seed and splits. Runs go to `models/cv/branches-20260809-drop-{family}`. Nothing
 promotes; the registry is untouched.
 
+**One arm spanned a hibernation — recorded before either result is read.** The
+laptop's battery reached 1% and the machine hibernated from ~09:17 to 11:00 on
+2026-08-09 (`pmset`: `Wake from Hibernate ... Using AC (Charge:1%)`; the process
+showed 2 h 14 m elapsed against 59 m of CPU). The processes survived and resumed
+correctly, and the damage is bounded:
+
+| arm | status |
+|---|---|
+| `unfolded` | finished 08:48, ~30 min before the hibernation — **clean** |
+| `periodogram` | fold 0 clean; **folds 1–4 span the hibernation** |
+| `scalar_only` | started after the wake — **clean** |
+
+Hibernation restores process memory exactly, and TF/Metal would be far more
+likely to error than to corrupt silently, so this is probably immaterial —
+**probably is not a standard this project accepts for a pre-registered
+comparison.** `periodogram` is therefore re-run into
+`branches-20260809-drop-periodogram-clean`, and **the clean run is the
+authoritative one**, fixed here before either number is looked at.
+
+The hibernation-spanning run is **kept, not deleted**, and the two are compared
+as a free consistency check. If they differ by more than the floor, that is a
+finding about running training across a suspend — worth having, and it is only
+available because the first run was not quietly thrown away.
+
 **Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
 negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
 built with our existing injection machinery. Plus the observation-selection
