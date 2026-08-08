@@ -1185,16 +1185,107 @@ itself; transit sensitivity moved further from zero at **−0.1467** (run 3:
 −0.1249). Both are reported diagnostics, both point at stage 8, and neither gates
 anything.
 
-**Stage 7 *(old D)* — branch attribution.** Which of the eleven branches earn
+### Stage 7's criterion is blocked on stage 11 — found 2026-08-09
+
+**The control-arm host-pass rate cannot be measured for any branch model today,
+and nothing recorded this.** `roadmap.md` gates stage 7 on "26.4% must fall",
+measured on real hosts with no injection. That number comes from
+`injection_recovery.py`, whose control arm is `snr_target == 0, depth 0` pushed
+through the **live scoring path**. That path cannot carry a branch model:
+
+- `ScoringEnsemble.from_registry` loads `cnn_dualview.keras` per fold and
+  predicts from `global_view`, `local_view`, `aux_features`.
+- `TargetScorer` builds those with `preprocess.views.build_views` — the
+  dual-view builder, not `preprocess.viewset`'s eleven.
+- The runner constructs `TargetScorer(models_dir=Path("models"))` and reports
+  `scorer.ensemble.run_id`: it scores **whatever the registry serves**, with no
+  flag for a CV run directory. Pointing it at an ablation by editing
+  `models/registry.json` is a hard non-negotiable.
+
+Adding a run-directory flag is necessary and nowhere near sufficient — the
+serving path would still build the wrong views. **Making a branch model scoreable
+from a light curve is stage 11's "`TargetScorer` computes every branch live"**,
+budgeted 10–15 h and scheduled four stages later. Stage 7 as written depends on
+it.
+
+Separately, `select_hosts` filters on mission, label, depth and cache only:
+**the baseline-matched harness owed since old 2(b) does not exist**, so even with
+serving parity the hosts would not be matched on observation baseline.
+
+Three ways out, none taken unilaterally: pull stage 11's serving parity forward;
+build an **offline** injection/control harness over `preprocess/viewset.py` and
+`eval/scoring.py` (no `/score`, no registry — plausibly much cheaper than full
+parity, and it is what the criterion actually needs); or re-scope stage 7's
+criterion and record that the control arm is deferred. **Ollie's call.**
+
+**Stage 7 *(old D)* — branch attribution.** Which of the twelve branches earn
 their place, now that the unfolded one can actually see a transit. A branch-drop
 mechanism driven by config rather than by editing `build_cnn_branches` — leaving
 a branch out must be a declared experiment, not a code edit — plus the harness
 owed since old 2(b) was specified: **injection-recovery on matched hosts with
 observation baseline held constant**, the only causal measure available here and
-immune to the label-selection confound that moved to stage 8. Eleven branches
-group into ~7 families, one leave-one-out CV run each at `--n-models-per-fold 3`.
+immune to the label-selection confound that moved to stage 8. **Twelve branches
+over eleven views group into eight families** — the "eleven branches / ~7
+families" this file carried until 2026-08-09 counted views, not branches, and
+`BRANCH_FAMILIES` is now derived so the two cannot drift again. One leave-one-out
+CV run each at `--n-models-per-fold 3`.
 **Its criterion is already specified and is not AUC**: the control-arm host-pass
-rate, 26.4%, must fall.
+rate, 26.4%, must fall — **and is currently unmeasurable; see above.**
+
+#### Pre-registered before the sweep — recorded 2026-08-09, nothing launched
+
+**Scope: three families, not eight, prioritised by uncertainty rather than
+completeness.** A full sweep spends hours confirming that `flux` and `global`
+matter, which is not in doubt.
+
+| family | why it is uncertain | params |
+|---|---|---:|
+| `unfolded` | rebuilt 2026-08-08 (`65d1d98`) and never attributed; the branch stage 7 exists for | −8.5% |
+| `periodogram` | built and never measured; largest non-flux capacity delta, and the most plausible redundancy with flux | −14.4% |
+| `scalar_only` | tests whether the scalar path earns the `dv_usable` masking complexity | −9.8% |
+
+**This sweep is EXPLORATORY, and that is fixed now rather than after the
+numbers.** It reads AUC and recall @1% FPR deltas — which is what stage 4 did
+four times without persuading anyone — because the criterion that would settle
+the stage is blocked. **No branch is added or removed on the strength of it.** A
+family that passes earns a confirmatory repeat, not a decision.
+
+**The threshold is a two-run difference, not a margin against a fixed number.**
+Both the control and each ablation are 3-member ensembles, and their errors are
+independent, so the spread of the *difference* combines in quadrature:
+
+```
+sd(delta) = sqrt( (sd_control/√3)² + (sd_ablation/√3)² )
+```
+
+Using the re-baseline's measured floors, and assuming the ablation's own floor is
+comparable, the 2σ bars are **recall ≈ 0.048** and **AUC ≈ 0.0098** — *not* the
+0.034 and 0.007 that apply to a margin against a fixed reference. Each run
+reports its own `pooled_gate_recall_seed_sd` and `seed_sd`, so the bar is
+recomputed per comparison rather than assumed.
+
+**Multiple comparisons, stated in advance.** Three families against a 2σ bar is a
+familywise false-positive rate of roughly **1 − 0.954³ ≈ 13%** under the null —
+and it would have been ~31% at eight. No correction is applied, because the
+sweep is exploratory and a Bonferroni bar would make it unable to detect anything
+real at n=3; the number is recorded so "one family passed" is read as what it is.
+
+**A null is ambiguous and does not mean "carries no signal".** Leave-one-out
+measures whether a branch is *uniquely necessary*. Two branches carrying the same
+signal both show ≈0 delta, and the periodogram pair against the flux family is
+exactly that shape. **A null reads as "not uniquely necessary" only**; concluding
+"this branch is useless" from it would need a joint drop, which is not in this
+sweep.
+
+**The capacity confound.** Every drop removes 7–14% of parameters, so a hurt
+could be capacity. The capacity arm bounds it — **+19% params moved nothing**
+(paired d = −0.44) — which makes capacity a weak explanation for a large hurt but
+not a zero one, and it cuts the wrong way for a *null*: a branch that carries
+signal could show ≈0 because the capacity it freed was reused.
+
+**Control:** `models/cv/branches-20260808-rebaseline`, identical shards, identical
+seed and splits. Runs go to `models/cv/branches-20260809-drop-{family}`. Nothing
+promotes; the registry is untouched.
 
 **Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
 negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
