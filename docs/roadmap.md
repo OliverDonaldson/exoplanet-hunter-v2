@@ -93,7 +93,7 @@ in HANDOVER.md.
 | **3** *(old A)* re-baselined incumbent summary | **done** 2026-08-08 | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`; the gate returns decisions again instead of refusing |
 | **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
-| **6** recall variance + re-baseline | **in progress** | `recall @1% FPR` has rejected all four arms and has no variance estimate at all. Record it per member, report `recall_seed_sd` / `recall_fold_sd`, then re-baseline HEAD at `--n-models-per-fold 3` |
+| **6** recall variance + re-baseline | **in progress** — built and pre-registered 2026-08-08, run pending | `recall @1% FPR` has rejected all four arms and had no variance estimate at all. Now recorded per member and per pooled-member draw; `recall_*`, `gate_recall_*` and `pooled_gate_recall_seed_sd` join the AUC pair in `summary.variance`. The re-baseline run is the control for every stage after it |
 | **7** *(old D)* branch attribution | not started | absorbs the unfolded-flux branch (old 2(b)), trend + periodogram (old 2(c)) and the training half of stage 11's occlusion |
 | **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9** | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
@@ -938,10 +938,30 @@ and a brute-force threshold sweep. So each member records its own
 / `recall_fold_sd` beside the existing pair. **Purely additive to
 `cv_summary.json`** — the promotion gate reads named keys and is unaffected.
 
-Then the re-baseline itself: HEAD, `--n-models-per-fold 3`, 5 folds, clean tree.
-It is the control for every subsequent stage — three training-path changes have
-landed since run 3, so nothing measured before 2026-08-08 is a baseline — and it
-returns the recall noise floor for free.
+**Three estimates, not one, because a fold is the wrong population.** TESS holds
+2,399 rows at a 0.552 base rate, so a fold's TESS test slice carries ~215
+negatives and its 1% FPR cut is **two rows** — the statistic is set by where the
+third-highest-scoring negative lands, and its spread says more about that than
+about the model. The gate reads the *pooled* out-of-fold set: ~1,074 negatives,
+a cut of ten. So `predictions.parquet` gained one uncalibrated score column per
+ensemble member, and stacking member *i*'s column across folds re-forms a
+complete out-of-fold prediction set for that member alone. Three members, three
+independent draws of **the number the gate actually reads**, at the cost of three
+float columns and no extra training or inference.
+
+| reported | what it is |
+|---|---|
+| `recall_seed_sd` / `recall_fold_sd` | the whole fold, every mission — mirrors the AUC pair exactly |
+| `gate_recall_seed_sd` / `gate_recall_fold_sd` | that fold's TESS rows alone; **coarse, and an upper bound** |
+| `pooled_gate_recall_seed_sd` | spread of the three pooled-TESS draws — **the primary estimate** |
+
+Then the re-baseline itself: HEAD, `--n-models-per-fold 3`, 5 folds, over the
+**unchanged** training shards (5,426 rows: 2,500 Kepler, 2,399 TESS, 527 K2).
+Same rows as run 3 and the capacity arm, so the only differences are the three
+code changes and the gate's row-count alarm should stay silent. It is the
+control for every subsequent stage — three training-path changes have landed
+since run 3, so nothing measured before 2026-08-08 is a baseline — and it returns
+the recall noise floor for free.
 
 **This replaces the queued capacity repeat**, which was specified against the
 capacity arm's architecture. That architecture no longer exists on HEAD, so
@@ -949,6 +969,95 @@ running it now would measure the rebuilt unfolded branch rather than the capacit
 arm — the same trap as `init_filters=22` being re-derived against run 3. This
 measures the thing underneath instead, on the architecture that exists, for one
 run instead of three.
+
+#### Pre-registered before the run — recorded 2026-08-08, run not yet launched
+
+Nobody is watching an autonomous session read its own result, so every number
+below is written down first.
+
+**The decision rule, taken from the AUC precedent rather than invented here.**
+The adopted AUC threshold is `2 x seed_sd / sqrt(n_models_per_fold)`:
+`2 x 0.0081 / sqrt(3) = 0.0094`, which is the recorded "a margin under ~0.009 is
+not a decision". Applied unchanged to recall, a margin `M` **is not a decision**
+when
+
+```
+per-member seed_sd  >=  M x sqrt(3) / 2
+```
+
+**The two numbers, computed before the run exists.**
+
+| question | margin | the rejection/effect survives only if per-member `seed_sd` is |
+|---|---:|---:|
+| Is run 3's rejection sound? *(TESS R@1%FPR 0.145 vs incumbent 0.307)* | 0.162 | **below 0.1403** |
+| Was the capacity arm's 0.145 -> 0.236 noise? | 0.091 | at or **above 0.0788** for it to be noise |
+
+`pooled_gate_recall_seed_sd` is the estimator these are read against.
+`gate_recall_seed_sd` is reported beside it and is an upper bound, so a
+conclusion that survives *it* is safe a fortiori.
+
+**How each outcome reads — fixed now.**
+
+| `pooled_gate_recall_seed_sd` | reading |
+|---|---|
+| **< 0.0788** | run 3's rejection is sound, and the capacity arm's recall jump is **outside** reseeding noise. It stays **unactionable** regardless — the architecture it was measured on does not exist on HEAD — so it is recorded as a lead for stage 7, not built on |
+| **0.0788 – 0.1403** | run 3's rejection stands; the capacity jump is **inside** noise and is retired as an observation. This fully discharges the queued capacity repeat |
+| **>= 0.1403** | **run 3's margin does not support its own rejection.** Report as falsified, stop, and surface it. Do not re-specify the criterion. This does not un-reject run 3 — AUC, Brier and the gate's other guards are untouched — but it would mean the criterion this project has leaned on cannot carry the weight put on it, which is a finding |
+
+**Prediction, recorded so it can be wrong.** `pooled_gate_recall_seed_sd` lands
+in **0.02–0.08**, and `gate_recall_seed_sd` lands above it. The re-baseline's own
+`per_mission.TESS` AUC lands **within ±0.009 of run 3's 0.9119**, and its TESS
+recall @1% FPR lands in **0.10–0.30** — a deliberately wide band, because a
+narrow one on the statistic whose spread has never been measured would be false
+precision.
+
+**Four caveats, recorded now rather than discovered later.**
+
+1. **Reseeding noise is necessary, not sufficient.** 0.145 vs 0.307 compares two
+   *different models*, not two seeds of one; the incumbent carries its own noise
+   and a different architecture and protocol. Clearing the threshold does not by
+   itself make the rejection sound. Failing it does make it unsound.
+2. **Three draws is a thin sd.** The sampling spread of an sd from three draws is
+   roughly 40% of its own value. If the result lands within a factor of ~1.5 of a
+   threshold, the honest reading is **unresolved** — that is a stop-and-ask, not
+   a re-specification.
+3. **Two TESS populations, as always.** The pooled draws are over the run's own
+   `per_mission.TESS`, **n=2,399**. The 0.145 and 0.307 in the table above are
+   the **n=2,367** shared-join gate slice. Both are correct; neither is being
+   "fixed" to match the other.
+4. **The floor is measured on HEAD, applied to run 3's margin.** That assumes the
+   noise scale is a property of the statistic and the population rather than of
+   the specific architecture. Both are eleven-branch models on the same shards,
+   so it is reasonable — and it is an assumption, not a measurement.
+
+**What will be run, named before it exists.** One CV run to
+`models/cv/branches-20260808-rebaseline`, `--n-models-per-fold 3`, 5 folds, over
+`data/processed/viewset_tfrecords` unchanged. Then, as a **reported diagnostic
+and not a decision**, `evaluate_promotion` against
+`models/cv/incumbent-rebaselined/cv_summary.json` — the same protocol run 3's
+table used, so the two are comparable. `promotion_gate.py` itself is not used:
+it reads the registry, the live incumbent has no `per_mission` block and it has
+no `--incumbent` flag.
+
+**The tree condition, stated precisely rather than as "clean".** No *tracked*
+file will differ from the recorded `git_sha` — `git status --porcelain
+--untracked-files=no` is empty at launch. `run_config.git_dirty` will
+nevertheless be **True**, because `--porcelain` counts untracked files and
+`docs/demo-script-2026-08-08.md` is one: written by another session at 21:10,
+read by nothing, and not this session's to commit. Recorded here so the flag on
+the control run is explained by the artefact rather than guessed at later. Run 3
+recorded no provenance at all and the capacity arm recorded `dirty: True` with
+no explanation; this is the first branch run whose flag means something specific.
+
+**Nothing promotes.** The re-baseline is a control. `models/registry.json` is
+untouched, `ca906040` stays served, and a favourable number here does not reopen
+stage 4 — only stage 7's leave-one-out runs, read against this re-baseline, can
+move anything.
+
+If the re-baseline's TESS AUC lands outside ±0.009 of 0.9119 in either direction,
+that is a **falsified prediction** and is reported as one. It is not re-read as
+an improvement or a regression: one run of a control cannot carry that, and stage
+7 re-baselines again anyway.
 
 **Stage 7 *(old D)* — branch attribution.** Which of the eleven branches earn
 their place, now that the unfolded one can actually see a transit. A branch-drop
