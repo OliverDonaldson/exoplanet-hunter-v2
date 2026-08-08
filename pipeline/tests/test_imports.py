@@ -30,7 +30,7 @@ MODULES = [
 ]
 
 
-#: Deleted in stage 0 because each could silently produce wrong data of record.
+#: Deleted in stage 1 because each could silently produce wrong data of record.
 #: `preprocess_only.py` wrote a 9-dim aux vector where `build_dataset.py` writes
 #: 13 and bypassed `build_labels_from_cfg`, dropping every K2 row; nothing
 #: downstream errored. `score_target.py` was the last hand-rolled aux layout,

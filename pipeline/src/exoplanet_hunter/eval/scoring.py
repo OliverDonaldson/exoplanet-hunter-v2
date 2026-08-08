@@ -242,7 +242,7 @@ def summarise_scored(
 
     `evaluate_promotion` gates on `per_mission[GATE_MISSION]`. A summary without
     that block makes it fall through to comparing pooled means over populations
-    that may differ, which is how every stage-2 decision before 2026-08-07 was
+    that may differ, which is how every stage 4 decision before 2026-08-07 was
     silently taken. The live incumbent `ca906040` has no such block, and the
     re-baseline exists only as predictions — so this is what lets the gate
     engage at all.
@@ -269,7 +269,7 @@ def summarise_scored(
     # source does not cover. On 2026-08-08 that was five rows: the incumbent was
     # re-scored on the legacy 9-dim shards (5,380 rows, no mission column) while
     # missions resolve from the current view set (5,426), and five confirmed
-    # planets present in the former dropped out of the Stage 1 rebuild. They are
+    # planets present in the former dropped out of the stage 2 rebuild. They are
     # outside the comparison population — no candidate can score them — so
     # excluding them is right, but it is a decision the caller makes explicitly.
     unresolved = scored[scored["mission"].isna()]

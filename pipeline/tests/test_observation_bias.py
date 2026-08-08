@@ -1,4 +1,4 @@
-"""The falsifiable test for stage 2(b): does the score track transits or time?"""
+"""The falsifiable test for stage 7 (old 2(b)): does the score track transits or time?"""
 
 from __future__ import annotations
 

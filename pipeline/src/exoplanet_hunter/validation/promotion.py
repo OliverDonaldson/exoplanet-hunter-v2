@@ -16,8 +16,8 @@ This module decides whether that run replaces the incumbent in
     predates the `test_ece` field;
   * shortlist guard: recall at 1% FPR must not fall by more than
     `recall_tolerance`. AUC scores ranking at every threshold; the follow-up
-    shortlist this system exists to produce lives at exactly one. The stage
-    2(a) branch model is the case that motivated it — TESS AUC within 0.002
+    shortlist this system exists to produce lives at exactly one. The stage 4
+    branch model is the case that motivated it — TESS AUC within 0.002
     of the incumbent while recall at 1% FPR fell 0.307 -> 0.238;
   * the first-ever run promotes automatically (there is no bar yet — the RF
     baseline becomes the incumbent as soon as it's registered).
@@ -486,7 +486,7 @@ def publishable_cv_dirs(models_dir: Path) -> list[Path]:
 def assert_servable(cv_dir: Path) -> None:
     """Every fold must hold weights and a calibrator before the registry names it.
 
-    Stage 2(a) run 1 wrote no checkpoints at all — a metrics-only run that would
+    Stage 4 run 1 wrote no checkpoints at all — a metrics-only run that would
     promote cleanly here and fail at serve time, long after the decision. The
     registry is a pointer to something that has to exist.
     """

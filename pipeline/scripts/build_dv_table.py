@@ -2,7 +2,7 @@
 
     python pipeline/scripts/build_dv_table.py --out data/processed/dv_scalars.parquet
 
-No network. Difference-image pixels stay in the XML until stage 2 fixes a stamp
+No network. Difference-image pixels stay in the XML until stage 9 fixes a stamp
 size; this is the scalar half.
 
 `dv_usable` is the column that matters: a report holds one `planetResults` per

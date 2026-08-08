@@ -8,13 +8,13 @@ promotion gate reads.
 
 **`summarise` is what lets the gate engage at all.** `evaluate_promotion` gates
 on `per_mission[TESS]`, the live incumbent's summary has no such block, and the
-re-baseline existed only as predictions — so every stage-2 decision was refused
+re-baseline existed only as predictions — so every stage 4 decision was refused
 (and before 2026-08-07, silently taken on pooled means). Slices are out-of-fold
 only: the re-baselined set carries 243 zero-shot Kepler rows that are *all*
 negatives, and pooling them into the out-of-fold Kepler figure measures a
 population no model was asked about.
 
-Coverage is reported before any metric. The stage 2(a) comparison matched 4,605
+Coverage is reported before any metric. The stage 4 comparison matched 4,605
 rows and looked complete while dropping all 527 K2 examples, because the
 incumbent's run predates K2 entirely — so a mission the join loses is named
 first, and `--strict` refuses the comparison outright.

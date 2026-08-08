@@ -170,7 +170,7 @@ class FFIDownloader:
                 shutil.rmtree(stage, ignore_errors=True)
                 continue
 
-            # Per-target staging, removed on success (stage 0 deleted 71 GB
+            # Per-target staging, removed on success (stage 1 deleted 71 GB
             # of stitched-and-forgotten debris from not doing this).
             shutil.rmtree(stage, ignore_errors=True)
             result = FFIResult(

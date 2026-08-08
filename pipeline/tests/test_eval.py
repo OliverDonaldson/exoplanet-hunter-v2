@@ -1,6 +1,6 @@
 """Comparing two prediction sets, and the cuts that read the result.
 
-These numbers decide whether a run promotes and whether stage 2(b) proceeds. A
+These numbers decide whether a run promotes and whether stage 7 proceeds. A
 silently wrong cut produces a plausible table, which is the failure mode this
 project keeps meeting — so the guards against silence are tested as hard as the
 arithmetic.
@@ -66,7 +66,7 @@ def separable(n, rng, strength):
 
 
 def test_a_mission_the_join_drops_is_named():
-    """The stage 2(a) case: the incumbent predates K2, so an inner join keeps
+    """The stage 4 case: the incumbent predates K2, so an inner join keeps
     none of it while reporting a healthy 4,605 rows."""
     branches = frame(list(range(10)), ["K2"] * 4 + ["TESS"] * 3 + ["Kepler"] * 3)
     incumbent = frame(list(range(4, 10)))

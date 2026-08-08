@@ -1,4 +1,4 @@
-"""Per-diagnostic view set (stage 2 of the ExoMiner rebuild).
+"""Per-diagnostic view set (stage 2 of the ExoMiner rebuild, old stage 1).
 
 Separate from `views.py`, whose global/local pair feeds the live model.
 
@@ -20,7 +20,7 @@ from exoplanet_hunter.preprocess.fold import bin_profile
 if TYPE_CHECKING:
     import lightkurve as lk
 
-#: The incumbent's resolution, restored 2026-08-06. Stage 2(a) run 1 built these
+#: The incumbent's resolution, restored 2026-08-06. Stage 4 run 1 built these
 #: at ExoMiner's 301/31 — on views ours oversample ~7x — and lost 0.0348 AUC on
 #: Kepler, monotonically in transits caught, while TESS stayed level. That is the
 #: signature of a bin count too coarse to hold what a four-year baseline

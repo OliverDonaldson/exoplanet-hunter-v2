@@ -5,7 +5,7 @@ Hydra entry points. Anything reusable lives in
 only place a piece of logic exists. That rule exists because it was broken
 twice: two scripts once carried their own copy of the aux vector and the
 catalogue request, and both silently wrote wrong data
-(`preprocess_only.py`, deleted in Stage 0).
+(`preprocess_only.py`, deleted in stage 1, the old stage 0).
 
 Hydra style is `key=value`, **not** `--flag`:
 

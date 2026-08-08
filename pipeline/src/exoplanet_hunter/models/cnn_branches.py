@@ -1,4 +1,4 @@
-"""Per-diagnostic branch CNN — stage 2(a) of the ExoMiner rebuild.
+"""Per-diagnostic branch CNN — stage 4 (old 2(a)) of the ExoMiner rebuild.
 
 One conv tower per view, each with its own scoped scalars, then a late-fusion
 head. Reimplemented from the ExoMiner/ExoMiner++ papers; their branch structure
@@ -219,7 +219,7 @@ def _unfolded_branch(
     twenty low-SNR single transits would set the normalisation for the four
     high-SNR folded views as well — moving `local_view`, the odd/even contrast
     and `secondary_view` in the same change that fixes this branch, and
-    confounding the attribution stage D exists to do.
+    confounding the attribution stage 7 (old D) exists to do.
 
     **Three statistics, not an average.** A mean across transits is the folded
     view again, which is the thing this branch exists to avoid. `mean` is the
@@ -332,7 +332,7 @@ class TransitPresence(layers.Layer):
 
     So an unmasked pool would divide by twenty regardless and make the branch's
     output scale with occupancy — reintroducing the observation-baseline
-    confound (roadmap, stage 3) through the one branch built to measure
+    confound (roadmap, stage 8) through the one branch built to measure
     transits rather than hosts.
     """
 

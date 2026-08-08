@@ -2,7 +2,7 @@
 
 Two models are compared on the rows they share, and an inner join is a lossy
 operation that reports nothing about what it dropped. Comparing the incumbent
-`ca906040` against the stage 2(a) branch model matched 4,605 rows and looked
+`ca906040` against the stage 4 (old 2(a)) branch model matched 4,605 rows and looked
 complete; it had silently discarded **all 527 K2 examples**, 9.7% of training,
 because the incumbent's run predates K2 entirely. The surviving weights were
 Kepler 48.6% / TESS 51.4% / K2 0%, in a decision whose consequences are 100%

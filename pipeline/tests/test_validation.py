@@ -652,7 +652,7 @@ def test_a_k2_drop_inside_the_alarm_threshold_is_quiet():
 
 
 def test_recall_at_1pct_fpr_can_reject_a_model_that_wins_on_auc():
-    """The stage 2(a) case: TESS AUC within noise, recall @1% FPR 0.307 -> 0.238.
+    """The stage 4 case: TESS AUC within noise, recall @1% FPR 0.307 -> 0.238.
     AUC scores ranking everywhere; the shortlist lives at one threshold."""
     candidate = gated(0.9100, 0.1194, recall_at_1pct_fpr=0.238)
     incumbent = gated(0.9079, 0.1211, recall_at_1pct_fpr=0.307)
@@ -803,7 +803,7 @@ def test_registry_roundtrip(tmp_path):
 
 @pytest.mark.parametrize("missing", ["weights", "calibrator", "folds"])
 def test_a_run_with_nothing_to_serve_cannot_be_promoted(tmp_path, missing):
-    """Stage 2(a) run 1 wrote no checkpoints at all — a metrics-only run that
+    """Stage 4 run 1 wrote no checkpoints at all — a metrics-only run that
     would promote cleanly and fail at serve time, long after the decision."""
     cv_dir = tmp_path / "cv" / "run123"
     cv_dir.mkdir(parents=True)
