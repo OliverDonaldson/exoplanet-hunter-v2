@@ -54,6 +54,28 @@ def _assert_converged(res: Any, fit: str) -> None:
         raise RuntimeError(f"{fit} did not converge: {res.message}")
 
 
+def _nll(z: np.ndarray, labels: np.ndarray) -> float:
+    """Mean binary cross-entropy from *logits*, without clipping anything.
+
+    `softplus(z) - y*z` is algebraically the same as
+    `-[y log s(z) + (1-y) log(1-s(z))]`, and `np.logaddexp` evaluates it
+    stably at every magnitude — so the objective needs no `clip` to stay
+    finite, and its exact derivative with respect to `z` is `s(z) - y`.
+
+    **That exactness is the point, not the stability.** The clipped form this
+    replaces was paired with an *unclipped* analytic gradient, so once any row
+    saturated past `_EPS` the function and its jacobian described different
+    problems and BFGS's line search failed on the inconsistency. Measured
+    2026-08-09 on the stage 6 re-baseline's fold 0: 4 of 868 validation rows
+    clipped (p down to 3.5e-10), BFGS stalled after 5 iterations at
+    ||grad|| 8.6e-3 and reported "precision loss"; this form converges in 9 at
+    ||grad|| 1.3e-6. Before `_assert_converged` existed the stalled iterate was
+    returned silently, so runs predating it calibrated on a non-converged fit —
+    ranking is untouched (Platt is monotone) but Brier and ECE are not.
+    """
+    return float(np.mean(np.logaddexp(0.0, z) - labels * z))
+
+
 def fit_temperature(
     scores: np.ndarray,
     labels: np.ndarray,
@@ -69,9 +91,7 @@ def fit_temperature(
     def nll(T: float) -> float:
         if T <= 0:
             return float("inf")
-        p = _sigmoid(logits / T)
-        p = np.clip(p, _EPS, 1.0 - _EPS)
-        return -float(np.mean(labels * np.log(p) + (1.0 - labels) * np.log(1.0 - p)))
+        return _nll(logits / T, labels)
 
     res = minimize_scalar(nll, bounds=bounds, method="bounded")
     _assert_converged(res, "fit_temperature")
@@ -91,10 +111,11 @@ def fit_platt(scores: np.ndarray, labels: np.ndarray) -> tuple[float, float]:
 
     def nll(params: np.ndarray) -> float:
         u, b = params
-        p = np.clip(_sigmoid(np.exp(u) * logits + b), _EPS, 1.0 - _EPS)
-        return -float(np.mean(labels * np.log(p) + (1.0 - labels) * np.log(1.0 - p)))
+        return _nll(np.exp(u) * logits + b, labels)
 
     def grad(params: np.ndarray) -> np.ndarray:
+        # Exactly d(nll)/d(u, b) for the objective above, which is what BFGS's
+        # line search assumes and what the clipped objective made false.
         u, b = params
         a = np.exp(u)
         residual = _sigmoid(a * logits + b) - labels

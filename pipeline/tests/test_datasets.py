@@ -194,7 +194,17 @@ def test_augmented_dataset_differs_across_epochs(shard_set):
 
 @pytest.mark.slow
 def test_end_to_end_mini_training(tmp_path):
-    """One epoch of the real trainer over synthetic shards (CPU, ~1 min)."""
+    """One epoch of the real trainer over synthetic shards (CPU, ~1 min).
+
+    `val_frac_within_fold` is raised to 0.5 for the fixture. The declared 0.12
+    leaves **6 validation rows carrying 1 positive** here, which is separable
+    often enough to matter: logistic regression has no finite MLE under
+    separation, so `fit_platt` runs `b` to infinity, exceeds its iteration
+    budget and the convergence guard fires. Measured 2026-08-09 — 1 failure in
+    8 runs on the clipped objective, 4 in 8 once the objective stopped
+    artificially bounding the runaway. A property of the fixture, not the
+    trainer; production splits ~868 rows. Same reasoning as `FAST_CV` in
+    `test_train_branches.py`."""
     from hydra import compose, initialize_config_dir
 
     from exoplanet_hunter.training.train import run
@@ -217,6 +227,7 @@ def test_end_to_end_mini_training(tmp_path):
                 "train.epochs=1",
                 "train.batch_size=16",
                 "model.cross_validation.n_splits=2",
+                "model.cross_validation.val_frac_within_fold=0.5",
                 "model.global_view.conv_blocks=[8]",
                 "model.local_view.conv_blocks=[8]",
                 "model.head.fc_units=[16]",
