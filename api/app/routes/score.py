@@ -19,9 +19,10 @@ import re
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as FastPath
 
+from app.ratelimit import rate_limit
 from app.schemas import (
     CentroidDiagnostics,
     CentroidTrack,
@@ -105,7 +106,10 @@ def get_scorer():
         return _scorer
 
 
-@router.get("/score/{tic_id}", response_model=ScoreResponse)
+# Scoped to `/score` alone. `/candidates` and `/reliability` are parquet reads;
+# this is the only route whose cache miss costs a MAST download plus a five-fold
+# TF inference, so it is the only one worth a limiter's own failure modes.
+@router.get("/score/{tic_id}", response_model=ScoreResponse, dependencies=[Depends(rate_limit)])
 def score_target(
     tic_id: int = FastPath(..., ge=1, le=_MAX_TIC_ID),
     period_days: float | None = Query(
