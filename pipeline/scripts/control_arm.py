@@ -144,6 +144,13 @@ def score_through_run(
     )
     from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_metadata
 
+    # Imported for its side effect: PresenceFlag, PickColumns, StackViews and
+    # MaskedTransitPool are registered with @register_keras_serializable at
+    # import time, and load_model resolves them from that registry. Without this
+    # the checkpoint deserialises to a bare Functional with an empty config and
+    # raises "Could not locate class 'StackViews'".
+    from exoplanet_hunter.models import cnn_branches  # noqa: F401
+
     metadata = load_metadata(shard_dir)
     shards = list_shards(shard_dir)
     base = parse_viewset_shards(shards, metadata)
@@ -185,11 +192,16 @@ def score_through_run(
         # Only the rows this fold owns. Every row is scored by exactly one fold,
         # so a row left NaN below means its host had no fold and was dropped.
         wanted = {tic for tic, f in folds.items() if f == fold}
+        written = 0
         for tic, value in zip(tics, calibrated, strict=True):
             mask = (index["tic_id"] == int(tic)).to_numpy()
             if int(tic) in wanted and mask.any():
                 scores.loc[index.index[mask]] = float(value)
-        log.info("[control-arm] fold %d scored %d rows", fold, len(wanted))
+                written += int(mask.sum())
+        # The count written here, not len(wanted): that is the fold's whole
+        # membership across the run and would report ~1,085 for a control arm
+        # of eight hosts.
+        log.info("[control-arm] fold %d scored %d control-arm row(s)", fold, written)
     return scores
 
 
