@@ -81,10 +81,124 @@ what was committed to at the time. Where one of those blocks points forward to a
 stage, the new number is added in **square brackets** — `stage 3 [now 8]` — which
 is an editorial insertion, not a rewrite.
 
+## Execution order — the dependency graph, and why it is not the numbering
+
+**Raised 2026-08-09: the roadmap is not sequential.** It is correct, and the
+back-and-forth is real rather than cosmetic. Three backward edges existed in the
+plan as written:
+
+| edge | what it meant |
+|---|---|
+| **7 → 11** | stage 7's criterion needs a branch model scoreable from a light curve, which is stage 11's first half, four stages later |
+| **8 → 7** | stage 8 changes the training distribution, so stage 7's attribution numbers are invalidated after they are measured |
+| **9 → 7** | stage 9 adds a branch, so an attribution done at stage 7 describes a branch set that no longer exists |
+
+Each was recorded honestly and none was ever resolved into an *order*. The 7 → 11
+edge was worked around on 2026-08-09 by adopting the offline harness; the other
+two were left as knock-ons to absorb later.
+
+**Do not renumber a third time.** The numbers were already reassigned once
+(2026-08-08) and have since become *names*: run directories, commit messages and
+three documents refer to them, and `branches-20260809-drop-unfolded` would need
+two hops to resolve under a third scheme. What was missing was never a numbering
+scheme — it was a stated execution order. **The integers stay as stable
+identities; the order below is what is executed, and it is the primary artefact.**
+
+**One stage genuinely has parts, and splitting it removes every backward edge.**
+Stage 7 owes two different things: an *instrument* (the offline control-arm
+harness) and a *reading* (which branches earn their place). They have opposite
+dependencies — the instrument blocks stage 8, the reading depends on stages 8, 9
+and 10. Sub-steps as `i, ii` are the convention already set for exactly this
+case.
+
+| order | stage | depends on | why it sits here |
+|---:|---|---|---|
+| 1 | **7i** offline control-arm harness | nothing outstanding | it is **stage 8's measuring instrument**, not only stage 7's — pre-commitment (d)'s "injection-recovery on matched hosts with baseline held constant" is this harness. Also the only way to get a pre-stage-8 before-reading |
+| 2 | **8** labels and negatives | 7i | the largest measured defect, and it invalidates everything measured before it — so it goes as early as its instrument allows |
+| 3 | **9** difference-image branch | 8 | the last genuine build. After the distribution settles, or it is measured twice |
+| 4 | **10** Optuna re-tune | 8, 9 | "on the winner, after the distribution is settled" — that is the settled architecture *and* the settled labels |
+| 5 | **7ii** branch attribution | 8, 9, 10, 7i | attribution describes a **finished** branch set on a **settled** distribution. Run before any of them it is measuring something about to change, which is what the all-null sweep already spent six hours discovering |
+| 6 | **11** serving parity + explainability | 7ii *(adjacency, not blocking)* | **stage 11's branch-occlusion and stage 7ii's leave-one-out are the same measurement at different granularity** — per-target against per-population. Running them adjacently validates the serving implementation against the population reading instead of leaving two independent attributions to disagree in public |
+| 7 | **12** UI redesign | 11 | presentation only, locked last |
+
+**No edge in that table points backwards.** Stages 1–6 are done and are not in
+it. Stage 3's re-baselined incumbent summary is invalidated by stage 8 and needs
+regenerating — that is a **repeat of a repeatable path**, not a backward edge,
+and keeping stage 3 re-runnable rather than a one-off artefact is what makes it
+so.
+
+**The consequence for stage 7, stated plainly.** Its sweep has already run and is
+all-null; per the sequencing assessment below, no further stage-7 CV compute is
+bought before stage 8. Stage 7i finishes now, stage 7ii runs once, late, on a
+branch set and a distribution that have stopped moving.
+
+**One open item is on no stage at all.** The narrow-span, high-count Kepler cell
+(+0.1446, unmoved by two bin resolutions, four fixed input defects, tied odd/even
+weights and a shared tower) is described in this file as "the sharpest
+unexplained thing in the model" and appears in no stage's contents. It needs an
+owner or an explicit decision to leave it unexplained; it is currently neither.
+
+## What stages 7–11 are worth — ranked by impact, 2026-08-09
+
+Ranked against the product's actual job: **ranking candidates for follow-up**.
+Not by build effort, and not by roadmap position.
+
+| rank | stage | answers | impact if done | cost / confidence |
+|---:|---|---|---|---|
+| **1** | **8** labels and negatives | defect 5 | **The largest measured defect, and the only stage that can reach it.** Baseline correlates +0.278 with the label itself and +0.387 on TESS — *above every model*, so no architecture can touch it. For the deployment use it is actively counterproductive: it promotes targets that already received attention over under-observed ones that may deserve it. It improves **any** model, including the served incumbent | 25–35 h, **low** — external catalogue ingestion, whose only precedent was 5× out |
+| **2** | **11** serving parity + explainability | delivery | **The only stage whose absence blocks shipping anything.** No branch model can be served at all until `TargetScorer` computes every branch live; `/score` returning per-branch contributions is what makes a shortlist justifiable per target rather than asserted; and stage 12 has nothing to display without it. Also carries `score_std`, provenance headers and precision@k | 10–15 h, medium. **No training compute** |
+| **3** | **9** difference-image branch | defect 2 | The direct test of *"is this even the star we think it is"* — a centroid shift under the transit is how a background eclipsing binary is caught, and that is the host-scoring pathology at its source rather than at its symptom. The last genuine build in the model | 10–14 h, medium. Blocked on re-gridding 11–17 px stamps |
+| **4** | **10** Optuna re-tune | defect 4 | Extracts what is left once architecture and distribution stop moving. Real but bounded — and it is the one stage that is almost entirely unattended, so it costs little attention | 12–15 h, medium-high, ~10–13 h of it unattended |
+| **5** | **7** branch attribution | defects 1, 2, 3 | **Lowest as scoped, and the split is why.** 7i (the harness) is genuinely load-bearing — it is stage 8's instrument. 7ii (the reading) has already spent six hours returning four nulls, and leave-one-out structurally cannot separate redundancy from irrelevance. Its lasting deliverable is the instrument, not the attribution | 7i small; 7ii ~7 h compute, once, late |
+
+**Read rank 5 correctly.** Stage 7 being last by impact is not an argument for
+skipping it — attribution is what turns "eleven branches exist" into "these
+branches earn their place", which is a claim the project should be able to make.
+It is an argument for running it **once, at the end**, which is what the
+execution order above does.
+
+## Is Exoplanet Hunter ready once stage 11 is done?
+
+Against the seven-point "what finished means" contract in
+`handover-2026-08-08.md` — **yes, with two named exceptions.**
+
+| # | contract item | after 11 |
+|---|---|---|
+| 1 | a promotion decision made on evidence | **satisfiable** — see the caveat below |
+| 2 | every number has an error bar | **done** — stage 6 delivered the recall floor; AUC had one already |
+| 3 | control-arm host-pass rate moved off 26.4%, **or explained** | **satisfiable** — 7i measures it, 7ii and 9 are the interventions. "Explained" is an accepted finished state |
+| 4 | ranking not driven by observation baseline | **stage 8's deliverable**, with the residual quantified rather than unknown |
+| 5 | the score is a probability | **done and shipping**, plus `score_std` surfaced at stage 11 |
+| 6 | every score can be explained | **stage 11's deliverable** — per-branch occlusion through `/score` |
+| 7 | evaluation reproducible from artefacts | **already true**, and it has stayed true through an audit |
+
+**Caveat on item 1, stated because it is the likely outcome rather than the
+feared one.** Five arms have now been rejected — runs 1, 2, 3, the capacity arm
+and the re-baseline — every one of them on shortlist recall. The probable
+resolution of item 1 is **"the branch line is closed in writing and `ca906040`,
+or its stage-10 retune, stays served"**, not a promotion. That is explicitly one
+of the two finished states, and the handover already says so: only "we never
+found out" fails. The apparatus that can tell those apart is itself a deliverable.
+
+**Exception A — the narrow-span, high-count Kepler cell.** Unexplained across
+three architectures, on no stage, and named in this file as the sharpest
+unexplained thing in the model. It does not block shipping (Kepler is 0% of the
+deployment population) but "ready" should not quietly include an unexplained
++0.1446.
+
+**Exception B — distribution, which is not an engineering gap.** The one genuine
+gap against ExoMiner is a published survey-scale catalogue with per-row
+uncertainty, a DOI and a citation ask. It is a publishing task, it is deliberately
+not on this roadmap, and stage 11 does not touch it.
+
+**So: after stage 11 the product is complete and stage 12 is pure presentation**
+— which is exactly the bar the contract sets. If the UI stage finds itself
+needing a number the API cannot produce, a stage before it was not finished.
+
 ## Where the project stands
 
 One table, kept current. Detail for each row is in the stage sections below and
-in HANDOVER.md.
+in `docs/archive/handover-2026-07-10-superseded.md`.
 
 | stage | status | what closed it, or what is left |
 |---|---|---|
@@ -94,8 +208,9 @@ in HANDOVER.md.
 | **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
 | **6** recall variance + re-baseline | **done** 2026-08-09 | `pooled_gate_recall_seed_sd` **0.0292** → **a recall @1% FPR margin under ~0.034 is not a decision**. Run 3's rejection is sound at 4.8× the floor; the capacity arm's 0.145 → 0.236 was **real, not noise**, and stays unactionable. `models/cv/branches-20260808-rebaseline` is the control for every stage after it |
-| **7** *(old D)* branch attribution | **in progress** — 3-family sweep done 2026-08-09, **all arms null**; criterion blocked | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. **The stage's real criterion — control-arm 26.4% — is unmeasurable until the offline harness exists** |
-| **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9** | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
+| **7i** *(old D)* offline control-arm harness | **in progress** — executes **first**, see the execution order above | the instrument: `clean`/`flatten` → `inject_box_transit` → `build_view_set` → `write_viewset_shards` → `make_viewset_dataset` → a run directory's fold members and calibrator. It is **stage 8's measuring instrument**, which is why it leads |
+| **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving |
+| **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9**; runs second, behind 7i only | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
 | **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
 | **11** *(old 4)* serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
@@ -312,7 +427,7 @@ leaves instead. And **difference-image stamps are 11-17 px, not a fixed
 33x33**; that is Kepler's size, and stage 9 must re-grid.
 
 Full detail, and the merge collision that silently dropped the transit counts
-past all seven gates, in HANDOVER.md (2026-08-05).
+past all seven gates, in `docs/archive/handover-2026-07-10-superseded.md` (2026-08-05).
 
 **Stage 3 *(old A)* — the re-baselined incumbent summary.** *(done 2026-08-08)*
 `evaluate.py summarise` writes `models/cv/incumbent-rebaselined/cv_summary.json`
@@ -1438,6 +1553,119 @@ the affected run was kept.** The two `periodogram` runs differ by **+0.0158** in
 recall against a two-run bar of 0.0383, and by **+0.0002** in AUC against 0.0183:
 they agree within noise on both. No evidence that suspending training across a
 hibernate perturbs it. The clean run remains authoritative as pre-registered.
+
+### Sequencing: should stage 8 come first? — assessed 2026-08-09
+
+**The question, put by Ollie and never assessed.** Stage 8 invalidates stage 7's
+attribution numbers — this file says so twice, and it is why stage 8 was moved
+ahead of stage 9. So there is a case for doing stage 8 before finishing stage 7,
+on the same "do not pay for it twice" argument that rejected pulling stage 11's
+serving parity forward.
+
+**Answer: no. Build stage 7's harness now; defer stage 7's remaining
+*attribution compute* until after stage 8.** The question conflates two things
+stage 7 still owes, and they sit on opposite sides of the argument.
+
+**1. What stage 8 invalidates is numbers, not code — and the numbers at risk are
+four nulls.** Stage 7's 15–20 h estimate was dominated by the sweep, and ~6 h of
+it has run. Every arm came back null. Deferring the harness to avoid re-measuring
+that protects nothing worth protecting.
+
+**2. The harness is stage 8's instrument, not only stage 7's — this is
+decisive.** Stage 8's own success criterion is whether baseline dependence falls,
+and the clean test of that was pre-registered on 2026-08-06 as pre-commitment (d):
+**injection-recovery on matched hosts with observation baseline held constant.**
+That is this harness, including the baseline matcher. Doing stage 8 first means
+building stage 8's measuring instrument under stage 8's own pressure — the exact
+shape of the argument that rejected pulling serving parity forward, running in
+the same direction.
+
+**3. Stage 8 needs a before-reading, and this is the only protocol that can
+produce one.** The live 26.4% is already recorded as not comparable to anything
+the branch line produces. Without the harness in place first, the pre-stage-8
+control-arm rate exists only retrospectively. It is *recoverable* — the fold
+checkpoints, the bundles and the labels snapshot are all on disk — so this is
+insurance rather than a hard block; but it depends on the pre-stage-8 host
+population still being reconstructable after `labels.parquet` changes, and on
+someone choosing to go back for it once newer numbers exist.
+
+**4. The cost asymmetry is large, and it is measured rather than estimated.** Two
+things expected to be missing are already present, and each removes a chunk of
+the build:
+
+| needed | status |
+|---|---|
+| per-fold scalar normalisation constants | **persisted** in `fold_k/cnn_calibrator.joblib` beside the Platt fit |
+| out-of-fold routing for a host | **`predictions.parquet` carries `fold`** |
+
+So the remaining build is the driver, the baseline matcher and the report, over a
+chain of existing parts, with compute that is forward passes over 6,721 cached
+FITS. Against that, stage 8 is 25–35 h at explicitly **low** confidence, gated on
+external catalogue ingestion whose only precedent here (the DV download) was 5×
+out.
+
+**What is genuinely paid for twice, and the consequence.** The branch-model
+control-arm *reading* itself: stage 8 retrains, so the number moves. It is
+therefore recorded as a **baseline, not a verdict**, and the consequence is a
+scoping recommendation rather than a silent choice — **no further stage-7 CV
+compute before stage 8.** No joint drop, no widening to the five unmeasured
+families. That work is the part stage 8 really does invalidate, and the previous
+session's own "the natural follow-up is a joint drop" should wait behind it.
+**Re-scoping is Ollie's call, so this is put as a recommendation and not acted
+on.**
+
+#### Pre-registered before the harness runs — recorded 2026-08-09, nothing built
+
+The two limits already recorded under *Decided 2026-08-09* stand unchanged and
+must survive into the result: **`detection`/`ghost` run masked** (`dv_usable`
+False — no DV report exists at a synthetic ephemeris), and **this does not
+restore comparability with 26.4%**, so the dual-view incumbent is re-measured
+through the same harness and the comparison is made within protocol.
+
+Reading the code surfaced three further choices the sweep never had to make.
+Fixed here, before the harness exists.
+
+**1. Fold routing is out-of-fold, and a host that cannot be routed is dropped.**
+Control-arm hosts are real labelled TESS targets that were in training, so the
+only honest protocol is the fold that held each one out — read from the run's own
+`predictions.parquet` `fold` column, which carries it. A host absent from that
+frame is **dropped, not zero-shot scored**: silently mixing the two protocols
+across one population is the exact defect stage 3 closed, and `eval/scoring.py`
+already refuses to guess between them.
+
+**2. The pass threshold is the run's own recall @1% FPR operating point, and
+both operating points are reported.** A branch run directory stores **no**
+threshold — `bundle["threshold"]` is the legacy *serving* bundle's field, and the
+branch bundle carries `calibrator`, `platt_a`, `platt_b`, `scalar_constants` and
+nothing else. So one must be chosen rather than read:
+
+| candidate | verdict |
+|---|---|
+| **1% FPR on the run's own out-of-fold TESS rows** | **primary.** It is the threshold every gate decision in this project is made at, and "passes threshold" then means "would reach the shortlist" |
+| mean of the folds' F1-optimal thresholds | **reported alongside.** It is what the live path used for the original 26.4%, so omitting it would discard the only continuity available |
+
+Both are applied to the same scores, so reporting the pair costs nothing and
+stops the choice of operating point from being an unexamined degree of freedom.
+The same rule is applied to the incumbent, computed from its own re-baselined
+predictions.
+
+**3. Baseline matching is on `baseline_days`, by quantile stratum, drawn equally
+per label.** The statistic of interest is not 26.4% but the **46.7% / 12.3**
+split between planet hosts and false-positive hosts — and observation baseline is
+the confound that split is most exposed to, at +0.387 against the label on TESS.
+So hosts are stratified into `baseline_days` quantile bins and drawn equally from
+each label within each bin; strata that cannot supply both labels are dropped and
+**the number dropped is reported**, because a matcher that quietly discards its
+hard strata reports a clean number about an easier population.
+
+`labels.parquet` has **no `expected_transit_count`** (18 columns, confirmed), so
+`baseline_days` — `(expected_transit_count − 1) × period` — is unavailable there
+and comes from a join against the viewset scalars.
+
+**Recorded as unmeasured, not assumed away.** Matching costs sample size, and the
+cached-FITS host pool is what it is. If a matched draw cannot fill its strata the
+result is reported at the size it reaches, with the unmatched rate beside it —
+not topped up from unmatched hosts.
 
 **Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
 negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
