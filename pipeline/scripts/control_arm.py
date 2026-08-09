@@ -39,6 +39,7 @@ import argparse
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -205,6 +206,131 @@ def score_through_run(
     return scores
 
 
+#: What a run directory's fold_0 contains decides which lane scores it. A flag
+#: would let a dual-view run be scored down the eleven-view path, which fails
+#: with a shape error at best and a wrong number at worst.
+BRANCH_CHECKPOINT = "model_*_cnn_branches.keras"
+DUALVIEW_CHECKPOINT = "cnn_dualview.keras"
+
+
+def run_kind(run_dir: Path) -> str:
+    """`"branch"` or `"dualview"`, from the checkpoints actually on disk."""
+    fold_0 = run_dir / "fold_0"
+    has_branch = bool(list(fold_0.glob(BRANCH_CHECKPOINT)))
+    has_dualview = (fold_0 / DUALVIEW_CHECKPOINT).exists()
+    if has_branch and has_dualview:
+        raise ValueError(f"{fold_0} carries both checkpoint kinds; cannot choose a lane")
+    if has_branch:
+        return "branch"
+    if has_dualview:
+        return "dualview"
+    raise FileNotFoundError(
+        f"{fold_0} carries neither {BRANCH_CHECKPOINT} nor {DUALVIEW_CHECKPOINT}"
+    )
+
+
+def build_host_dualview(
+    fits_path: Path,
+    period: float,
+    stellar: dict,
+    sigma_clip: float,
+    window: int,
+    polyorder: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Global view, local view and the 9-dim aux row for the incumbent lane.
+
+    The same host, the same cleaning and flattening and the same synthetic
+    ephemeris as the branch lane — only the view builder and the feature layout
+    differ, because that is exactly what distinguishes the two models.
+
+    `depth` and `catalogue_snr` are left unset, so the fitted aux pipeline
+    imputes them. That is not a shortcut: it is what the live path does for an
+    ad-hoc target ("unknown for an ad-hoc target (as in training)",
+    `service.py`), and a synthetic ephemeris has no catalogue row to read either
+    from. Inventing a depth of 0 would assert "measured, and flat", which the
+    imputer would then treat as a real value.
+    """
+    import lightkurve as lk
+
+    from exoplanet_hunter.features.aux import LEGACY_AUX_DIM, build_aux_row
+    from exoplanet_hunter.features.centroid import extract_centroid_offset
+    from exoplanet_hunter.preprocess.views import build_views
+
+    raw = lk.read(str(fits_path))
+    cleaned = clean_lightcurve(raw, sigma_clip=sigma_clip)
+    flat = flatten_lightcurve(cleaned, window_length=window, polyorder=polyorder)
+
+    time = np.asarray(flat.time.value, dtype=float)
+    flux = np.asarray(flat.flux.value, dtype=float)
+    duration_d = transit_duration_hours(period) / 24.0
+    t0 = float(np.nanmin(time)) + 0.5 * period
+    flat.flux[:] = inject_box_transit(time, flux, period, t0, duration_d, depth=0.0)
+
+    views = build_views(flat, period, t0, duration_d)
+    # Computed rather than left NaN: the live path computes it, and omitting it
+    # would hand the incumbent a thinner feature vector than it serves with.
+    centroid_snr = float(extract_centroid_offset(raw, period, t0, duration_d))
+    aux = build_aux_row(
+        LEGACY_AUX_DIM,
+        teff=stellar.get("teff"),
+        radius=stellar.get("radius"),
+        logg=stellar.get("logg"),
+        tmag=stellar.get("tmag"),
+        depth=None,
+        duration=duration_d,
+        period=period,
+        catalogue_snr=None,
+        centroid_snr=centroid_snr,
+    )
+    return (
+        np.asarray(views.global_view, dtype=np.float32),
+        np.asarray(views.local_view, dtype=np.float32),
+        aux,
+    )
+
+
+def score_through_dualview(run_dir: Path, rows: list[dict], folds: dict) -> np.ndarray:
+    """Calibrated score per row through the incumbent's own fold checkpoints.
+
+    No shard round-trip here, and the asymmetry with the branch lane is
+    deliberate rather than a corner cut. The branch model's scalar
+    normalisation lives *in* the shard pipeline, so writing and reading a shard
+    is the only way to reproduce it; the dual-view model's aux normalisation is
+    a fitted sklearn pipeline carried in its own bundle, so replaying that
+    pipeline is the equivalent fidelity guarantee. Both lanes reuse the exact
+    transform their model was trained with.
+    """
+    import joblib
+    import tensorflow as tf
+
+    scores = np.full(len(rows), np.nan, dtype=float)
+    for fold in sorted(set(folds.values())):
+        fold_dir = run_dir / f"fold_{fold}"
+        bundle = joblib.load(fold_dir / "cnn_calibrator.joblib")
+        model = tf.keras.models.load_model(str(fold_dir / DUALVIEW_CHECKPOINT), compile=False)
+        pipeline = bundle.get("aux_pipeline")
+
+        owned = [i for i, r in enumerate(rows) if folds.get(int(r["tic_id"])) == fold]
+        if not owned:
+            log.info("[control-arm] fold %d owns no control-arm row", fold)
+            continue
+        inputs = {
+            "global_view": np.stack([rows[i]["global_view"] for i in owned])[..., None],
+            "local_view": np.stack([rows[i]["local_view"] for i in owned])[..., None],
+        }
+        if pipeline is not None:
+            inputs["aux_features"] = pipeline.transform(
+                np.stack([rows[i]["aux"] for i in owned]).astype(np.float32)
+            ).astype(np.float32)
+        # Deterministic pass, as the live path does for the headline: the
+        # calibrators were fitted on deterministic scores, and feeding them MC
+        # means costs ~0.08 ECE.
+        raw = np.asarray(model(inputs, training=False)).ravel()
+        scores[owned] = bundle["calibrator"].predict(raw)
+        log.info("[control-arm] fold %d scored %d control-arm row(s)", fold, len(owned))
+    return scores
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
@@ -214,7 +340,22 @@ def main() -> None:
     )
     parser.add_argument("--raw", type=Path, default=Path("data/raw"))
     parser.add_argument("--out", type=Path, default=Path("results/control_arm"))
-    parser.add_argument("--hosts", type=int, default=80, help="target matched host count")
+    parser.add_argument(
+        "--hosts",
+        type=int,
+        default=80,
+        help=(
+            "target total matched hosts; divided evenly over 2 labels x --n-strata. "
+            "A stratum short of that many of either label contributes what it has, so "
+            "the draw is usually smaller than this — the report says by how much"
+        ),
+    )
+    parser.add_argument(
+        "--per-stratum",
+        type=int,
+        default=None,
+        help="hosts per label per stratum, overriding --hosts. Set high to take the pool's maximum",
+    )
     parser.add_argument("--n-strata", type=int, default=4)
     parser.add_argument("--periods", type=float, nargs="+", default=list(DEFAULT_PERIODS))
     parser.add_argument("--max-host-depth-ppm", type=float, default=3000.0)
@@ -222,9 +363,37 @@ def main() -> None:
     parser.add_argument("--window-length", type=int, default=401)
     parser.add_argument("--polyorder", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--also-routable-in",
+        type=Path,
+        default=None,
+        help=(
+            "restrict hosts to those also routable out-of-fold in this run directory. "
+            "Required for a within-protocol comparison: the incumbent's fold membership "
+            "predates K2 and the current catalogue, so the two runs cover different "
+            "populations and an unrestricted pair would compare two of them again"
+        ),
+    )
     args = parser.parse_args()
+    kind = run_kind(args.run_dir)
+    log.info("[control-arm] %s is a %s run", args.run_dir.name, kind)
 
+    labels_all = pd.read_parquet(args.labels)
     predictions = pd.read_parquet(args.run_dir / "predictions.parquet")
+    # The incumbent's predictions carry `fold` and `y_true` but no `mission`, so
+    # without this join the operating point would be fitted over Kepler+TESS
+    # together — a threshold set partly by a mission with no serving stake.
+    if "mission" not in predictions.columns:
+        predictions = predictions.merge(
+            labels_all[["tic_id", "mission"]].drop_duplicates("tic_id"),
+            on="tic_id",
+            how="left",
+            validate="many_to_one",
+        )
+    if "label" not in predictions.columns:
+        predictions["label"] = predictions["y_true"]
+    if "score" not in predictions.columns:
+        predictions["score"] = predictions["prob_calibrated"]
     points = operating_points(predictions)
     folds = fold_assignment(predictions)
     log.info(
@@ -236,8 +405,7 @@ def main() -> None:
         points.n_positive,
     )
 
-    labels = pd.read_parquet(args.labels)
-    labels = labels[labels["mission"] == "TESS"]
+    labels = labels_all[labels_all["mission"] == "TESS"]
     labels = labels[labels["depth"].fillna(np.inf) * 1e6 <= args.max_host_depth_ppm]
     cached = {int(p.stem.split("_")[1]) for p in args.raw.glob("tic_*.fits")}
     labels = labels[labels["tic_id"].isin(cached)]
@@ -250,6 +418,19 @@ def main() -> None:
         len(routable),
         len(labels) - len(routable),
     )
+    shared_with = None
+    if args.also_routable_in is not None:
+        other = pd.read_parquet(args.also_routable_in / "predictions.parquet")
+        other_folds = fold_assignment(other)
+        before = len(routable)
+        routable = routable[routable["tic_id"].isin(other_folds)]
+        shared_with = str(args.also_routable_in)
+        log.info(
+            "[control-arm] %d routable in both runs (%d dropped by %s)",
+            len(routable),
+            before - len(routable),
+            args.also_routable_in.name,
+        )
 
     scalars_index = pd.read_parquet(args.viewset_index)
     joined = routable.merge(
@@ -260,7 +441,7 @@ def main() -> None:
     )
     matched = baseline_matched_hosts(
         joined,
-        per_label_per_stratum=max(1, args.hosts // (2 * args.n_strata)),
+        per_label_per_stratum=args.per_stratum or max(1, args.hosts // (2 * args.n_strata)),
         n_strata=args.n_strata,
         seed=args.seed,
     )
@@ -269,6 +450,7 @@ def main() -> None:
         raise SystemExit("no matched hosts — relax --max-host-depth-ppm or --n-strata")
 
     view_sets, rows = [], []
+    dualview_rows: list[dict] = []
     # `to_dict("records")` rather than `itertuples`: attribute access on a
     # namedtuple row types as the union of every column dtype, so int()/float()
     # over it cannot type-check. Records give plain dicts.
@@ -282,41 +464,55 @@ def main() -> None:
             continue
         for period in args.periods:
             try:
-                views, scalars = build_host_views(
-                    tic_id, fits, period, args.sigma_clip, args.window_length, args.polyorder
-                )
+                if kind == "branch":
+                    views, scalars = build_host_views(
+                        tic_id, fits, period, args.sigma_clip, args.window_length, args.polyorder
+                    )
+                    view_sets.append(views)
+                else:
+                    gview, lview, aux = build_host_dualview(
+                        fits, period, host, args.sigma_clip, args.window_length, args.polyorder
+                    )
+                    scalars = {"tic_id": tic_id, "mission": "TESS", "period": period}
+                    dualview_rows.append(
+                        {"tic_id": tic_id, "global_view": gview, "local_view": lview, "aux": aux}
+                    )
             except Exception as exc:
                 log.warning("[control-arm] TIC %d P=%.1f failed: %s", tic_id, period, exc)
                 continue
             scalars["label"] = int(host["label"])
             scalars["baseline_days"] = float(host["baseline_days"])
             scalars["stratum"] = int(host["stratum"])
-            view_sets.append(views)
             rows.append(scalars)
             log.info("[control-arm] built TIC %d P=%.1f d", tic_id, period)
 
-    if not view_sets:
+    if not rows:
         raise SystemExit("no host views built")
-    arrays = stack_view_sets(view_sets, control_scalars(rows))
-    problems = arrays.validate()
-    if problems:
-        raise ValueError(f"control-arm view set is malformed: {problems}")
 
     args.out.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        shard_dir = Path(tmp) / "shards"
-        write_viewset_shards(arrays, shard_dir)
-        scored = score_through_run(args.run_dir, shard_dir, arrays.scalars, folds)
-
-    frame = arrays.scalars.copy()
-    frame["score"] = scored.to_numpy()
+    if kind == "branch":
+        arrays = stack_view_sets(view_sets, control_scalars(rows))
+        problems = arrays.validate()
+        if problems:
+            raise ValueError(f"control-arm view set is malformed: {problems}")
+        with tempfile.TemporaryDirectory() as tmp:
+            shard_dir = Path(tmp) / "shards"
+            write_viewset_shards(arrays, shard_dir)
+            scored = score_through_run(args.run_dir, shard_dir, arrays.scalars, folds).to_numpy()
+        frame = arrays.scalars.copy()
+    else:
+        scored = score_through_dualview(args.run_dir, dualview_rows, folds)
+        frame = pd.DataFrame(rows)
+    frame["score"] = scored
     unscored = int(frame["score"].isna().sum())
     if unscored:
         log.warning("[control-arm] %d row(s) unscored and dropped", unscored)
         frame = frame[frame["score"].notna()]
 
-    results = {
+    results: dict[str, Any] = {
         "run_dir": str(args.run_dir),
+        "run_kind": kind,
+        "also_routable_in": shared_with,
         "n_rows": len(frame),
         "n_hosts": int(frame["tic_id"].nunique()),
         "n_unscored_dropped": unscored,

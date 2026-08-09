@@ -1662,6 +1662,31 @@ hard strata reports a clean number about an easier population.
 `baseline_days` — `(expected_transit_count − 1) × period` — is unavailable there
 and comes from a join against the viewset scalars.
 
+**The comparison population, measured 2026-08-10 before the run.** Hosts routable
+out-of-fold in **both** run directories — an unrestricted pair would compare two
+different populations again, which is the defect this project keeps hitting.
+
+| | hosts |
+|---|---:|
+| cached TESS, depth-filtered | 1,058 |
+| routable in `branches-20260808-rebaseline` | 1,057 |
+| routable in `ca906040` | 1,052 |
+| **routable in both — the comparison population** | **1,051** *(552 FP / 499 planet)* |
+| **after baseline matching, 4 strata** | **580** *(290 per label, 0 strata dropped)* |
+
+The per-stratum counts are the +0.387 correlation made concrete, and they are why
+matching caps the draw at 580:
+
+| baseline stratum | FP hosts | planet hosts | matched pairs |
+|---|---:|---:|---:|
+| 0 *(shortest)* | 230 | 33 | 33 |
+| 1 | 164 | 99 | 99 |
+| 2 | 81 | 181 | 81 |
+| 3 *(longest)* | 77 | 186 | 77 |
+
+**580 hosts x 3 periods = 1,740 rows per lane** is therefore the full measurement,
+and it is the pool's maximum rather than a chosen sample size.
+
 **Recorded as unmeasured, not assumed away.** Matching costs sample size, and the
 cached-FITS host pool is what it is. If a matched draw cannot fill its strata the
 result is reported at the size it reaches, with the unmatched rate beside it —
