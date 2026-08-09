@@ -198,7 +198,7 @@ needing a number the API cannot produce, a stage before it was not finished.
 ## Where the project stands
 
 One table, kept current. Detail for each row is in the stage sections below and
-in `docs/archive/handover-2026-07-10-superseded.md`.
+in HANDOVER.md.
 
 | stage | status | what closed it, or what is left |
 |---|---|---|
@@ -427,7 +427,7 @@ leaves instead. And **difference-image stamps are 11-17 px, not a fixed
 33x33**; that is Kepler's size, and stage 9 must re-grid.
 
 Full detail, and the merge collision that silently dropped the transit counts
-past all seven gates, in `docs/archive/handover-2026-07-10-superseded.md` (2026-08-05).
+past all seven gates, in HANDOVER.md (2026-08-05).
 
 **Stage 3 *(old A)* — the re-baselined incumbent summary.** *(done 2026-08-08)*
 `evaluate.py summarise` writes `models/cv/incumbent-rebaselined/cv_summary.json`

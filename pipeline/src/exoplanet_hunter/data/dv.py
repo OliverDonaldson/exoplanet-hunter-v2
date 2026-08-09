@@ -8,8 +8,7 @@ round trip. Selection keeps the widest multi-sector run, which already holds
 one `differenceImageResults` per sector it spans; skipped products stay in the
 manifest with size and URI so a policy change needs no second query pass.
 
-Sizing and coverage measurements are in
-docs/archive/handover-2026-07-10-superseded.md (2026-08-01).
+Sizing and coverage measurements are in HANDOVER.md (2026-08-01).
 """
 
 from __future__ import annotations
