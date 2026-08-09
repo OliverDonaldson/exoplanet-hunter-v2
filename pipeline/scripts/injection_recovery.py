@@ -32,12 +32,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from exoplanet_hunter.eval.control_arm import baseline_matched_hosts
 from exoplanet_hunter.eval.injection_recovery import (
     completeness_curve,
     count_transits,
     noise_ppm,
     transit_snr,
 )
+from exoplanet_hunter.eval.observation_bias import BASELINE_DAYS, baseline_days
 from exoplanet_hunter.preprocess import clean_lightcurve, flatten_lightcurve
 from exoplanet_hunter.scoring import NoLightCurveError, TargetScorer
 from exoplanet_hunter.scoring.service import InjectionSpec
@@ -85,6 +87,40 @@ def _harmonic_of(period: float, host_period: float, tol: float = 0.02) -> bool:
     return any(abs(period - host_period * r) / (host_period * r) < tol for r in (0.5, 1.0, 2.0))
 
 
+def join_baseline(hosts: pd.DataFrame, viewset_index_path: Path) -> pd.DataFrame:
+    """Attach `baseline_days` from the viewset scalars.
+
+    **`labels.parquet` does not carry `expected_transit_count`** — it holds 18
+    columns and that is not one of them — so the baseline the observation-bias
+    work is defined against cannot be derived from the labels alone. The viewset
+    index does carry it, keyed on `tic_id`.
+
+    `validate="one_to_one"` rather than a bare merge: a repeated `tic_id` on
+    either side would multiply host rows and every downstream rate would be
+    computed over a population that does not exist. Five merges in
+    `eval/comparison.py` had exactly that hole until 2026-08-08.
+    """
+    index = pd.read_parquet(viewset_index_path)
+    needed = {"tic_id", "expected_transit_count", "period"}
+    missing = needed - set(index.columns)
+    if missing:
+        raise KeyError(f"{viewset_index_path} is missing {sorted(missing)}")
+    scalars = index[sorted(needed)].drop_duplicates("tic_id")
+    joined = hosts.drop(columns=["expected_transit_count"], errors="ignore").merge(
+        scalars.rename(columns={"period": "viewset_period"}),
+        on="tic_id",
+        how="inner",
+        validate="one_to_one",
+    )
+    # The viewset period is the one `expected_transit_count` was counted
+    # against, so the baseline is derived from that pair and not from the
+    # catalogue period, which can differ after a refresh.
+    joined[BASELINE_DAYS] = baseline_days(
+        joined.rename(columns={"viewset_period": "period"})[["expected_transit_count", "period"]]
+    )
+    return joined
+
+
 def select_hosts(
     labels_path: Path,
     raw_dir: Path,
@@ -94,8 +130,22 @@ def select_hosts(
     allow_download: bool,
     seed: int,
     host_label: int | None = None,
+    viewset_index_path: Path | None = None,
+    match_baseline: bool = False,
+    n_strata: int = 4,
 ) -> pd.DataFrame:
-    """TESS hosts shallow enough that their own signal will not dominate."""
+    """TESS hosts shallow enough that their own signal will not dominate.
+
+    With `match_baseline`, planet and false-positive hosts are drawn matched on
+    observation baseline — the harness the roadmap has owed since old 2(b).
+    Unmatched, the control arm's 46.7 / 12.3 split is confounded by the +0.387
+    correlation between baseline and the label on TESS, so a difference between
+    the two host populations cannot be attributed to the model at all.
+
+    Matching needs a `viewset_index_path` because the baseline is not derivable
+    from `labels.parquet`; asking for it without one raises rather than falling
+    back to an unmatched draw that reports the same column names.
+    """
     df = pd.read_parquet(labels_path)
     df = df[df["mission"] == "TESS"]
     if host_label is not None:
@@ -107,7 +157,30 @@ def select_hosts(
     df = df.drop_duplicates("tic_id")
     if df.empty:
         return df
-    return df.sample(n=min(n_hosts, len(df)), random_state=seed)
+
+    if not match_baseline:
+        if viewset_index_path is not None:
+            df = join_baseline(df, viewset_index_path)  # reported, not matched on
+        return df.sample(n=min(n_hosts, len(df)), random_state=seed)
+
+    if viewset_index_path is None:
+        raise ValueError(
+            "match_baseline needs viewset_index_path: labels.parquet carries no "
+            "expected_transit_count, so baseline_days cannot be derived from it"
+        )
+    if host_label is not None:
+        raise ValueError(
+            "match_baseline draws both labels by construction; --host-label would "
+            "leave every stratum single-label and drop the whole draw"
+        )
+    matched = baseline_matched_hosts(
+        join_baseline(df, viewset_index_path),
+        per_label_per_stratum=max(1, n_hosts // (2 * n_strata)),
+        n_strata=n_strata,
+        seed=seed,
+    )
+    log.info("[injection] baseline-matched hosts: %s", matched.report())
+    return matched.hosts
 
 
 def host_baseline(scorer: TargetScorer, tic_id: int) -> tuple[np.ndarray, np.ndarray]:
