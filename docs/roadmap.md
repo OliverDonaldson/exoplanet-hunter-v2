@@ -94,7 +94,7 @@ in HANDOVER.md.
 | **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
 | **6** recall variance + re-baseline | **done** 2026-08-09 | `pooled_gate_recall_seed_sd` **0.0292** → **a recall @1% FPR margin under ~0.034 is not a decision**. Run 3's rejection is sound at 4.8× the floor; the capacity arm's 0.145 → 0.236 was **real, not noise**, and stays unactionable. `models/cv/branches-20260808-rebaseline` is the control for every stage after it |
-| **7** *(old D)* branch attribution | not started | absorbs the unfolded-flux branch (old 2(b)), trend + periodogram (old 2(c)) and the training half of stage 11's occlusion |
+| **7** *(old D)* branch attribution | **in progress** — 3-family sweep done 2026-08-09, **all arms null**; criterion blocked | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. **The stage's real criterion — control-arm 26.4% — is unmeasurable until the offline harness exists** |
 | **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9** | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
 | **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
@@ -1378,6 +1378,66 @@ The hibernation-spanning run is **kept, not deleted**, and the two are compared
 as a free consistency check. If they differ by more than the floor, that is a
 finding about running training across a suspend — worth having, and it is only
 available because the first run was not quietly thrown away.
+
+### Stage 7 sweep result — every arm null, and the one "PASS" is an artefact (2026-08-09)
+
+Four runs against `branches-20260808-rebaseline`, read by the rule fixed before
+any of them existed. TESS slice, each run's own `per_mission.TESS` (n=2,399).
+
+| arm | AUC | ΔAUC | bar | | R@1% FPR | ΔR | bar | |
+|---|---:|---:|---:|---|---:|---:|---:|---|
+| **control** | 0.9202 | | | | 0.2196 | | | |
+| `unfolded` | 0.9135 | −0.0067 | 0.0137 | null | 0.2204 | +0.0008 | 0.0423 | null |
+| `periodogram` *(hibernation)* | 0.9215 | +0.0013 | 0.0163 | null | 0.2694 | +0.0498 | 0.0509 | null |
+| **`periodogram-clean`** | 0.9213 | +0.0011 | 0.0130 | null | 0.2536 | +0.0340 | 0.0339 | *PASS* |
+| `scalar_only` | 0.9094 | −0.0108 | 0.0176 | null | 0.2792 | +0.0596 | 0.0768 | null |
+
+**The `periodogram-clean` PASS clears its bar by 0.00008 — 0.23% of the bar — and
+should not be treated as a result.** It satisfies the letter of the pre-registered
+rule and is reported as such rather than quietly reclassified, but the
+classification is driven by the *bar*, not by the effect:
+
+| run | `pooled_gate_recall_seed_sd` | the three draws |
+|---|---:|---|
+| control | 0.0292 | 0.1857, 0.1842, 0.2355 |
+| `unfolded` | 0.0221 | 0.1162, 0.0838, 0.1260 |
+| **`periodogram-clean`** | **0.0029** | 0.1623, 0.1630, 0.1577 |
+| `scalar_only` | 0.0597 | 0.1494, 0.2551, 0.1540 |
+
+`periodogram-clean`'s three draws happened to land within 0.005 of each other, an
+sd **ten times** the control's tightness — and an sd from three draws carries
+~40% sampling spread, so this is far more likely three lucky draws than a
+genuinely stabler configuration.
+
+**The comparison that settles it:** `scalar_only` has the **largest** recall
+delta in the sweep (+0.0596) and reads *null*, while `periodogram-clean` at
++0.0340 reads *PASS* — purely because one run's 3-draw sd came out 20× the
+other's. Under this sweep's own machinery, PASS and null are being assigned by
+noise in the error bar rather than by effect size. **Treat all four arms as
+null**, and note that the pre-registered consequence of a PASS was never a
+decision anyway: it earns a confirmatory repeat.
+
+**What the sweep does support.** `unfolded` — the branch stage 7 exists for, and
+the one just rebuilt — costs −0.0067 AUC and +0.0008 recall when removed. Per the
+pre-registration that is **not uniquely necessary**, *not* "carries no signal";
+redundancy with the flux family is the obvious candidate and a leave-one-out
+design structurally cannot separate it. A joint drop would, and is not in this
+sweep.
+
+**One pattern, named as a hypothesis and nothing more.** Every drop *raised*
+shortlist recall while holding or lowering AUC: +0.0008, +0.0340, +0.0596. All
+null individually, but three independent arms agreeing in sign is the same shape
+as the capacity arm's 0.145 → 0.236 — which stage 6 showed was a real effect on a
+retired architecture. Removing capacity appears to trade ranking for shortlist
+recall. **Three nulls pointing one way is not a result**, and this exploratory
+sweep cannot establish it; it is recorded as a design question for a later
+confirmatory run.
+
+**The hibernation left no measurable trace — and this is only knowable because
+the affected run was kept.** The two `periodogram` runs differ by **+0.0158** in
+recall against a two-run bar of 0.0383, and by **+0.0002** in AUC against 0.0183:
+they agree within noise on both. No evidence that suspending training across a
+hibernate perturbs it. The clean run remains authoritative as pre-registered.
 
 **Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
 negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives

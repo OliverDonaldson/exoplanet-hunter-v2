@@ -18,7 +18,8 @@ Start with [OPERATING.md](OPERATING.md) if you want to *run* something, and
 | [data_provenance.md](data_provenance.md) | catalogue sources, label definitions, known archive quirks |
 | [pipeline_diagram.md](pipeline_diagram.md) | the refresh DAG |
 | [roadmap.md](roadmap.md) | the ExoMiner-inspired rebuild, staged — and the permanent old→new stage-number mapping |
-| [handover-2026-08-08.md](handover-2026-08-08.md) | entry point for a new session: what is being built, what "finished" means, the non-negotiables |
+| [handover-2026-08-09.md](handover-2026-08-09.md) | **start here** — current stage, the open decisions, and the operational facts that live nowhere else |
+| [handover-2026-08-08.md](handover-2026-08-08.md) | the previous session's brief: what is being built, what "finished" means, the non-negotiables, the trap list. Dated, not stale — do not edit |
 | [audit-2026-08-07.md](audit-2026-08-07.md) | the full audit of the model and every recorded metric — read before interpreting any earlier result |
 | [figures/](figures) | generated performance and provenance figures |
 
