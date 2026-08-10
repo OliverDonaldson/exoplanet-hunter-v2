@@ -1692,6 +1692,62 @@ cached-FITS host pool is what it is. If a matched draw cannot fill its strata th
 result is reported at the size it reaches, with the unmatched rate beside it —
 not topped up from unmatched hosts.
 
+#### Pre-registered before the stage 7i measurement — recorded 2026-08-10, nothing run
+
+Both lanes exist and are smoke-tested; **no control-arm number has been produced
+for either model.** Written down first because nobody is watching an autonomous
+session read its own result.
+
+**What is run.** Two invocations, identical hosts: `--per-stratum 200`,
+`--seed 42`, three periods (3, 7, 12 d), each restricted with
+`--also-routable-in` to the other run. That yields the same 580-host matched
+draw for both — 290 per label, 4 strata, none dropped — so the comparison is
+paired on the host.
+
+**The criterion, re-specified as unmeasurable-as-written on 2026-08-09 and
+settled here.** "26.4% must fall" cannot be read against the live figure. What
+is tested instead:
+
+> **Does the branch model score the *star* less than the dual-view incumbent, on
+> one common offline protocol?**
+
+**The bar, computed before the numbers exist.** A pass rate is a proportion over
+hosts, and the three periods of one host are correlated, so the effective n is
+the **host** count and not the 1,740 rows. At n=580 a single rate carries
+`2σ ≈ 0.04`; at n=290 per label, `2σ ≈ 0.06`; the planet-minus-FP split combines
+in quadrature to `2σ ≈ 0.07`. The comparison between models is **paired on the
+same hosts**, which makes an unpaired bar conservative — it is used anyway, and
+the pairing is noted rather than banked.
+
+**How each outcome reads — fixed now.**
+
+| outcome | reading |
+|---|---|
+| branch rate **below** incumbent by more than 0.04 | the branch architecture scores the star less, **on this protocol only**. It cannot support a serving claim, and it is not a promotion argument — the gate is AUC and shortlist recall |
+| within **±0.04** | **level.** The branch architecture does not reduce host-scoring. Given stage 4 rejected every arm on recall, this is the outcome that closes the branch line's remaining case |
+| branch rate **above** incumbent by more than 0.04 | the branch architecture scores the star *more*. Report it; do not re-specify |
+
+**The split is the sharper statistic and is read alongside.** The headline 26.4%
+conflates two populations; the 46.7 / 12.3 gap is what "the model scores the
+star" actually predicts. A model that vets the transit should show a **smaller
+planet-minus-FP split**. Because hosts are baseline-matched, a residual split
+can no longer be explained by observation baseline — which is the whole reason
+the matcher exists.
+
+**Predictions, recorded so they can be wrong.**
+
+1. Both models pass **well under 26.4%** at the shortlist cut, because that cut
+   is far stricter (1% FPR, ~0.96–0.97 calibrated) than the F1-optimal cut the
+   26.4% was measured at. The F1 cut is the one to compare against 26.4% loosely.
+2. Both show a **positive** planet-minus-FP split at the F1 cut — the pathology
+   is real and matching removes the baseline confound, not the effect.
+3. The two models land **within 0.04 of each other** on the overall rate. Stage
+   4 found the branch line level on TESS AUC and worse on recall; there is no
+   measured reason to expect a large control-arm separation.
+
+**Nothing promotes.** `models/registry.json` untouched, `ca906040` stays served.
+A favourable number here does not reopen stage 4.
+
 **Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
 negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
 built with our existing injection machinery. Plus the observation-selection
