@@ -208,7 +208,7 @@ in HANDOVER.md.
 | **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
 | **6** recall variance + re-baseline | **done** 2026-08-09 | `pooled_gate_recall_seed_sd` **0.0292** → **a recall @1% FPR margin under ~0.034 is not a decision**. Run 3's rejection is sound at 4.8× the floor; the capacity arm's 0.145 → 0.236 was **real, not noise**, and stays unactionable. `models/cv/branches-20260808-rebaseline` is the control for every stage after it |
-| **7i** *(old D)* offline control-arm harness | **in progress** — executes **first**, see the execution order above | the instrument: `clean`/`flatten` → `inject_box_transit` → `build_view_set` → `write_viewset_shards` → `make_viewset_dataset` → a run directory's fold members and calibrator. It is **stage 8's measuring instrument**, which is why it leads |
+| **7i** *(old D)* offline control-arm harness | **done** 2026-08-12 — criterion **NOT met**; the branch line has no measured advantage on either criterion | the instrument: `clean`/`flatten` → `inject_box_transit` → `build_view_set` → `write_viewset_shards` → `make_viewset_dataset` → a run directory's fold members and calibrator. It is **stage 8's measuring instrument**, which is why it leads |
 | **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving |
 | **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9**; runs second, behind 7i only | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
@@ -1747,6 +1747,95 @@ the matcher exists.
 
 **Nothing promotes.** `models/registry.json` untouched, `ca906040` stays served.
 A favourable number here does not reopen stage 4.
+
+### Stage 7i result — the branch architecture does not score the star less (2026-08-12)
+
+`results/control_arm/`. **580 baseline-matched hosts x 3 periods = 1,740 rows per
+lane, 0 unscored**, exactly the sizing pre-registered before the run. Both limits
+recorded on 2026-08-09 survive into the result and are written into the output
+JSON: `detection`/`ghost` ran masked, and these numbers cannot support a claim
+about *serving*.
+
+**Host-level rates** — the host is the independent unit, so a host's three
+periods are averaged before the population mean:
+
+| | cut | pass | planet hosts | FP hosts | **split** |
+|---|---:|---:|---:|---:|---:|
+| incumbent, shortlist | 0.9623 | **0.0000** | 0.0000 | 0.0000 | +0.0000 |
+| branch, shortlist | 0.9731 | **0.0006** | 0.0000 | 0.0011 | −0.0011 |
+| incumbent, F1 | 0.5390 | 0.1230 | 0.1839 | 0.0621 | **+0.1218** |
+| branch, F1 | 0.4486 | **0.1943** | 0.2540 | 0.1345 | **+0.1195** |
+
+2σ bars: **0.036** on a single rate (n=580), **0.051** per label (n=290),
+**0.072** on the split. Paired on the host, `2×se = 0.0344`.
+
+**The pre-registered PRIMARY operating point returned a floor, and that is a
+finding about the protocol rather than a result.** At the 1% FPR cut *both*
+models pass essentially nothing — 0.0000 and 0.0006. There is no room for a rate
+to fall, so the comparison that was nominated as primary **cannot carry the
+stage's criterion**. It is reported as level because it is, and because the
+alternative — quietly promoting the secondary point to primary after seeing the
+numbers — is the thing pre-registration exists to prevent. The F1 point was
+pre-registered as *reported alongside*, so it is available without
+re-specification.
+
+**At each model's own operating point the branch model scores the star MORE.**
+Paired over the same 580 hosts, `+0.0713` against a paired bar of `0.0344` —
+**2.1x the bar**. Per the pre-registered outcome table this reads as *"the branch
+architecture scores the star more. Report it; do not re-specify."*
+
+**The split — the sharper statistic — is level.** +0.1195 against +0.1218, a
+difference of **−0.0023 against a 0.072 bar**, which is 3% of it. The 46.7 / 12.3
+pathology is reproduced in both models at essentially identical magnitude, on
+hosts where observation baseline has been matched away. Whatever drives
+host-scoring, **eleven diagnostic branches do not reduce it.**
+
+**Three predictions, two right and one falsified.**
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | both pass well under 26.4% at the shortlist cut | **correct**, and by more than expected — both ≈0 |
+| 2 | both show a positive planet-minus-FP split at F1 | **correct** — +0.1218 and +0.1195 |
+| 3 | the two models land within 0.04 on the overall rate | **FALSIFIED at the F1 point** (+0.0713). Correct at the shortlist point, where the floor makes it trivial |
+
+**A diagnostic, explicitly NOT pre-registered and not part of the reading.**
+Scored at the *incumbent's* cut rather than its own, the branch model passes
+0.1075 against 0.1230 (paired −0.0155, inside the bar) with a split of +0.0747.
+So much of the +0.0713 is where each model's F1 optimum sits — the branch
+model's is lower (0.4486 vs 0.5390) — rather than host-scoring alone. This is
+post-hoc, it does **not** overturn the pre-registered reading, and it is recorded
+because omitting it would overstate the result.
+
+**Verdict: stage 7's criterion is NOT met.** "The 26.4% control-arm host-pass
+rate must fall", re-specified on 2026-08-09 as a within-protocol comparison, is
+answered **no**: the split is level and the own-operating-point rate is higher.
+Combined with five arms rejected on shortlist recall, **the branch line now has
+no measured advantage on either of its two criteria.** That is the outcome the
+pre-registration named as closing its remaining case.
+
+**Two defects were found and fixed while running this, and the numbers above are
+post-fix.** Both are the house failure mode — a plausible number from a broken
+computation:
+
+1. **Score collapse across periods.** `score_through_run` assigned by `tic_id`
+   match, but `write_viewset_shards` permutes rows, so positional alignment was
+   unavailable and every row of a host matched. All three of a host's periods
+   were overwritten with whichever was processed last — two thirds of the
+   measurement silently discarded, with a wholly plausible pass rate surviving.
+   Fixed by aligning against the index the writer actually produced, with a
+   raise if the stream and index disagree. The incumbent lane never had this bug,
+   which is how it surfaced: its per-host scores differed and the branch lane's
+   did not.
+2. **The stream was iterated four times per fold** — once per member plus once
+   to read identities back. Folded into the members' own passes. Scoring went
+   from **~10 minutes per fold to ~14 seconds**.
+
+**Cost, for future sizing.** Build ~50 min for 1,740 rows (dominated by two BLS
+periodograms per row; the multi-sector tail is much slower than the median),
+scoring ~1 min. The incumbent lane is ~10 min end to end. `--shard-dir` now
+persists the built shards so a failed scoring pass does not repeat the build.
+
+**Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
 
 **Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
 negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives

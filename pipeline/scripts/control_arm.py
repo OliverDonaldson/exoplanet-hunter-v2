@@ -36,6 +36,7 @@ are recorded into the output JSON rather than left to a reader's memory:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import tempfile
 from pathlib import Path
@@ -132,10 +133,44 @@ def build_host_views(
     return views, scalars
 
 
+def assert_stream_aligned(tics: np.ndarray, index: pd.DataFrame) -> None:
+    """Raise unless the shard stream came back in the shard index's own order.
+
+    Extracted from `score_through_run` so it can be made to fire without a
+    trained model on disk. An unshuffled stream is *supposed* to match the index
+    row for row; when it does not, every score is attached to the wrong target
+    and the pass rate stays entirely believable, which is this project's
+    defining failure mode.
+    """
+    seen = np.asarray(tics).astype(np.int64)
+    expected = index["tic_id"].to_numpy(np.int64)
+    if len(seen) != len(expected):
+        raise RuntimeError(
+            f"shard stream returned {len(seen)} row(s) for an index of {len(expected)}"
+        )
+    if not np.array_equal(seen, expected):
+        wrong = int((seen != expected).sum())
+        raise RuntimeError(
+            f"shard stream is not aligned with the shard index: {wrong} of {len(seen)} "
+            "row(s) differ, so every score would be attached to the wrong target"
+        )
+
+
 def score_through_run(
-    run_dir: Path, shard_dir: Path, index: pd.DataFrame, folds: dict
-) -> pd.Series:
-    """Calibrated score per row, each from the fold that held its host out."""
+    run_dir: Path, shard_dir: Path, folds: dict
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Score the shard set through a run directory's own fold members.
+
+    Returns the shard **index** and a score per row, aligned positionally.
+
+    Alignment is against the index the writer actually produced, not the frame
+    handed to it: `write_viewset_shards` permutes rows before sharding, so the
+    two are in different orders. Matching on `tic_id` instead — which an earlier
+    version did — silently collapses a host's three periods onto one score,
+    because every row of that host matches and the last write wins. The pass
+    rate stays entirely plausible while two thirds of the measurement is
+    overwritten.
+    """
     import joblib
     import tensorflow as tf
 
@@ -143,7 +178,7 @@ def score_through_run(
         make_viewset_dataset,
         parse_viewset_shards,
     )
-    from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_metadata
+    from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_index, load_metadata
 
     # Imported for its side effect: PresenceFlag, PickColumns, StackViews and
     # MaskedTransitPool are registered with @register_keras_serializable at
@@ -154,56 +189,52 @@ def score_through_run(
 
     metadata = load_metadata(shard_dir)
     shards = list_shards(shard_dir)
+    index = load_index(shard_dir).reset_index(drop=True)
     base = parse_viewset_shards(shards, metadata)
-    scores = pd.Series(np.nan, index=index.index, dtype=float)
+    scores = np.full(len(index), np.nan, dtype=float)
 
-    for fold in sorted(set(folds.values())):
-        fold_dir = run_dir / f"fold_{fold}"
-        bundle = joblib.load(fold_dir / "cnn_calibrator.joblib")
-        members = sorted(fold_dir.glob("model_*_cnn_branches.keras"))
-        if not members:
-            raise FileNotFoundError(f"{fold_dir} carries no member checkpoints")
-
-        stream = make_viewset_dataset(
+    def stream() -> tf.data.Dataset:
+        return make_viewset_dataset(
             shards,
             metadata,
             base=base,
             scalar_constants=bundle["scalar_constants"],
-            batch_size=32,
+            batch_size=64,
             shuffle=False,
             with_tic_id=True,
         )
-        raw = np.mean(
-            [
-                np.concatenate(
-                    [
-                        tf.keras.models.load_model(str(m), compile=False)
-                        .predict(inputs, verbose=0)
-                        .ravel()
-                        for inputs, _, _ in stream
-                    ]
-                )
-                for m in members
-            ],
-            axis=0,
-        )
-        tics = np.concatenate([t.numpy() for _, _, t in stream])
-        calibrated = bundle["calibrator"].predict(raw)
 
-        # Only the rows this fold owns. Every row is scored by exactly one fold,
-        # so a row left NaN below means its host had no fold and was dropped.
-        wanted = {tic for tic, f in folds.items() if f == fold}
-        written = 0
-        for tic, value in zip(tics, calibrated, strict=True):
-            mask = (index["tic_id"] == int(tic)).to_numpy()
-            if int(tic) in wanted and mask.any():
-                scores.loc[index.index[mask]] = float(value)
-                written += int(mask.sum())
-        # The count written here, not len(wanted): that is the fold's whole
-        # membership across the run and would report ~1,085 for a control arm
-        # of eight hosts.
-        log.info("[control-arm] fold %d scored %d control-arm row(s)", fold, written)
-    return scores
+    for fold in sorted(set(folds.values())):
+        fold_dir = run_dir / f"fold_{fold}"
+        bundle = joblib.load(fold_dir / "cnn_calibrator.joblib")
+        members = sorted(fold_dir.glob(BRANCH_CHECKPOINT))
+        if not members:
+            raise FileNotFoundError(f"{fold_dir} carries no member checkpoints")
+
+        per_member = []
+        tics: np.ndarray | None = None
+        for path in members:
+            model = tf.keras.models.load_model(str(path), compile=False)
+            preds, seen = [], []
+            for inputs, _, tic in stream():
+                preds.append(np.asarray(model.predict_on_batch(inputs)).ravel())
+                if tics is None:
+                    seen.append(tic.numpy())
+            per_member.append(np.concatenate(preds))
+            if tics is None:
+                # Captured on the first member's pass rather than a fourth
+                # sweep of the stream purely to read identities back.
+                tics = np.concatenate(seen)
+
+        assert tics is not None
+        assert_stream_aligned(tics, index)
+
+        calibrated = bundle["calibrator"].predict(np.mean(per_member, axis=0))
+        fold_of_row = index["tic_id"].map(lambda t: folds.get(int(t), -1)).to_numpy(int)
+        owned = fold_of_row == fold
+        scores[owned] = calibrated[owned]
+        log.info("[control-arm] fold %d scored %d control-arm row(s)", fold, int(owned.sum()))
+    return index, scores
 
 
 #: What a run directory's fold_0 contains decides which lane scores it. A flag
@@ -364,6 +395,14 @@ def main() -> None:
     parser.add_argument("--polyorder", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--shard-dir",
+        type=Path,
+        default=None,
+        help="keep the built shard set here instead of a temp dir, so a failed scoring pass "
+        "leaves something to inspect and re-score by hand. The driver still rebuilds it "
+        "on every run — see the note in main()",
+    )
+    parser.add_argument(
         "--also-routable-in",
         type=Path,
         default=None,
@@ -495,14 +534,29 @@ def main() -> None:
         problems = arrays.validate()
         if problems:
             raise ValueError(f"control-arm view set is malformed: {problems}")
-        with tempfile.TemporaryDirectory() as tmp:
-            shard_dir = Path(tmp) / "shards"
+        # Persisted rather than a TemporaryDirectory when --shard-dir is given,
+        # so a crash in the scoring pass leaves the ~35 min build on disk to
+        # inspect and re-score by hand.
+        #
+        # It is deliberately **not** a resume: the build runs unconditionally
+        # even when the directory already holds a shard set. Skipping it would
+        # mean a directory left by a different host draw, seed or period list
+        # gets scored as though it were this one — a wrong measurement that
+        # reports a completely plausible pass rate, which is the failure mode
+        # this project keeps paying for. Rebuilding costs 35 minutes; a silent
+        # mismatch costs the result's credibility.
+        stack = contextlib.ExitStack()
+        with stack:
+            if args.shard_dir is not None:
+                shard_dir = args.shard_dir
+            else:
+                shard_dir = Path(stack.enter_context(tempfile.TemporaryDirectory())) / "shards"
             write_viewset_shards(arrays, shard_dir)
-            scored = score_through_run(args.run_dir, shard_dir, arrays.scalars, folds).to_numpy()
-        frame = arrays.scalars.copy()
+            frame, scored = score_through_run(args.run_dir, shard_dir, folds)
     else:
         scored = score_through_dualview(args.run_dir, dualview_rows, folds)
         frame = pd.DataFrame(rows)
+    frame = frame.copy()
     frame["score"] = scored
     unscored = int(frame["score"].isna().sum())
     if unscored:
