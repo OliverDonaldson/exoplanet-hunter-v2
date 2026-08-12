@@ -16,6 +16,7 @@ import pytest
 
 from exoplanet_hunter.datasets.synthetic_negatives import (
     INVERT,
+    MAX_SURVIVING_SIGMA,
     MIN_SEGMENTS,
     SCRAMBLE,
     assert_transit_destroyed,
@@ -24,6 +25,7 @@ from exoplanet_hunter.datasets.synthetic_negatives import (
     invert_flux,
     make_synthetic_negative,
     scramble_flux,
+    transit_significance,
 )
 from exoplanet_hunter.eval.injection_recovery import inject_box_transit
 
@@ -142,8 +144,8 @@ def test_scrambling_is_reproducible_from_its_seed():
 def test_a_destroyed_transit_passes_and_reports_what_survived():
     time, flux = curve()
     scrambled = scramble_flux(time, flux, n_segments=16, seed=2)
-    ratio = assert_transit_destroyed(time, flux, scrambled, PERIOD, T0, DURATION)
-    assert 0.0 <= ratio <= 0.05
+    sigma = assert_transit_destroyed(time, flux, scrambled, PERIOD, T0, DURATION)
+    assert abs(sigma) <= MAX_SURVIVING_SIGMA
 
 
 def test_a_surviving_transit_raises_and_names_it_a_mislabelled_positive():
@@ -176,13 +178,57 @@ def test_a_scramble_that_preserved_phase_is_caught():
         assert_transit_destroyed(time, flux, rotated, period, 0.5, 0.2)
 
 
-def test_a_flat_original_raises_because_the_check_cannot_pass_or_fail():
-    """No depth to begin with means the guard is vacuous. Saying so beats
-    returning a ratio of 0/0 that reads as a clean pass."""
+def test_an_undetectable_original_raises_because_the_check_cannot_pass_or_fail():
+    """Nothing to destroy means the guard is vacuous. Saying so beats returning
+    a number that reads as a clean pass."""
+    rng = np.random.default_rng(0)
     time = np.linspace(0.0, 40.0, 4000)
-    flat = np.ones_like(time)
-    with pytest.raises(ValueError, match="nothing to destroy"):
-        assert_transit_destroyed(time, flat, flat, PERIOD, T0, DURATION)
+    noise = 1.0 + rng.normal(0.0, 1e-4, time.size)
+    with pytest.raises(ValueError, match="no detectable transit to destroy"):
+        assert_transit_destroyed(time, noise, noise, PERIOD, T0, DURATION)
+
+
+def test_the_guard_reads_significance_not_a_fraction_of_the_original_depth():
+    """The regression the first real run exposed.
+
+    A catalogue transit is often only a few sigma, so `after / before` divides
+    two noisy small numbers: on the first real build three of four scrambles
+    were rejected, one reporting 620% of the original depth because the scramble
+    had moved a low-flux chunk into the transit window. That is noise, not a
+    surviving transit.
+
+    What this pins is the new statistic behaving correctly on a shallow but
+    genuinely detectable transit — the regime the old one mishandled. It does
+    *not* reproduce the 620% case: that needed real light curves with gaps and
+    correlated noise, and tuning a Gaussian fixture until the old statistic
+    misfired would be staging the evidence rather than testing anything.
+    """
+    rng = np.random.default_rng(3)
+    time = np.linspace(0.0, 60.0, 12000)
+    # A shallow transit — detectable, but only just, like most of the catalogue.
+    flux = inject_box_transit(
+        time, 1.0 + rng.normal(0.0, 3e-4, time.size), PERIOD, T0, DURATION, 8e-4
+    )
+    before = transit_significance(time, flux, PERIOD, T0, DURATION)
+    assert before > MAX_SURVIVING_SIGMA, "the fixture must carry a detectable transit"
+
+    scrambled = scramble_flux(time, flux, n_segments=24, seed=11)
+    after = assert_transit_destroyed(time, flux, scrambled, PERIOD, T0, DURATION)
+    assert abs(after) <= MAX_SURVIVING_SIGMA
+
+
+def test_significance_is_signed_so_a_brightening_is_distinguishable():
+    """Inversion produces a negative significance, which is proof it is not a
+    transit rather than evidence of one."""
+    time, flux = curve()
+    assert transit_significance(time, flux, PERIOD, T0, DURATION) > 0
+    assert transit_significance(time, invert_flux(flux), PERIOD, T0, DURATION) < 0
+
+
+def test_significance_refuses_a_fold_with_too_few_cadences_to_measure():
+    time = np.linspace(2.0, 2.5, 200)
+    with pytest.raises(ValueError, match="a significance needs at least two"):
+        transit_significance(time, np.ones_like(time), PERIOD, T0, DURATION)
 
 
 def test_both_kinds_survive_the_guard_end_to_end():

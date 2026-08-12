@@ -33,9 +33,12 @@ synthesis instead of the absence of a transit.
 **The failure mode this module is built around.** A "synthetic negative" that
 still contains its transit is a *mislabelled positive*, and it is invisible —
 training accepts it, the loss barely moves, and the intervention appears to have
-been tried. So the constructions do not trust their own mechanism: they measure
-the residual transit depth at the original ephemeris and **raise** when it has
-not collapsed. See `assert_transit_destroyed`.
+been tried. So the constructions do not trust their own mechanism: they ask
+whether a transit is still **detectable** at the original ephemeris and raise
+when one is. See `assert_transit_destroyed`, and note that it tests a detection
+significance rather than a fraction of the original depth — the fraction is two
+noisy small numbers divided by each other on a real light curve, and it
+mis-rejected three of the first four real scrambles.
 """
 
 from __future__ import annotations
@@ -57,11 +60,12 @@ INVERT = "invert"
 SCRAMBLE = "scramble"
 KINDS = (INVERT, SCRAMBLE)
 
-#: Fraction of the original injected depth that may survive the construction.
-#: A transit reduced to under a twentieth of itself is below this catalogue's
-#: shallowest real signals; anything more and the "negative" still carries the
-#: thing it is supposed to lack.
-MAX_SURVIVING_DEPTH_FRACTION = 0.05
+#: Detection threshold, in sigma, at the original ephemeris. A construction
+#: that leaves a signal above this has left a *detectable* transit, which is
+#: what makes a row a mislabelled positive — not the fraction of depth that
+#: survives. 3 sigma is deliberately conservative: the shortlist operates far
+#: above it, so a residual this small cannot be what the model keys on.
+MAX_SURVIVING_SIGMA = 3.0
 
 #: Fewest segments a scramble may use. Two is the minimum that permutes at all,
 #: and a single segment is the identity — which returns the light curve
@@ -153,6 +157,42 @@ def folded_depth(
     return 1.0 - float(np.median(values[in_transit])) / baseline
 
 
+def transit_significance(
+    time: np.ndarray, flux: np.ndarray, period: float, t0: float, duration: float
+) -> float:
+    """Signed depth in units of its own standard error at one ephemeris.
+
+    Positive is a dip, negative a brightening. The error combines the
+    out-of-transit scatter over both sample sizes, `sd * sqrt(1/n_in + 1/n_out)`,
+    which is the standard two-sample error on a difference of means — the
+    in-transit window is the small sample and usually sets it.
+    """
+    t = np.asarray(time, dtype=float)
+    values = np.asarray(flux, dtype=float)
+    if period <= 0 or duration <= 0:
+        raise ValueError(f"a fold needs a positive period and duration, got {period}, {duration}")
+
+    phase = np.abs(np.mod(t - t0 + 0.5 * period, period) - 0.5 * period)
+    in_transit = (phase < 0.5 * duration) & np.isfinite(values)
+    out_transit = (phase >= 0.5 * duration) & np.isfinite(values)
+    n_in, n_out = int(in_transit.sum()), int(out_transit.sum())
+    if n_in < 2 or n_out < 2:
+        raise ValueError(
+            f"the fold leaves {n_in} in-transit and {n_out} out-of-transit cadence(s); "
+            "a significance needs at least two of each"
+        )
+
+    baseline = float(np.median(values[out_transit]))
+    if baseline == 0.0:
+        raise ValueError("out-of-transit median is zero; depth is undefined")
+    depth = 1.0 - float(np.median(values[in_transit])) / baseline
+    scatter = float(np.std(values[out_transit], ddof=1)) / abs(baseline)
+    error = scatter * np.sqrt(1.0 / n_in + 1.0 / n_out)
+    if error == 0.0:
+        raise ValueError("out-of-transit scatter is zero; a significance is undefined")
+    return depth / error
+
+
 def assert_transit_destroyed(
     time: np.ndarray,
     original: np.ndarray,
@@ -161,9 +201,9 @@ def assert_transit_destroyed(
     t0: float,
     duration: float,
     *,
-    max_fraction: float = MAX_SURVIVING_DEPTH_FRACTION,
+    max_sigma: float = MAX_SURVIVING_SIGMA,
 ) -> float:
-    """Raise unless the construction actually removed the signal. Returns the ratio.
+    """Raise unless no transit is *detectable* in `constructed`. Returns its sigma.
 
     The mechanisms are sound in the abstract and this does not trust them. A
     scramble whose segments align with the period, an inversion of a curve whose
@@ -172,23 +212,35 @@ def assert_transit_destroyed(
     and still carries its dip. Training would accept it silently as a
     mislabelled positive, the loss would barely move, and the intervention would
     be recorded as tried.
+
+    **Significance, not a fraction of the original depth.** This checked
+    `after / before < 5%` until 2026-08-12, which is the wrong statistic on real
+    light curves: a catalogue transit is often only a few sigma to begin with, so
+    the ratio is two noisy small numbers divided by each other. On the first real
+    run three of four scrambles "failed", one reporting **620% of the original
+    depth** — the scramble had merely moved a low-flux chunk into the transit
+    window, which is noise, not a surviving transit. The question that matters is
+    not *how much of the dip is left* but *is there a transit here at all*, and
+    that is a detection threshold.
+
+    A curve whose original transit is itself undetectable is rejected: there is
+    nothing to destroy, so the check could neither pass nor fail honestly.
     """
-    before = abs(folded_depth(time, original, period, t0, duration))
-    if before <= 0.0:
+    before = transit_significance(time, original, period, t0, duration)
+    if abs(before) <= max_sigma:
         raise ValueError(
-            "the original curve has no depth at this ephemeris, so there is nothing to "
-            "destroy and the check cannot pass or fail — build the negative from a host "
-            "with a real or injected transit"
+            f"the original curve shows only {before:+.1f} sigma at this ephemeris "
+            f"(threshold {max_sigma}), so there is no detectable transit to destroy and "
+            "this check can neither pass nor fail — draw a host with a real transit"
         )
-    after = abs(folded_depth(time, constructed, period, t0, duration))
-    ratio = after / before
-    if ratio > max_fraction:
+    after = transit_significance(time, constructed, period, t0, duration)
+    if abs(after) > max_sigma:
         raise ValueError(
-            f"the construction left {ratio:.1%} of the transit depth at the original "
-            f"ephemeris (limit {max_fraction:.0%}) — this is a mislabelled positive, not a "
-            "synthetic negative, and training cannot tell the difference"
+            f"the construction left a {after:+.1f} sigma signal at the original ephemeris "
+            f"(limit {max_sigma}, original {before:+.1f}) — a transit is still detectable "
+            "here, so this is a mislabelled positive and training cannot tell the difference"
         )
-    return ratio
+    return after
 
 
 def make_synthetic_negative(
