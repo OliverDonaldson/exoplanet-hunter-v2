@@ -204,7 +204,7 @@ in HANDOVER.md.
 |---|---|---|
 | **1** *(old 0)* housekeeping, landmines | **done** | 71 GB staging reclaimed; two scripts that could silently write bad data deleted; four audit items fixed; TRICERATOPS vendored |
 | **2** *(old 1)* ExoMiner-grade inputs | **done** 2026-08-05 | 5,423 examples × 11 branches, 3.6 GB DV archive, DV scalars, Gaia RUWE, FFI recovery, seventh gate |
-| **3** *(old A)* re-baselined incumbent summary | **done** 2026-08-08 | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`; the gate returns decisions again instead of refusing |
+| **3** *(old A)* re-baselined incumbent summary | **done** 2026-08-08; **its second half was not done until 2026-08-12** | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`. This row read "the gate returns decisions again instead of refusing" for four days and **that was false** — the summary existed but nothing routed the gate to it, so `promotion_gate.py` went on refusing every candidate on paperwork. `--incumbent-summary` closes it; see *The promotion gate was not calibrated* below |
 | **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
 | **6** recall variance + re-baseline | **done** 2026-08-09 | `pooled_gate_recall_seed_sd` **0.0292** → **a recall @1% FPR margin under ~0.034 is not a decision**. Run 3's rejection is sound at 4.8× the floor; the capacity arm's 0.145 → 0.236 was **real, not noise**, and stays unactionable. `models/cv/branches-20260808-rebaseline` is the control for every stage after it |
@@ -1851,6 +1851,150 @@ is the cheaper side of that trade.)*
 
 **Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
 
+### The promotion gate was not calibrated to its own noise floor (2026-08-12)
+
+Audited on Ollie's instruction — *"inspect the promotion and rejection gates as
+well, I don't want any bias"* — rather than found by a failing test. **Three
+defects. None changes a recorded verdict; all three changed what a verdict was
+allowed to claim.**
+
+**1. The gate could not promote anything, and had not been able to since the
+re-baseline.** `registry.json` names `ca906040`'s own `cv_summary.json`, which
+carries no `per_mission` block. So `_gate_slice` returns `None`,
+`_population_mismatch` fires, and `evaluate_promotion` returns REJECT **before a
+single metric is compared**. Run, it says so in as many words:
+
+> REJECT: gated on pooled CV means — a summary here predates the per_mission
+> block; … refusing to promote on a pooled comparison whose rows cannot be
+> matched
+
+The 2026-08-07 audit predicted exactly this and noted `promotion_gate.py` had no
+flag to point at a re-baselined summary. Stage 3 built the summary and the note
+was never actioned, while the stage-3 row above recorded the opposite. **Every
+branch rejection on this project was therefore decided by hand, via
+`evaluate.py compare`, not by the gate.** Closed with `--incumbent-summary`. The
+registry is deliberately left alone: it names what is *served*, and making the
+serving pointer depend on an evaluation artefact is the wrong coupling — besides
+which touching it is a stop-and-ask.
+
+**2. The recall tolerance was tighter than the floor this project had already
+measured.** Stage 6 measured `pooled_gate_recall_seed_sd = 0.0292`, fixed the
+rule `2 × seed_sd / √n_models`, and recorded the conclusion in this file: *a
+recall @1% FPR margin under ~0.034 is not a decision.* The gate went on
+rejecting at a hardcoded **0.02** — 0.68 σ — so a candidate whose true recall
+equalled the incumbent's was failed by reseeding noise about **31%** of the time,
+on the single criterion that has rejected every branch arm. The constant predates
+stage 6 and was never revisited when it landed. `recall_tolerance` now defaults
+to the candidate's own measured floor.
+
+**3. A tie on AUC was recorded as a defeat.** AUC was a bare `>` with **zero**
+tolerance while Brier (+0.005), ECE (+0.01) and recall (−0.02) each granted a
+band. Whoever held the incumbent seat therefore won every tie by construction —
+at a run-level AUC floor of 0.0069, a genuinely level candidate lost a coin flip.
+The *verdict* is unchanged and should be: a tie is not a reason to churn a
+deployed model. What changed is the record — a delta inside the floor now reads
+*"level on ROC-AUC … not a measured difference"* instead of *"does not beat the
+incumbent's CV score"*, and every margin is quoted as a multiple of its floor.
+
+**The symmetry test, run because a gate that only ever rejects challengers is
+indistinguishable from one that is rigged.** Same two summaries, roles swapped:
+
+| direction | verdict | rejected on |
+|---|---|---|
+| branch as candidate | REJECT | shortlist recall 0.220 vs 0.307 |
+| **incumbent as candidate** | **REJECT** | **AUC 0.9100 vs 0.9202** |
+
+**The gate is not protecting `ca906040`.** On the re-baselined like-for-like
+comparison the branch model *wins* TESS AUC (+0.0102), Brier (−0.0103) and ECE
+(−0.0279), and loses only on shortlist recall. The bias was in the calibration of
+the thresholds, not in their direction.
+
+**Re-run after the fix, the rejection stands and is now measured:**
+
+> recall @1% FPR 0.220 vs incumbent 0.307 (−0.0873, **2.6× the 0.0337 floor**;
+> tolerance 0.0337) — shortlist recall degraded beyond tolerance
+
+`paired_folds` remains computed-but-never-gating, and returns `None` against the
+re-baselined summary in any case because that summary carries no `folds` block.
+**Recorded as a known limitation, not fixed** — making the project's best
+statistic decisive is a change to what the gate *means*, and that is Ollie's
+call, not a bug fix.
+
+**Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
+
+### Stage 10.5 — the ensemble arm, pre-registered 2026-08-12, nothing run
+
+**Why this exists.** Five arms have been rejected, every one on shortlist recall,
+and every one asked the same question: *does this replace the incumbent?* Nobody
+ever asked whether it **complements** it. Measured on the 2,367 shared TESS
+gating rows, at each model's own 1% FPR cut:
+
+| caught | n |
+|---|---:|
+| both | 117 |
+| incumbent only | 282 |
+| branch only | 172 |
+| neither | 729 |
+
+Spearman agreement between the two scores is **0.654**. They are not a better
+and a worse model; they are right about different targets. Combining them:
+
+| combiner | TESS AUC | recall @1% FPR |
+|---|---:|---:|
+| branch alone | 0.9215 | 0.2223 |
+| incumbent alone | 0.9100 | 0.3069 |
+| mean of probabilities | 0.9498 | 0.4292 |
+| **mean of logits** | **0.9537** | **0.4746** |
+| rank-average | 0.9535 | 0.4538 |
+
+**Every combiner beats both models.** Mean of logits is +0.168 recall over the
+incumbent — **5.7× the 0.0337 floor** — and needs no population statistics, so it
+is deployable as written.
+
+**This is exploratory and is NOT a result.** One draw, no ensemble variance
+estimate; the two runs used different CV splits, so while no row's own label
+leaked (both scores are out-of-fold in their own run), it is not a clean joint-CV
+measurement. **A pre-registered confirmation run is required before any of it is
+read as a finding.**
+
+**Sequenced after stage 8, on the same argument that put stage 8 ahead of stage
+9** — stage 8 changes the labels both models learn from, so measuring this first
+means measuring it twice. Ollie's decision, 2026-08-12.
+
+**Pre-registered now, before the run exists.**
+
+*What is run.* Both models on a **common fold assignment**, the ensemble scored
+out-of-fold, `--n-models-per-fold 3` so the ensemble carries its own variance
+estimate rather than borrowing a single model's.
+
+*What is measured.* TESS AUC and recall @1% FPR on the gate slice; the
+control-arm split through the stage 7i harness; and Spearman(score,
+`baseline_days`), because an ensemble that inherits the *worse* of its two
+members' baseline dependence is not an improvement for the deployment use.
+
+*The bar.* Recall @1% FPR against the incumbent's 0.307, read against the
+ensemble's own measured floor by the stage 6 rule. Nothing under **1×** the floor
+is a decision.
+
+| outcome | reading |
+|---|---|
+| ensemble recall **above** incumbent beyond its floor | the branch line's value is as a **complement**, not a replacement. This reopens nothing about stage 4 — those rejections were about replacement and remain correct |
+| **within** its floor | the disjointness is real but does not convert into shortlist recall. Record it and close the branch line as the plan already anticipates |
+| ensemble recall **below** the incumbent | the exploratory reading was an artefact of the mismatched splits. Report it as falsified; do not re-specify |
+
+*Predictions, recorded so they can be wrong.*
+
+1. The confirmation run lands **below** the exploratory 0.4746, because the
+   mismatched-split version gave each model a slightly different training set
+   and that flatters an ensemble.
+2. It still clears the incumbent's 0.307 by more than its floor.
+3. Baseline sensitivity of the ensemble sits **between** its two members'
+   (+0.5155 branch, +0.3812 incumbent) rather than below both — averaging does
+   not remove a confound both models share.
+
+*Nothing promotes on this either.* A favourable ensemble number is an argument
+for a serving change, which is stage 11 work and Ollie's call.
+
 **Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
 negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
 built with our existing injection machinery. Plus the observation-selection
@@ -1891,9 +2035,33 @@ Measured 2026-08-05, baseline as a span in **days**:
 | stage 4 branches, labelled CV set | +0.239 |
 | **the ground-truth label itself** | **+0.278**, and **+0.387** on TESS alone |
 
-Every model sits *below* the labels. The correlation survives inside every TESS
-period band and is not a period artefact. TESS confirmed planets have a median
-baseline of **1,495 d against 430 d** for false positives.
+The correlation survives inside every TESS period band and is not a period
+artefact. TESS confirmed planets have a median baseline of **1,495 d against
+430 d** for false positives.
+
+**"Every model sits below the labels" was true on 2026-08-05 and is not true
+now.** This line said so until 2026-08-12 and had to be corrected twice over,
+because the crossing had already been recorded elsewhere in this file and never
+propagated back here. Stage 6 noted the re-baseline reached **+0.3025 pooled,
+above the +0.278 label figure**. Re-measured on 2026-08-12 with the same Spearman
+statistic, **per mission**, which is what pooling was hiding:
+
+| series | all missions | **TESS** *(gates)* | Kepler | K2 |
+|---|---:|---:|---:|---:|
+| branch model, `branches-20260808-rebaseline` | +0.3025 | **+0.5155** | +0.0859 | −0.0064 |
+| incumbent `ca906040`, shared TESS rows | — | +0.3812 | — | — |
+| **the ground-truth label**, same rows | +0.2136 | **+0.3874** | +0.1025 | −0.1490 |
+
+The label's TESS figure reproduces the recorded +0.387 to three places, so the
+slice is right and it is the *model* row that was stale. **On the mission that
+gates, the branch architecture sits +0.13 above the labels it learned from** —
+it does not merely inherit the confound, it amplifies it. The incumbent, at
++0.3812, still sits just below.
+
+**Consequence for stage 8: there are two targets, not one.** The bias in the
+labels, and the branch architecture's amplification of it. An intervention that
+fixes the first and leaves the second is a partial result, and the pre-registration
+must be able to tell them apart.
 
 The mechanism is confirmation bias in the catalogue: a target observed across
 many sectors accumulates the follow-up that promotes it to confirmed, while a
