@@ -151,6 +151,70 @@ def paired_folds(
     return PairedFolds(deltas.tolist(), effect, p_value, exact)
 
 
+@dataclass(frozen=True)
+class DecisionFloor:
+    """The smallest margin this run can resolve, from its own recorded variance.
+
+    Stage 6 measured the floors and fixed the rule that turns them into a
+    threshold: **`2 x seed_sd / sqrt(n_models_per_fold)`**. It yielded ~0.007 on
+    gate AUC and **~0.034 on gate recall @1% FPR**, and the roadmap states the
+    consequence plainly — *a recall @1% FPR margin under ~0.034 is not a
+    decision*.
+
+    The gate did not read any of it. It compared AUC with a strict `>` and no
+    band at all, and rejected on recall at a hardcoded 0.02 — **tighter than the
+    0.034 floor the same project had measured**, so a candidate whose true recall
+    equalled the incumbent's was rejected by reseeding noise about a third of the
+    time. Both numbers predate stage 6 and neither was revisited when it landed.
+
+    A floor is not a licence to promote a worse model: the gate stays
+    conservative and a tie still leaves the incumbent served. What the floor
+    changes is what the decision is allowed to *claim* — a margin inside it is
+    reported as level, not as having been beaten.
+    """
+
+    auc: float | None
+    recall: float | None
+    source: str
+
+    def times(self, margin: float, floor: float | None) -> str:
+        """`margin` as a multiple of its floor, for the decision text."""
+        if floor is None or floor <= 0.0:
+            return "no measured floor"
+        return f"{abs(margin) / floor:.1f}x the {floor:.4f} floor"
+
+
+#: Applied when a summary carries no `variance` block — every run before
+#: 2026-08-08. Not a measurement, and the decision text says so.
+LEGACY_RECALL_TOLERANCE = 0.02
+
+
+def decision_floor(summary: dict[str, Any]) -> DecisionFloor:
+    """Resolvable margins for this candidate, by stage 6's rule.
+
+    Read from the candidate rather than the incumbent: the incumbent's summary
+    is a stored artefact that may predate the variance block entirely, and it is
+    the candidate's own reseeding spread that says whether *this* run's margin
+    is real.
+    """
+    variance = summary.get("summary", {}).get("variance") or {}
+    n_models = variance.get("n_models_per_fold")
+    if not n_models or n_models < 1:
+        return DecisionFloor(None, None, "no variance block — run with --n-models-per-fold")
+
+    root = math.sqrt(float(n_models))
+
+    def floor(key: str) -> float | None:
+        sd = variance.get(key)
+        return 2.0 * float(sd) / root if sd else None
+
+    return DecisionFloor(
+        auc=floor("seed_sd"),
+        recall=floor("pooled_gate_recall_seed_sd"),
+        source=f"2 x seed_sd / sqrt({int(n_models)}), measured by this run",
+    )
+
+
 @dataclass
 class PromotionDecision:
     promoted: bool
@@ -307,7 +371,7 @@ def evaluate_promotion(
     *,
     brier_tolerance: float = 0.005,
     ece_tolerance: float = 0.01,
-    recall_tolerance: float = 0.02,
+    recall_tolerance: float | None = None,
     mission_alarm: float = 0.02,
     allow_unmatched_populations: bool = False,
 ) -> PromotionDecision:
@@ -318,6 +382,10 @@ def evaluate_promotion(
     the fallback refuses rather than comparing populations that may differ —
     see `_population_mismatch`. `allow_unmatched_populations` overrides that
     for a deliberate cross-population read.
+
+    `recall_tolerance` defaults to **this run's own measured floor** rather than
+    a constant — see `DecisionFloor`. Passing a number overrides it, which is
+    what the pre-stage-6 tests do deliberately.
     """
     if incumbent is None:
         return PromotionDecision(True, ["first registered model — becomes the incumbent"])
@@ -341,6 +409,10 @@ def evaluate_promotion(
             _mean_or_none(incumbent, "test_ece"),
         )
         header = "gated on pooled CV means — a summary here predates the per_mission block"
+
+    floor = decision_floor(candidate)
+    if recall_tolerance is None:
+        recall_tolerance = floor.recall if floor.recall is not None else LEGACY_RECALL_TOLERANCE
 
     mismatch = _population_mismatch(candidate, incumbent)
     paired = paired_folds(candidate, incumbent)
@@ -398,7 +470,27 @@ def evaluate_promotion(
             return PromotionDecision(False, reasons, alarms)
 
     if cand_auc <= inc_auc:
-        reasons.append("does not beat the incumbent's CV score")
+        # A tie and a loss are not the same statement, and saying "does not beat"
+        # for a delta of 0.0001 asserts a measurement that does not exist. The
+        # gate's answer is identical either way — the incumbent keeps serving,
+        # because churning a deployed model on noise is not an upgrade — but the
+        # *record* has to distinguish them, or a level result reads for ever
+        # after as a defeat. This is the direction of the asymmetry that matters:
+        # every other criterion below grants the candidate a tolerance band, so
+        # without this the incumbent silently wins every tie it is handed.
+        margin = inc_auc - cand_auc
+        if floor.auc is not None and margin <= floor.auc:
+            reasons.append(
+                f"level on ROC-AUC — the {margin:.4f} gap is inside this run's own "
+                f"{floor.auc:.4f} floor ({floor.source}), so it is not a measured "
+                "difference. The incumbent stays served because a tie is not a reason "
+                "to replace a deployed model, not because the candidate lost"
+            )
+        else:
+            reasons.append(
+                f"does not beat the incumbent's CV score (-{margin:.4f}, "
+                f"{floor.times(margin, floor.auc)})"
+            )
         return PromotionDecision(False, reasons, alarms)
     if cand_brier > inc_brier + brier_tolerance:
         reasons.append(f"calibration degraded beyond tolerance (+{brier_tolerance})")
@@ -413,9 +505,17 @@ def evaluate_promotion(
         reasons.append("ECE guard skipped — summary predates the test_ece field")
 
     if cand_recall is not None and inc_recall is not None:
-        reasons.append(f"recall @1% FPR {cand_recall:.3f} vs incumbent {inc_recall:.3f}")
-        if cand_recall < inc_recall - recall_tolerance:
-            reasons.append(f"shortlist recall degraded beyond tolerance (-{recall_tolerance})")
+        margin = cand_recall - inc_recall
+        measured = floor.recall is not None
+        reasons.append(
+            f"recall @1% FPR {cand_recall:.3f} vs incumbent {inc_recall:.3f} "
+            f"({margin:+.4f}, {floor.times(margin, floor.recall)}; "
+            f"tolerance {recall_tolerance:.4f}"
+            + ("" if measured else ", legacy constant — this run reported no variance block")
+            + ")"
+        )
+        if margin < -recall_tolerance:
+            reasons.append(f"shortlist recall degraded beyond tolerance (-{recall_tolerance:.4f})")
             return PromotionDecision(False, reasons, alarms)
     else:
         reasons.append("recall guard skipped — summary predates the per_mission block")
@@ -449,17 +549,39 @@ def load_registry(models_dir: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def load_incumbent_summary(models_dir: Path) -> dict[str, Any] | None:
+def load_incumbent_summary(
+    models_dir: Path, summary_path: Path | None = None
+) -> dict[str, Any] | None:
+    """The incumbent's summary — the registry's, or an explicit re-baseline.
+
+    **`summary_path` is the other half of stage 3.** The 2026-08-07 audit found
+    that the registry's `ca906040` summary carries no `per_mission` block, so
+    `_gate_slice` returns None, `_population_mismatch` fires and every candidate
+    is refused *before a single metric is compared*. Stage 3 produced the
+    re-baselined summary that fixes it — `models/cv/incumbent-rebaselined/` —
+    and the audit's own note said `promotion_gate.py` had no flag to point at
+    one. That note was never actioned: the roadmap recorded stage 3 as "the gate
+    returns decisions again instead of refusing" while the gate went on refusing
+    everything, and every branch rejection since was decided by hand.
+
+    Passing a path here rather than editing `models/registry.json` is deliberate.
+    The registry names what is *served*; the re-baseline is a measurement of that
+    same model on the current view set. Writing the latter into the former would
+    make the serving pointer depend on an evaluation artefact, and touching the
+    registry at all is a stop-and-ask in this project.
+    """
+    if summary_path is not None:
+        return json.loads(summary_path.read_text())
     registry = load_registry(models_dir)
     if registry is None:
         return None
     # Registry paths are repo-root-relative ("models/cv/<run>/..."); resolve
     # against models_dir's parent, not the caller's cwd, so
     # `promotion_gate.py --models-dir` works from anywhere.
-    summary_path = Path(registry["cv_summary"])
-    if not summary_path.is_absolute():
-        summary_path = models_dir.parent / summary_path
-    return json.loads(summary_path.read_text())
+    path = Path(registry["cv_summary"])
+    if not path.is_absolute():
+        path = models_dir.parent / path
+    return json.loads(path.read_text())
 
 
 def publishable_cv_dirs(models_dir: Path) -> list[Path]:

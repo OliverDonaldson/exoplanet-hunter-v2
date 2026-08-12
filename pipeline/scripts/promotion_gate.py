@@ -32,17 +32,40 @@ def main() -> None:
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
     parser.add_argument("--brier-tolerance", type=float, default=0.005)
     parser.add_argument("--ece-tolerance", type=float, default=0.01)
+    parser.add_argument(
+        "--incumbent-summary",
+        type=Path,
+        default=None,
+        help=(
+            "read the incumbent's metrics from this cv_summary.json instead of the one "
+            "the registry names. Required whenever the served model's own summary predates "
+            "the per_mission block — as ca906040's does, which makes the gate refuse every "
+            "candidate on paperwork before comparing a single metric. Point it at "
+            "models/cv/incumbent-rebaselined/cv_summary.json. The registry is not modified"
+        ),
+    )
+    parser.add_argument(
+        "--recall-tolerance",
+        type=float,
+        default=None,
+        help=(
+            "override the shortlist-recall tolerance. Defaults to the candidate run's own "
+            "measured floor (2 x seed_sd / sqrt(n_models_per_fold)); a run with no variance "
+            "block falls back to the pre-stage-6 constant of 0.02"
+        ),
+    )
     parser.add_argument("--promote", action="store_true", help="Update the registry on success")
     args = parser.parse_args()
 
     candidate = json.loads(args.cv_summary.read_text())
-    incumbent = load_incumbent_summary(args.models_dir)
+    incumbent = load_incumbent_summary(args.models_dir, args.incumbent_summary)
 
     decision = evaluate_promotion(
         candidate,
         incumbent,
         brier_tolerance=args.brier_tolerance,
         ece_tolerance=args.ece_tolerance,
+        recall_tolerance=args.recall_tolerance,
     )
     log.info("[promotion] %s", decision)
 

@@ -17,6 +17,7 @@ from exoplanet_hunter.validation.leakage import (
 from exoplanet_hunter.validation.promotion import (
     PairedFolds,
     PromotionDecision,
+    decision_floor,
     evaluate_promotion,
     load_incumbent_summary,
     load_registry,
@@ -44,6 +45,7 @@ __all__ = [
     "check_dv_archive",
     "check_view_set",
     "check_views",
+    "decision_floor",
     "diff_label_catalogues",
     "drop_quarantined",
     "evaluate_promotion",

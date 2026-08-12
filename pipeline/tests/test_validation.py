@@ -19,6 +19,7 @@ from exoplanet_hunter.validation import (
     check_catalogue_shrink,
     check_dv_archive,
     check_views,
+    decision_floor,
     diff_label_catalogues,
     drop_quarantined,
     evaluate_promotion,
@@ -893,3 +894,124 @@ def test_a_uniform_shift_across_every_fold_is_infinitely_consistent():
     paired = paired_folds(folds(0.92, 0.92, 0.92), folds(0.90, 0.90, 0.90))
     assert paired is not None
     assert paired.effect_size == math.inf
+
+
+# ------------------------------ promotion: the gate reads its own noise floor --
+#
+# Every guard below is made to fire. Stage 6 measured the floors and fixed the
+# rule (`2 x seed_sd / sqrt(n_models_per_fold)`); the gate ignored all of it and
+# went on comparing AUC with a bare `>` and rejecting recall at a constant that
+# was *tighter* than the floor the same project had measured.
+
+
+def measured(seed_sd: float = 0.0060, recall_sd: float = 0.0292, n_models: int = 3) -> dict:
+    """A summary carrying the variance block `--n-models-per-fold` writes.
+
+    Defaults are `branches-20260808-rebaseline`'s own, so the floors these tests
+    assert against are the ones stage 6 actually recorded: 0.0069 and 0.0337.
+    """
+    return {
+        "summary": {
+            "test_roc_auc": {"mean": 0.90},
+            "test_brier": {"mean": 0.10},
+            "variance": {
+                "seed_sd": seed_sd,
+                "pooled_gate_recall_seed_sd": recall_sd,
+                "n_models_per_fold": n_models,
+            },
+        }
+    }
+
+
+def test_the_floor_is_two_sigma_over_root_n_models():
+    floor = decision_floor(measured())
+    assert floor.auc == pytest.approx(2 * 0.0060 / math.sqrt(3))
+    assert floor.recall == pytest.approx(2 * 0.0292 / math.sqrt(3))
+    # The roadmap's stage 6 conclusion, to four places.
+    assert floor.recall == pytest.approx(0.0337, abs=5e-5)
+
+
+def test_a_summary_with_no_variance_block_reports_no_floor_rather_than_guessing():
+    floor = decision_floor(summary(0.90, 0.10))
+    assert floor.auc is None and floor.recall is None
+    assert "no variance block" in floor.source
+
+
+def test_a_recall_drop_inside_the_measured_floor_no_longer_rejects():
+    """The behaviour change, and the reason this module was touched at all.
+
+    A 0.025 drop is inside the 0.0337 floor this run measured, so it is not a
+    difference. The gate rejected it anyway, because `recall_tolerance` was a
+    0.02 constant written before the floor existed — a candidate whose true
+    recall equalled the incumbent's was failed by reseeding noise about a third
+    of the time, on the one criterion that has rejected every branch arm.
+    """
+    candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
+    incumbent = gated(0.91, 0.10)  # recall 0.30 from the slice defaults
+    assert evaluate_promotion(candidate, incumbent).promoted
+
+
+def test_that_same_drop_still_rejects_under_the_old_constant():
+    """Pins the change to the tolerance and nothing else: identical inputs,
+    identical verdict as before, once the caller asks for the old number."""
+    candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
+    decision = evaluate_promotion(candidate, gated(0.91, 0.10), recall_tolerance=0.02)
+    assert not decision.promoted
+    assert any("degraded beyond tolerance" in r for r in decision.reasons)
+
+
+def test_a_recall_drop_beyond_the_measured_floor_still_rejects():
+    """The floor widens the band; it does not remove the guard. 0.145 vs 0.307
+    is run 3's real rejection at 4.8x the floor, and it must survive."""
+    candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.145})
+    decision = evaluate_promotion(
+        candidate, gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91, "recall_at_1pct_fpr": 0.307})
+    )
+    assert not decision.promoted
+    assert any("degraded beyond tolerance" in r for r in decision.reasons)
+
+
+def test_the_recall_reason_states_the_margin_against_its_floor():
+    """A margin quoted without its floor is how 0.02 survived stage 6."""
+    candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
+    decision = evaluate_promotion(candidate, gated(0.91, 0.10))
+    assert any("x the 0.0337 floor" in r for r in decision.reasons)
+
+
+def test_a_legacy_summary_says_its_tolerance_is_a_constant_not_a_measurement():
+    candidate = summary(0.90, 0.10) | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
+    decision = evaluate_promotion(candidate, gated(0.91, 0.10))
+    assert any("legacy constant" in r for r in decision.reasons)
+
+
+def test_an_auc_tie_inside_the_floor_is_recorded_as_level_not_as_a_defeat():
+    """The incumbent still keeps serving — a tie is not a reason to churn a
+    deployed model. What changes is the record: every other criterion grants the
+    candidate a tolerance band, so without this the incumbent silently won every
+    tie it was handed and the roadmap read it as a loss.
+    """
+    candidate = measured() | slices(TESS={"roc_auc": 0.9098})
+    decision = evaluate_promotion(candidate, gated(0.9100, 0.10))
+    assert not decision.promoted
+    assert any("level on ROC-AUC" in r for r in decision.reasons)
+    assert not any("does not beat" in r for r in decision.reasons)
+
+
+def test_an_auc_loss_beyond_the_floor_is_still_a_defeat():
+    candidate = measured() | slices(TESS={"roc_auc": 0.85})
+    decision = evaluate_promotion(candidate, gated(0.91, 0.10))
+    assert not decision.promoted
+    assert any("does not beat" in r for r in decision.reasons)
+
+
+def test_an_explicit_incumbent_summary_bypasses_the_registry(tmp_path):
+    """The other half of stage 3. `ca906040`'s registry summary carries no
+    per_mission block, so the gate refuses every candidate before comparing a
+    metric; this is how it is pointed at the re-baseline instead. The registry
+    is not read at all on this path — passing a path must not require one.
+    """
+    rebaseline = tmp_path / "cv_summary.json"
+    rebaseline.write_text(json.dumps(gated(0.91, 0.10)))
+    loaded = load_incumbent_summary(tmp_path / "no-registry-here", rebaseline)
+    assert loaded is not None
+    assert loaded["per_mission"]["TESS"]["roc_auc"] == 0.91
