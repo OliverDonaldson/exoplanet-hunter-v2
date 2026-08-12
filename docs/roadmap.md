@@ -1756,8 +1756,16 @@ recorded on 2026-08-09 survive into the result and are written into the output
 JSON: `detection`/`ghost` ran masked, and these numbers cannot support a claim
 about *serving*.
 
-**Host-level rates** — the host is the independent unit, so a host's three
-periods are averaged before the population mean:
+**Pass rates, with the host as the inferential unit.** The rates below are the
+driver's row-level output over 1,740 rows; the bars beneath them use the **host**
+count of 580, because a host's three periods are correlated and the row count
+would overstate the precision. *(Corrected 2026-08-12: an earlier version of this
+line said a host's three periods are averaged before the population mean. They
+are not — no averaging happens anywhere in the driver. Row-level and host-level
+agree to every digit here only because every host contributed exactly three
+scored rows and none were dropped; they diverge as soon as
+`n_unscored_dropped` is non-zero, which the driver permits. Recorded rather than
+left to hold by luck.)*
 
 | | cut | pass | planet hosts | FP hosts | **split** |
 |---|---:|---:|---:|---:|---:|
@@ -1832,8 +1840,14 @@ computation:
 
 **Cost, for future sizing.** Build ~50 min for 1,740 rows (dominated by two BLS
 periodograms per row; the multi-sector tail is much slower than the median),
-scoring ~1 min. The incumbent lane is ~10 min end to end. `--shard-dir` now
-persists the built shards so a failed scoring pass does not repeat the build.
+scoring ~1 min. The incumbent lane is ~10 min end to end. `--shard-dir` keeps the
+built shard set on disk instead of a temp dir, so a failed scoring pass leaves
+something to inspect and re-score by hand. *(Corrected 2026-08-12: it does **not**
+skip the build on a re-run — an earlier version of this line said it did. The
+driver rebuilds unconditionally, on purpose: a directory left by a different host
+draw, seed or period list would otherwise be scored as though it were this one,
+which is a wrong measurement wearing a plausible pass rate. Thirty-five minutes
+is the cheaper side of that trade.)*
 
 **Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
 
