@@ -2014,6 +2014,95 @@ command, and a reason to keep stage 3 a repeatable path rather than a one-off
 artefact — and it invalidates stage 7's attribution numbers, which is exactly why
 stage 8 sits ahead of stage 9.
 
+#### Pre-registered before stage 8 runs — recorded 2026-08-12, nothing built
+
+Written before any intervention exists, because nobody is watching an autonomous
+session read its own result.
+
+**The before-readings already exist and are NOT to be re-derived.** Stage 7i
+produced the control-arm numbers; the baseline sensitivities were re-measured
+per mission on 2026-08-12. Everything below is compared against these:
+
+| statistic, TESS gate slice | before |
+|---|---:|
+| Spearman(branch score, `baseline_days`) | **+0.5155** |
+| Spearman(label, `baseline_days`) | **+0.3874** |
+| **amplification gap** = score − label | **+0.1281** |
+| control-arm split, branch, F1 cut | **+0.1195** |
+| TESS AUC / recall @1% FPR | 0.9202 / 0.2196 |
+
+**Two targets, separated. This is the point of the decomposition.** Stage 8's
+framing until now was "the bias is in the labels, no architecture can reach it".
+That is half the story:
+
+- **Target A — the labels.** `Spearman(label, baseline_days)`. The interventions
+  change what the training labels *are*, so this moves by construction and its
+  movement is the intervention working as designed.
+- **Target B — the amplification.** `score − label`. The branch model sits
+  **+0.1281 above** its own labels on TESS. No label intervention is required to
+  move this, and an intervention that fixes A while leaving B is a partial
+  result. Reporting only the score correlation would conflate the two, which is
+  how the pooled figure hid the crossing for four days.
+
+**The evaluation population is frozen, and this is the trap to avoid.** Adding
+negatives changes the training population, so a correlation computed over the
+*augmented* set is not comparable to +0.5155. Every number above and after is
+measured on the **same out-of-fold TESS rows** as the before-reading. Synthetic
+and external negatives enter **training only** and are excluded from every
+evaluation slice. A run that cannot demonstrate that exclusion is not read.
+
+**The bar.** Sampling error on a Spearman ρ at n=2,399 is `1/√(n−3) ≈ 0.0204`,
+so **2σ ≈ 0.041** — but that is a fixed model's sampling error, and reseeding
+noise on this statistic has never been measured here. So each run reports the
+**per-member spread** of its own baseline sensitivity at `--n-models-per-fold 3`,
+and the bar is stage 6's rule — `2 × sd / √3` — floored at the 0.041 sampling
+bar. **A margin under the larger of the two is not a decision.**
+
+**Arms, and why they are separate runs.** Three interventions run together
+cannot be attributed, and this project has already paid for that once with the
+three-family sweep. Each is measured against the same control:
+
+| arm | what changes |
+|---|---|
+| control | the current distribution, re-run for a same-code comparison |
+| **P** propensity weighting | per-example weights ∝ inverse propensity on `baseline_days` |
+| **S** stratified negatives | negatives resampled to match the positives' baseline distribution |
+| **N** synthetic negatives | scrambled + inverted light curves, baseline-independent by construction |
+| combined | only if at least one single arm clears its bar |
+
+At ~70 min a run that is ~4.7 h for the four, inside the 6–8 h budgeted.
+
+**How each outcome reads — fixed now.**
+
+| outcome | reading |
+|---|---|
+| amplification gap **falls** beyond the bar | the architecture's contribution to baseline dependence is reachable. Report the arm and the residual |
+| gap **level**, label correlation falls beyond the bar | the label intervention worked and the architecture still amplifies. **A partial result, reported as partial** — this is the outcome the old framing would have called a success |
+| **neither** moves beyond its bar | the intervention is falsified. Record it; do not re-specify, and do not run a fourth arm looking for a better one |
+| baseline dependence falls but **TESS recall @1% FPR falls beyond its 0.0337 floor** | the fix costs shortlist performance. Report both numbers together; a bias fix that defeats the deployment use is not a fix |
+
+**Predictions, recorded so they can be wrong.**
+
+1. **N (synthetic) moves the amplification gap the most**, because it is the only
+   arm that breaks the correlation by construction rather than reweighting an
+   existing population.
+2. **P (propensity weighting) moves the label correlation but not the gap** —
+   reweighting changes what the model is fitted to, not how it extrapolates.
+3. **At least one arm costs shortlist recall beyond its floor.** Observation
+   baseline is genuinely predictive of the label in this catalogue; removing the
+   model's access to it should cost measured performance, and an intervention
+   that costs nothing would be evidence it did nothing.
+4. The control arm's split (+0.1195) **does not move** on any arm, because
+   host-scoring and baseline dependence are different defects — stage 7i already
+   showed the split survives baseline matching.
+
+**The kill criterion stands as a decision already made.** If external catalogue
+ingestion exceeds **~8 hours** without a usable negative set, fall back to the
+synthetic negatives alone. Not re-litigated here — executed.
+
+**Nothing promotes.** Whatever stage 8 measures, `models/registry.json` is
+untouched and `ca906040` stays served.
+
 **Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
 left in the model, with quality attention. Blocked on a known problem: the stamps
 are **11–17 px, not the fixed 33×33** the design assumed — that is Kepler's size
