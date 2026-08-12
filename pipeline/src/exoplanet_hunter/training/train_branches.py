@@ -35,6 +35,7 @@ from exoplanet_hunter.datasets.viewset_pipeline import (
     fit_scalar_constants,
     make_split_table,
     make_viewset_dataset,
+    make_weight_table,
     parse_viewset_shards,
 )
 from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_index, load_metadata
@@ -256,6 +257,16 @@ class CVConfig:
     #: the incumbent it was compared against had it — one of the ways that
     #: comparison was not like-for-like.
     augment: AugmentConfig | None = field(default_factory=AugmentConfig)
+    #: Stage 8's baseline-bias arm: None (control), "propensity" or "stratified".
+    #: Recorded here rather than passed loose so it lands in `run_config` — two
+    #: runs differing only in their intervention would otherwise be
+    #: indistinguishable from their summaries, which is exactly the defect that
+    #: made run 1's comparison against the incumbent unreadable.
+    baseline_intervention: str | None = None
+    #: Strata for that arm. 16 removes the training-set correlation to +0.0025
+    #: for propensity weighting and 8 reaches +0.0060 for stratified sampling,
+    #: measured on the real TESS slice 2026-08-12.
+    baseline_strata: int = 16
 
 
 def _resolved_model_config(model_cfg: object) -> dict[str, Any] | None:
@@ -330,6 +341,7 @@ def run_fold(
     model_cfg: object,
     fold_dir: Path | None = None,
     base: tf.data.Dataset | None = None,
+    sample_weights: np.ndarray | None = None,
 ) -> tuple[dict, pd.DataFrame]:
     """Train one fold; return its metrics and its test-row predictions.
 
@@ -345,6 +357,11 @@ def run_fold(
     # Fitted on the training rows only: a validation row must never influence
     # the scale a training row is measured against.
     constants = fit_scalar_constants(index.iloc[train_idx], list(metadata["scalar_columns"]))
+    weights = (
+        make_weight_table(tic_ids, np.asarray(sample_weights, dtype=float))
+        if sample_weights is not None
+        else None
+    )
 
     def stream(split: Split, *, shuffle: bool, identify: bool = False) -> tf.data.Dataset:
         return make_viewset_dataset(
@@ -360,6 +377,11 @@ def run_fold(
             augment=config.augment if split is Split.TRAIN else None,
             seed=config.seed,
             with_tic_id=identify,
+            # Training only, for the same reason. A weighted validation stream
+            # would make early stopping optimise the reweighted population
+            # rather than the one the run is measured on, and a weighted test
+            # stream would weight the metrics themselves.
+            weight_table=weights if split is Split.TRAIN else None,
         )
 
     def train_one(index: int) -> _MemberRun:
@@ -509,6 +531,83 @@ def run_fold(
     }, predictions
 
 
+def _apply_baseline_intervention(
+    index: pd.DataFrame, config: CVConfig
+) -> tuple[pd.DataFrame, np.ndarray | None, dict[str, Any] | None]:
+    """Stage 8's arm, applied to the run's index before any fold is cut.
+
+    Returns the index to train on, per-example weights or None, and a report to
+    carry into `run_config`.
+
+    **Both arms act before the split, and that is deliberate.** Applied per fold
+    they would resample or reweight against each fold's own baseline
+    distribution, so the five folds would train on five different
+    interventions and the run-level number would describe none of them.
+
+    The stratified arm returns a *smaller index*. Rows it drops never reach a
+    split, so they are absent from training, validation **and test** — which is
+    the honest reading: a model trained on a resampled population has not been
+    evaluated on the rows that population excluded, and quietly testing on them
+    would report a number for a population the model never saw.
+    """
+    arm = config.baseline_intervention
+    if arm is None:
+        return index, None, None
+
+    # Imported here rather than at module scope: this trainer is imported by the
+    # serving path, and the intervention modules pull in scipy.
+    from exoplanet_hunter.datasets.baseline_bias import (
+        propensity_weights,
+        stratified_negative_sample,
+    )
+
+    if index["tic_id"].duplicated().any():
+        raise ValueError(
+            "the weight and split tables key on tic_id, and this index carries duplicates — "
+            "every planet of a multi-planet host would share one weight. Key on the row "
+            "instead before running an intervention arm"
+        )
+
+    if arm == "propensity":
+        weighted = propensity_weights(index, n_strata=config.baseline_strata)
+        log.info("[train-branches] arm 'propensity': %s", weighted.report())
+        return (
+            index,
+            weighted.weights,
+            {
+                "arm": arm,
+                "n_strata": config.baseline_strata,
+                "correlation_before": weighted.before,
+                "correlation_after": weighted.after,
+                "n_clipped": weighted.n_clipped,
+                "n_strata_used": weighted.n_strata_used,
+            },
+        )
+
+    if arm == "stratified":
+        sampled = stratified_negative_sample(
+            index, n_strata=config.baseline_strata, seed=config.seed
+        )
+        log.info("[train-branches] arm 'stratified': %s", sampled.report())
+        kept = pd.DataFrame(index.iloc[sampled.index]).reset_index(drop=True)
+        return (
+            kept,
+            None,
+            {
+                "arm": arm,
+                "n_strata": config.baseline_strata,
+                "correlation_before": sampled.before,
+                "correlation_after": sampled.after,
+                "n_dropped": sampled.n_dropped,
+                "n_kept": len(kept),
+            },
+        )
+
+    raise ValueError(
+        f"unknown baseline_intervention {arm!r}; expected None, 'propensity' or 'stratified'"
+    )
+
+
 def run_cv(
     shard_dir: Path,
     out_dir: Path,
@@ -537,8 +636,26 @@ def run_cv(
             before,
             len(index),
         )
+    index, sample_weights, intervention = _apply_baseline_intervention(index, config)
     y = index["label"].to_numpy().astype(int)
-    groups = index["tic_id"].to_numpy()
+    # `group_tic` when the shard set carries it, `tic_id` otherwise.
+    #
+    # Stage 8's synthetic negatives are built *from* a real star's light curve,
+    # so a scrambled row and the row it came from are the same star seen twice.
+    # Grouping on `tic_id` alone would let them fall in different folds, and the
+    # model would then be tested on a star whose own light curve — noise, gaps,
+    # systematics and all — it had already trained on. That is the leakage the
+    # grouped split exists to prevent, arriving through a door the split cannot
+    # see, because the synthetic row carries a `tic_id` of its own so the split
+    # and weight tables stay one-to-one.
+    group_column = "group_tic" if "group_tic" in index.columns else "tic_id"
+    groups = index[group_column].to_numpy()
+    if group_column == "group_tic":
+        log.info(
+            "[train-branches] grouping folds on 'group_tic' (%d rows over %d stars)",
+            len(index),
+            len(np.unique(groups)),
+        )
 
     # Decoded once for the whole run. Only normalisation is per-fold, and that
     # runs downstream of this — five folds x four streams was 20 full decodes of
@@ -566,6 +683,7 @@ def run_cv(
             model_cfg=model_cfg,
             fold_dir=out_dir / f"fold_{fold}",
             base=base,
+            sample_weights=sample_weights,
         )
         metrics["fold"] = fold
         rows.append(metrics)
@@ -617,6 +735,10 @@ def run_cv(
             "n_examples": len(index),
             **git_provenance().as_dict(),
             "model_config": _resolved_model_config(model_cfg),
+            # The arm that produced these numbers, in the artefact that carries
+            # them. Two runs differing only in their intervention are otherwise
+            # indistinguishable from their summaries alone.
+            "baseline_intervention": intervention,
         },
     }
     # `default=str` so a value that is not JSON-native is still recorded rather

@@ -50,6 +50,41 @@ def make_split_table(
     )
 
 
+def make_weight_table(
+    tic_ids: np.ndarray,
+    weights: np.ndarray,
+) -> tf.lookup.StaticHashTable:
+    """tic_id -> per-example training weight; unknown TICs map to 1.0.
+
+    Stage 8's propensity-weighting arm. The default is 1.0 rather than 0.0 for
+    the same reason `make_split_table` defaults to a dropped code: a row the
+    caller forgot to weight should train normally and be findable, not vanish
+    from the loss while every batch still looks the right size.
+
+    Weights are looked up by `tic_id` because that is the only identity a shard
+    carries through `tf.data`. The catalogue is one row per TIC — 5,703 rows,
+    5,703 unique TICs — so the mapping is exact today; a multi-planet host would
+    make it many-to-one and every planet of that host would share a weight,
+    which is why `run_cv` asserts uniqueness before building one.
+    """
+    if len(tic_ids) != len(weights):
+        raise ValueError(f"{len(tic_ids)} tic_ids but {len(weights)} weights")
+    if not np.isfinite(weights).all():
+        raise ValueError(
+            f"{int((~np.isfinite(weights)).sum())} non-finite weight(s) — a NaN weight "
+            "silently removes its example from the loss while the batch count is unchanged"
+        )
+    if (weights < 0).any():
+        raise ValueError("a negative training weight inverts the gradient for that example")
+    return tf.lookup.StaticHashTable(
+        tf.lookup.KeyValueTensorInitializer(
+            keys=tf.constant(tic_ids.astype(np.int64)),
+            values=tf.constant(weights.astype(np.float32)),
+        ),
+        default_value=tf.constant(1.0, tf.float32),
+    )
+
+
 def make_dataset(
     shard_files: list[str],
     metadata: ShardMetadata,

@@ -9,11 +9,13 @@ import tensorflow as tf
 
 from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES
 from exoplanet_hunter.datasets.viewset_pipeline import (
+    AugmentConfig,
     ScalarConstants,
     Split,
     fit_scalar_constants,
     make_split_table,
     make_viewset_dataset,
+    make_weight_table,
 )
 from exoplanet_hunter.datasets.viewset_tfrecords import (
     list_shards,
@@ -104,3 +106,90 @@ def test_split_table_and_split_must_be_passed_together(shards):
     path, metadata = shards
     with pytest.raises(ValueError):
         make_viewset_dataset(list_shards(path), metadata, split=Split.TRAIN)
+
+
+# ------------------------------------- stage 8: per-example training weights --
+
+
+def test_a_weight_table_puts_a_sample_weight_in_the_third_slot(shards):
+    """`fit` reads a three-tuple as (inputs, label, sample_weight)."""
+    path, metadata = shards
+    tics = load_index(path)["tic_id"].to_numpy()
+    table = make_weight_table(tics, np.full(len(tics), 2.5))
+    ds = make_viewset_dataset(list_shards(path), metadata, batch_size=4, weight_table=table)
+    batch = next(iter(ds))
+    assert len(batch) == 3
+    assert np.allclose(batch[2].numpy(), 2.5)
+
+
+def test_a_tic_the_caller_forgot_to_weight_trains_at_one_not_zero():
+    """A default of 0.0 removes the example from the loss while every batch
+    still looks the right size — invisible, and the population is no longer the
+    one the arm describes."""
+    table = make_weight_table(np.array([1, 2]), np.array([3.0, 4.0]))
+    assert float(table.lookup(tf.constant(999, tf.int64)).numpy()) == 1.0
+
+
+def test_a_weight_table_refuses_a_nan(shards):
+    with pytest.raises(ValueError, match="non-finite weight"):
+        make_weight_table(np.array([1, 2]), np.array([1.0, np.nan]))
+
+
+def test_a_weight_table_refuses_a_negative_weight():
+    """It does not down-weight the example, it inverts its gradient."""
+    with pytest.raises(ValueError, match="inverts the gradient"):
+        make_weight_table(np.array([1, 2]), np.array([1.0, -1.0]))
+
+
+def test_a_weight_table_refuses_mismatched_lengths():
+    with pytest.raises(ValueError, match="tic_ids but"):
+        make_weight_table(np.array([1, 2, 3]), np.array([1.0, 1.0]))
+
+
+def test_weights_and_tic_ids_cannot_both_claim_the_third_slot(shards):
+    """Passing both would hand fit() a tensor of TIC IDs as sample weights,
+    which trains happily and is nonsense."""
+    path, metadata = shards
+    tics = load_index(path)["tic_id"].to_numpy()
+    with pytest.raises(ValueError, match="third element"):
+        make_viewset_dataset(
+            list_shards(path),
+            metadata,
+            with_tic_id=True,
+            weight_table=make_weight_table(tics, np.ones(len(tics))),
+        )
+
+
+def test_augmentation_does_not_drop_the_weight(shards):
+    """An augmented weighted stream that silently reverted to a two-tuple would
+    train unweighted while the arm was recorded as weighted — the exact failure
+    the intervention exists to avoid."""
+    path, metadata = shards
+    tics = load_index(path)["tic_id"].to_numpy()
+    ds = make_viewset_dataset(
+        list_shards(path),
+        metadata,
+        batch_size=4,
+        augment=AugmentConfig(),
+        weight_table=make_weight_table(tics, np.full(len(tics), 3.0)),
+    )
+    batch = next(iter(ds))
+    assert len(batch) == 3
+    assert np.allclose(batch[2].numpy(), 3.0)
+
+
+def test_weights_are_looked_up_per_row_not_broadcast(shards):
+    """Every row weighted the same would pass the shape checks above while
+    carrying none of the intervention."""
+    path, metadata = shards
+    index = load_index(path)
+    tics = index["tic_id"].to_numpy()
+    per_tic = {int(t): 1.0 + i for i, t in enumerate(np.unique(tics))}
+    table = make_weight_table(
+        np.array(list(per_tic)), np.array(list(per_tic.values()), dtype=float)
+    )
+    ds = make_viewset_dataset(
+        list_shards(path), metadata, batch_size=len(index), weight_table=table
+    )
+    _, _, weights = next(iter(ds))
+    assert len(np.unique(weights.numpy())) > 1

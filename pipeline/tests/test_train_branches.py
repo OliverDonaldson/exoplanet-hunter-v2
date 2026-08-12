@@ -351,3 +351,92 @@ def test_augmentation_is_training_only(shard_dir, tmp_path, monkeypatch):
     assert {augmented for split, augmented in splits_augmented if split is not Split.TRAIN} == {
         False
     }
+
+
+# ------------------------------- stage 8: the baseline-bias intervention arms --
+
+
+def _biased_index(n: int = 800, seed: int = 0) -> pd.DataFrame:
+    """An index carrying the real confound: long baseline -> likely positive.
+
+    Sized so every quantile stratum holds both labels. At n=240 with p=0.9/0.1 a
+    stratum comes out single-class, the propensity has no inverse there, and the
+    residual guard fires on the fixture rather than on the code under test — the
+    interventions are covered against their own extremes in
+    `test_baseline_bias.py`.
+    """
+    rng = np.random.default_rng(seed)
+    period = rng.uniform(1.0, 20.0, n)
+    expected = rng.integers(2, 300, n)
+    span = (expected - 1) * period
+    p = np.where(span > np.median(span), 0.8, 0.2)
+    return pd.DataFrame(
+        {
+            "tic_id": np.arange(1, n + 1),
+            "label": rng.binomial(1, p),
+            "period": period,
+            "expected_transit_count": expected,
+        }
+    )
+
+
+def test_the_control_arm_changes_nothing_at_all():
+    """None must be a true no-op: an arm that quietly reweighted the control
+    would make every comparison against it meaningless."""
+    index = _biased_index()
+    kept, weights, report = train_branches._apply_baseline_intervention(index, CVConfig())
+    assert kept is index
+    assert weights is None
+    assert report is None
+
+
+def test_the_propensity_arm_returns_weights_and_keeps_every_row():
+    index = _biased_index()
+    kept, weights, report = train_branches._apply_baseline_intervention(
+        index, CVConfig(baseline_intervention="propensity", baseline_strata=8)
+    )
+    assert len(kept) == len(index)
+    assert weights is not None and len(weights) == len(index)
+    assert report is not None
+    assert abs(report["correlation_after"]) < abs(report["correlation_before"])
+
+
+def test_the_stratified_arm_shrinks_the_index_and_says_by_how_much():
+    index = _biased_index()
+    kept, weights, report = train_branches._apply_baseline_intervention(
+        index, CVConfig(baseline_intervention="stratified", baseline_strata=4)
+    )
+    assert weights is None
+    assert len(kept) < len(index)
+    assert report is not None
+    assert report["n_dropped"] == len(index) - len(kept)
+
+
+def test_the_arm_is_recorded_so_two_runs_are_distinguishable():
+    """Without this in run_config, a control and an intervention run differ only
+    in numbers nobody can attribute — the defect that made run 1's comparison
+    against the incumbent unreadable."""
+    _, _, report = train_branches._apply_baseline_intervention(
+        _biased_index(), CVConfig(baseline_intervention="propensity", baseline_strata=8)
+    )
+    assert report is not None and report["arm"] == "propensity"
+    assert report["n_strata"] == 8
+
+
+def test_an_unknown_arm_raises_rather_than_running_the_control():
+    """A typo that silently ran the control would record an intervention that
+    never happened."""
+    with pytest.raises(ValueError, match="unknown baseline_intervention"):
+        train_branches._apply_baseline_intervention(
+            _biased_index(), CVConfig(baseline_intervention="propnesity")
+        )
+
+
+def test_a_duplicated_tic_id_refuses_because_the_tables_key_on_it():
+    """The weight and split tables look up by tic_id, so a multi-planet host
+    would silently share one weight across all of its planets."""
+    index = pd.concat([_biased_index(n=200), _biased_index(n=200)], ignore_index=True)
+    with pytest.raises(ValueError, match="carries duplicates"):
+        train_branches._apply_baseline_intervention(
+            index, CVConfig(baseline_intervention="propensity")
+        )

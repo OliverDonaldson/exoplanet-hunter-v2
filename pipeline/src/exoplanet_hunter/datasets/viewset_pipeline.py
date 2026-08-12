@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-from exoplanet_hunter.datasets.pipeline import Split, make_split_table
+from exoplanet_hunter.datasets.pipeline import Split, make_split_table, make_weight_table
 from exoplanet_hunter.datasets.viewset_augment import AugmentConfig, augment_viewset
 from exoplanet_hunter.datasets.viewset_tfrecords import SCALAR_ENCODING, make_parse_fn
 from exoplanet_hunter.utils.logging import get_logger
@@ -31,6 +31,7 @@ __all__ = [
     "fit_scalar_constants",
     "make_split_table",
     "make_viewset_dataset",
+    "make_weight_table",
     "parse_viewset_shards",
 ]
 
@@ -112,6 +113,7 @@ def make_viewset_dataset(
     augment: AugmentConfig | None = None,
     seed: int = 42,
     with_tic_id: bool = False,
+    weight_table: tf.lookup.StaticHashTable | None = None,
 ) -> tf.data.Dataset:
     """Build one split's (inputs_dict, label) stream from a view-set shard set.
 
@@ -124,9 +126,20 @@ def make_viewset_dataset(
     `with_tic_id` yields a third element for prediction streams, so alignment
     can be asserted against the identity of the row rather than its label. It
     is not for `fit`, which takes the two-tuple.
+
+    `weight_table` yields a third element too — a per-example sample weight,
+    which is what `fit` does with a three-tuple. Stage 8's propensity arm. It is
+    mutually exclusive with `with_tic_id` **because they occupy the same slot**:
+    a prediction stream built with both would hand `fit` a tensor of TIC IDs as
+    its sample weights, which trains perfectly happily and is nonsense.
     """
     if with_tic_id and augment is not None:
         raise ValueError("with_tic_id is for prediction streams; augmentation is training-only")
+    if with_tic_id and weight_table is not None:
+        raise ValueError(
+            "with_tic_id and weight_table both write the third element of the tuple — "
+            "passing both would feed TIC IDs to fit() as sample weights"
+        )
     if (split_table is None) != (split is None):
         raise ValueError("split_table and split must be passed together")
     if metadata["scalar_columns"] and metadata.get("scalar_encoding") != SCALAR_ENCODING:
@@ -173,6 +186,8 @@ def make_viewset_dataset(
             inputs["masks"] = feats["masks"]
         if with_tic_id:
             return inputs, label, feats["tic_id"]
+        if weight_table is not None:
+            return inputs, label, weight_table.lookup(feats["tic_id"])
         return inputs, label
 
     # The cache sits on the parsed stream in `parse_viewset_shards`, upstream of
@@ -180,10 +195,21 @@ def make_viewset_dataset(
     # each epoch — a handful of tensor ops against ~670 MB of parsing.
     ds = ds.map(finalize, num_parallel_calls=tf.data.AUTOTUNE)
     if augment is not None:
-        ds = ds.map(
-            lambda inputs, label: (augment_viewset(inputs, augment), label),
-            num_parallel_calls=tf.data.AUTOTUNE,
-        )
+        # Augmentation touches the inputs only. The weight rides through
+        # untouched rather than being dropped — an augmented weighted stream
+        # that silently reverted to a two-tuple would train unweighted while the
+        # arm was recorded as weighted, which is the failure the whole
+        # intervention is built to avoid.
+        if weight_table is not None:
+            ds = ds.map(
+                lambda inputs, label, weight: (augment_viewset(inputs, augment), label, weight),
+                num_parallel_calls=tf.data.AUTOTUNE,
+            )
+        else:
+            ds = ds.map(
+                lambda inputs, label: (augment_viewset(inputs, augment), label),
+                num_parallel_calls=tf.data.AUTOTUNE,
+            )
     if shuffle:
         ds = ds.shuffle(buffer_size=shuffle_buffer, seed=seed)
     return ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
