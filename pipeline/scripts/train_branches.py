@@ -70,6 +70,23 @@ def main() -> None:
         "that capacity is tested within one architecture rather than across two",
     )
     parser.add_argument(
+        "--baseline-intervention",
+        choices=("propensity", "stratified"),
+        default=None,
+        help="stage 8 arm against observation-baseline dependence. 'propensity' reweights "
+        "every example by the inverse of its label's likelihood given its baseline stratum; "
+        "'stratified' resamples the negatives to the positives' baseline distribution. "
+        "Omit for the control. Recorded in run_config.baseline_intervention with the "
+        "before/after correlation it achieved",
+    )
+    parser.add_argument(
+        "--baseline-strata",
+        type=int,
+        default=16,
+        help="strata for --baseline-intervention. Measured on the real TESS slice "
+        "2026-08-12: propensity reaches +0.0025 at 16, stratified +0.0060 at 8",
+    )
+    parser.add_argument(
         "--drop-branches",
         default=None,
         help="comma-separated branches or families to leave out of fusion (stage 7 "
@@ -96,6 +113,8 @@ def main() -> None:
         seed=args.seed,
         n_models_per_fold=args.n_models_per_fold or int(training.get("n_models_per_fold", 1)),
         augment=_augment_config(raw),
+        baseline_intervention=args.baseline_intervention,
+        baseline_strata=args.baseline_strata,
     )
     if args.init_filters is not None:
         # Overridden in the resolved config rather than the YAML, so the run

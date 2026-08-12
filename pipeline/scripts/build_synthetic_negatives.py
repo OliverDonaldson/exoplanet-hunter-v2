@@ -7,6 +7,9 @@ that is correct regardless of how long the star was observed, which is what
 breaks the catalogue's baseline-label association by construction.
 
     python pipeline/scripts/build_synthetic_negatives.py --n 400
+    python pipeline/scripts/shard_viewset.py \
+        --extra data/processed/synthetic_negatives \
+        --out-dir data/processed/viewset_tfrecords_synneg
 
     clean -> flatten -> scramble|invert -> assert_transit_destroyed
           -> build_view_set at the host's own ephemeris
@@ -157,7 +160,12 @@ def main() -> None:
     )
     parser.add_argument("--labels", type=Path, default=Path("data/labels/labels.parquet"))
     parser.add_argument("--raw", type=Path, default=Path("data/raw"))
-    parser.add_argument("--out", type=Path, default=Path("data/processed/synthetic_negatives.npz"))
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("data/processed/synthetic_negatives"),
+        help="directory, written as a ViewSetArrays (viewset.npz + viewset_scalars.parquet)",
+    )
     parser.add_argument("--n", type=int, default=400, help="synthetic negatives to build")
     parser.add_argument("--n-strata", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
@@ -225,12 +233,10 @@ def main() -> None:
     if problems:
         raise ValueError(f"synthetic-negative view set is malformed: {problems}")
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        args.out,
-        **{f"view_{k}": v for k, v in arrays.views.items()},
-        scalars=arrays.scalars.to_records(index=False),
-    )
+    # Through `ViewSetArrays.save`, not a bespoke npz: `shard_viewset.py --extra`
+    # loads it with `ViewSetArrays.load`, and a second serialisation format for
+    # the same object is how two readers drift apart.
+    arrays.save(args.out)
     by_kind = frame["synthetic_kind"].value_counts().to_dict()
     log.info(
         "[synthetic-negatives] wrote %d rows (%d scramble / %d invert) to %s",
