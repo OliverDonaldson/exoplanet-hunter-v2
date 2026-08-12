@@ -79,3 +79,41 @@ def test_a_view_set_missing_a_declared_view_raises(make_view_set):
     extra.views.pop(next(iter(extra.views)))
     with pytest.raises(KeyError, match="every declared view"):
         shard_viewset.append(base, extra)
+
+
+# ------------------------- the tic_id sign guard, narrowed but not weakened --
+
+
+def test_a_declared_synthetic_row_may_carry_a_negative_id(make_view_set):
+    """Stage 8 numbers synthetic negatives downwards from -1 so they can never
+    be mistaken for a catalogue target. `check_view_set` has to let those
+    through or the merged set cannot be sharded at all."""
+    from exoplanet_hunter.validation import check_view_set
+
+    arrays = make_view_set(n=6)
+    arrays.scalars["synthetic_kind"] = [None, None, None, None, "scramble", "invert"]
+    arrays.scalars.loc[4:5, "tic_id"] = [-1, -2]
+    assert not [p for p in check_view_set(arrays) if "tic_id" in p]
+
+
+def test_an_undeclared_negative_id_is_still_caught(make_view_set):
+    """The exemption is narrow on purpose. A failed join, a sentinel written
+    through or an int overflow all produce non-positive IDs, and none of them
+    declares itself."""
+    from exoplanet_hunter.validation import check_view_set
+
+    arrays = make_view_set(n=6)
+    arrays.scalars.loc[4:5, "tic_id"] = [-1, -2]
+    assert any("not declared as synthetic" in p for p in check_view_set(arrays))
+
+
+def test_a_negative_id_beside_a_declared_one_is_still_caught(make_view_set):
+    """Mixed case: one row declares itself, one does not. Only the undeclared
+    row may be reported, or a single synthetic row would launder the rest."""
+    from exoplanet_hunter.validation import check_view_set
+
+    arrays = make_view_set(n=6)
+    arrays.scalars["synthetic_kind"] = [None, None, None, None, None, "invert"]
+    arrays.scalars.loc[4:5, "tic_id"] = [-1, -2]
+    problems = [p for p in check_view_set(arrays) if "tic_id" in p]
+    assert len(problems) == 1 and "1 non-positive" in problems[0]

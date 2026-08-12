@@ -191,8 +191,23 @@ def check_view_set(arrays: object, *, max_dead_frac: float = 0.98) -> list[str]:
         problems.append("labels: values outside {0, 1}")
     elif len(np.unique(labels)) < 2:
         problems.append("labels: only one class present")
-    if (np.asarray(scalars["tic_id"]) <= 0).any():
-        problems.append("tic_ids: non-positive IDs present")
+    # A non-positive TIC is a data error — a failed join, a sentinel written
+    # through, an int overflow — except where it is deliberate. Stage 8's
+    # synthetic negatives are numbered downwards from -1 precisely so they can
+    # never be mistaken for a catalogue target, and they declare themselves in
+    # `synthetic_kind`. Rows that do *not* declare themselves are still caught,
+    # so the guard keeps its teeth: the exemption is narrow and has to be asked
+    # for in the data.
+    non_positive = np.asarray(scalars["tic_id"]) <= 0
+    if non_positive.any():
+        declared = (
+            scalars["synthetic_kind"].notna().to_numpy()
+            if "synthetic_kind" in scalars.columns
+            else np.zeros(len(scalars), dtype=bool)
+        )
+        undeclared = int((non_positive & ~declared).sum())
+        if undeclared:
+            problems.append(f"tic_ids: {undeclared} non-positive ID(s) not declared as synthetic")
 
     return problems
 
