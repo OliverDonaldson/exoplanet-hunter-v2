@@ -102,6 +102,9 @@ class _MemberRun(NamedTuple):
     test_scores: np.ndarray
     test_labels: np.ndarray
     test_tics: np.ndarray
+    #: Per-epoch series from `fit`, as Keras returns them. Purely observational
+    #: — recording what training already did, never changing it.
+    history: dict[str, list[float]]
 
 
 def _format_sd(value: float | None) -> str:
@@ -421,7 +424,7 @@ def run_fold(
                 )
             )
 
-        model.fit(
+        fitted = model.fit(
             stream(Split.TRAIN, shuffle=True),
             validation_data=stream(Split.VAL, shuffle=False),
             epochs=config.epochs,
@@ -438,7 +441,13 @@ def run_fold(
         test_scores, test_labels, test_tics = _predict(
             model, stream(Split.TEST, shuffle=False, identify=True)
         )
-        return _MemberRun(val_scores, val_labels, test_scores, test_labels, test_tics)
+        # Floats, not numpy scalars: this lands in JSON, and np.float32 is
+        # not serialisable. Rounded to 6 places — a loss curve does not need
+        # seventeen significant figures and the file is read by humans.
+        history = {
+            name: [round(float(v), 6) for v in series] for name, series in fitted.history.items()
+        }
+        return _MemberRun(val_scores, val_labels, test_scores, test_labels, test_tics, history)
 
     runs = [train_one(i) for i in range(max(1, config.n_models_per_fold))]
     val_labels, test_labels, test_tics = runs[0].val_labels, runs[0].test_labels, runs[0].test_tics
@@ -522,6 +531,13 @@ def run_fold(
         "test_ece": float(expected_calibration_error(test_labels, calibrated)),
         "n_test": len(test_labels),
         "n_test_gate_mission": int(gate_rows.sum()),
+        # Per-epoch loss and AUC-PR for each member, train and validation.
+        # Recorded because `patience` is otherwise a number nobody can check:
+        # a summary that reports only the final metrics cannot say whether
+        # early stopping fired at epoch 9 or ran to the 40-epoch ceiling, so
+        # neither over- nor under-training is diagnosable after the fact. Pure
+        # observation — `fit` has already happened when this is read.
+        "epoch_history": [r.history for r in runs],
         "model_roc_auc": per_model_auc,
         # The gate's own statistic, which until 2026-08-08 had no error bar at
         # all while rejecting every arm of stage 4. Note `classification_metrics`

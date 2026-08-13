@@ -15,6 +15,7 @@ needs its own run must genuinely need different inputs, and say why.
 from __future__ import annotations
 
 import json
+import math
 
 import joblib
 import numpy as np
@@ -440,3 +441,48 @@ def test_a_duplicated_tic_id_refuses_because_the_tables_key_on_it():
         train_branches._apply_baseline_intervention(
             index, CVConfig(baseline_intervention="propensity")
         )
+
+
+# ------------------------------------------ per-epoch training curves (2026-08-13) --
+
+
+def test_every_fold_records_a_curve_per_member(ensemble_run):
+    """`patience` is otherwise a number nobody can check: a summary reporting
+    only final metrics cannot say whether early stopping fired at epoch 9 or ran
+    to the ceiling, so neither over- nor under-training is diagnosable after the
+    fact."""
+    summary, _ = ensemble_run
+    for fold in summary["folds"]:
+        assert "epoch_history" in fold
+        assert len(fold["epoch_history"]) == fold_member_count(summary)
+
+
+def fold_member_count(summary: dict) -> int:
+    return int(summary["run_config"]["n_models_per_fold"])
+
+
+def test_the_curve_carries_train_and_validation_series(ensemble_run):
+    summary, _ = ensemble_run
+    history = summary["folds"][0]["epoch_history"][0]
+    assert "loss" in history and "val_loss" in history
+    # Stopping is on val_pr_auc, so it has to be recorded or the stop point
+    # cannot be located on the curve that decided it.
+    assert any("pr_auc" in k for k in history)
+
+
+def test_the_curve_is_json_serialisable_and_finite(ensemble_run):
+    """np.float32 is not JSON-serialisable, and a NaN would sail through
+    json.dump only to become `NaN`, which is not valid JSON for strict readers."""
+    summary, _ = ensemble_run
+    history = summary["folds"][0]["epoch_history"][0]
+    for name, series in history.items():
+        assert all(isinstance(v, float) for v in series), name
+        assert all(math.isfinite(v) for v in series), name
+    json.dumps(history)
+
+
+def test_the_curve_length_shows_where_early_stopping_landed(ensemble_run):
+    """The whole point: epochs run is recoverable, so `patience` is auditable."""
+    summary, _ = ensemble_run
+    ran = len(summary["folds"][0]["epoch_history"][0]["loss"])
+    assert 1 <= ran <= int(summary["run_config"]["epochs"])
