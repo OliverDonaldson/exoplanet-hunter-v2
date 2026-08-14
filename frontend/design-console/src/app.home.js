@@ -170,27 +170,13 @@ function countUp(el) {
   });
 }
 
-/* Procedural stand-in for the hero photograph (hero-space-bg_8e38c7b4.jpg,
-   which was not in the design hand-off). Rendered at the same 0.35 opacity and
-   sits under the same two gradient overlays as the original.
-
-   Cool nebula only — the warm highlight that used to sit top-right read as a
-   lens flare, which is a camera artefact rather than anything in the sky, so
-   it is gone. */
+/* Stand-in for the hero photograph (hero-space-bg_8e38c7b4.jpg, which was not
+   in the design hand-off). A plain star field on the void, rendered at the same
+   0.35 opacity and sitting under the same two gradient overlays as the
+   original. No nebula. */
 function heroBackdrop() {
   const c = document.getElementById('hero-bg');
   if (!c) return;
-  /* The canvas sits at 0.35 opacity and the two gradient overlays take another
-     40–60% out of it, so a cloud painted at alpha 0.3 lands near 0.05 on screen
-     — which is why the earlier nebula was invisible. These are painted bright
-     and additively so the result survives both layers. */
-  const NEBULA = [
-    [0.74, 0.28, 0.52, 'rgba(64,104,168,0.90)'],
-    [0.88, 0.52, 0.40, 'rgba(126,86,164,0.72)'],
-    [0.62, 0.70, 0.46, 'rgba(34,86,112,0.62)'],
-    [0.80, 0.40, 0.22, 'rgba(96,150,205,0.55)'],
-    [0.69, 0.44, 0.13, 'rgba(150,196,235,0.42)'],
-  ];
   const paint = () => {
     const w = c.width = c.offsetWidth, h = c.height = c.offsetHeight;
     if (!w || !h) return;
@@ -198,26 +184,14 @@ function heroBackdrop() {
     let seed = 20260719;
     const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
 
-    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#050608';
     ctx.fillRect(0, 0, w, h);
-
-    ctx.globalCompositeOperation = 'lighter';   // clouds add, as emission does
-    NEBULA.forEach(([cx, cy, r, col]) => {
-      const g = ctx.createRadialGradient(cx * w, cy * h, 0, cx * w, cy * h, r * Math.max(w, h));
-      g.addColorStop(0, col);
-      g.addColorStop(0.55, col.replace(/[\d.]+\)$/, '0.18)'));
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-    });
 
     for (let i = 0; i < 900; i++) {
       const x = rnd() * w, y = rnd() * h, s = rnd() * 1.3 + 0.2, o = rnd() * 0.55 + 0.05;
       ctx.fillStyle = `rgba(240,238,232,${o})`;
       ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
     }
-    ctx.globalCompositeOperation = 'source-over';
   };
   paint();
   const ro = new ResizeObserver(paint); ro.observe(c); chartObservers.push(ro);
