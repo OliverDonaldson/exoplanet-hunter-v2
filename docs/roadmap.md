@@ -2103,6 +2103,97 @@ synthetic negatives alone. Not re-litigated here — executed.
 **Nothing promotes.** Whatever stage 8 measures, `models/registry.json` is
 untouched and `ca906040` stays served.
 
+### Stage 8 result — the amplification is reachable, the labels are not (2026-08-13)
+
+Four arms, `--n-models-per-fold 3`, ~2 h each. **Prediction 4 is still
+outstanding** — the control-arm split needs the stage 7i harness, which is the
+only piece of this stage not yet run.
+
+**The evaluation population is the full out-of-fold TESS slice the before-reading
+was taken on, n=2,399, identical rows for every arm.** Recorded because the first
+attempt at this table intersected the four arms' rows instead, and that is wrong
+in a way worth naming: **the intersection *is* the stratified arm's kept rows**,
+a population that arm engineered to be free of the confound. Its own label
+correlation there is **+0.0573 against the slice's +0.3874**, so comparing arms on
+it would have refereed the contest with one contestant's own instrument.
+
+| arm | TESS AUC | recall @1% FPR | score↔baseline | label↔baseline | **gap** |
+|---|---:|---:|---:|---:|---:|
+| control | 0.9204 | 0.2506 | +0.5139 | +0.3874 | **+0.1265** |
+| **P propensity** | 0.9138 | 0.2642 | **+0.3803** | +0.3874 | **−0.0071** |
+| N synthetic | 0.9127 | 0.2460 | +0.5097 | +0.3874 | +0.1223 |
+
+**The control reproduces the before-reading**: score +0.5139 against +0.5155, gap
++0.1265 against +0.1281. An independent retrain landing on the same numbers is
+what makes the rest of the table readable.
+
+| arm | Δ gap | vs bar | Δ AUC | vs floor | Δ recall | vs floor |
+|---|---:|---|---:|---|---:|---|
+| **propensity** | **−0.1336** | **3.3×** | −0.0066 | 0.8× *(level)* | +0.0136 | 0.3× *(level)* |
+| synthetic | −0.0042 | 0.1× *(null)* | −0.0076 | 0.8× *(level)* | −0.0045 | 0.1× *(null)* |
+
+Bars are each run's own per-member spread by stage 6's rule, floored at the
+0.0409 Fisher sampling bar, exactly as pre-registered.
+
+**Propensity weighting eliminated the architecture's amplification of the
+confound at no measurable cost.** The branch model went from sitting **+0.13
+above** its own labels to fractionally below them: it no longer amplifies, it
+merely inherits. That is the pre-registered outcome *"the architecture's
+contribution to baseline dependence is reachable"*.
+
+**What it does not claim.** Target A — the bias in the labels — is untouched, and
+cannot be otherwise: the label correlation on a frozen evaluation slice is
++0.3874 by definition. What is gone is target B, the amplification. Stage 8's
+deliverable is therefore **half of what the stage set out to reach, and it is the
+half no architecture change could have delivered.**
+
+**Arm S is not comparable, and that is structural rather than a failure.** It
+never scored 680 of the 2,399 pre-registered rows, because rows dropped before
+the split are absent from training, validation *and* test. Its own-slice figures
+(AUC 0.8799, recall 0.0777) are measured on a rebalanced population where the 1%
+FPR threshold means something else, and they are not evidence about the
+intervention. The build-time note that excluding rows from test was "the honest
+reading" was correct and incomplete: it also makes the arm unreadable against a
+fixed evaluation slice. **A resampling intervention has to keep the evaluation
+population whole even when it changes the training one.**
+
+**Three of four predictions falsified.**
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | N moves the gap most | **falsified** — N moved it least (0.1×), P most (3.3×) |
+| 2 | P moves the label correlation but not the gap | **falsified**, exactly backwards |
+| 3 | at least one arm costs shortlist recall beyond its floor | **falsified** — neither comparable arm did |
+| 4 | the control-arm split does not move | **not yet measured** |
+
+**Prediction 3 deserves its explanation, because it was written as a trap and the
+trap caught the wrong thing.** The pre-registration reasoned that an intervention
+costing nothing is evidence it did nothing. P plainly did something — 3.3× its
+bar — and cost nothing. The prediction conflated two quantities: removing
+**label-level** dependence must cost performance, since baseline genuinely
+predicts the label in a test set drawn from those labels; but removing only the
+**amplification** — the part where the model used baseline *more than the labels
+justify* — is free by construction, because over-use beyond the labels carries no
+predictive power on a test set built from them. Costless was the correct
+expectation for what P actually did.
+
+**Two defects in the run's own record, found while reading it.**
+
+1. **`run_config` does not record the shard directory.** Arm N differs from the
+   control only in which shard set it read, and the summary cannot say so — the
+   two are distinguishable solely by `n_examples` (5,767 vs 5,426). A provenance
+   gap: fix before any future arm selects its data by path.
+2. **The measured floors came in roughly double stage 6's** — the control's
+   pooled gate-recall floor is **0.0720** against stage 6's 0.0337. Three draws
+   is a thin sd and it is being asked to carry decisions; worth widening before
+   the next stage leans on it.
+
+**Cost, for future sizing.** ~2 h per arm at `--n-models-per-fold 3` on this
+machine, against the ~70 min the 2026-08-08 handover quoted — that figure is out
+by ~1.7× and should not be used for planning.
+
+**Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
+
 **Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
 left in the model, with quality attention. Blocked on a known problem: the stamps
 are **11–17 px, not the fixed 33×33** the design assumed — that is Kepler's size
