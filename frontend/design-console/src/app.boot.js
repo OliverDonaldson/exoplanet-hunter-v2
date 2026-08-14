@@ -20,13 +20,10 @@ const bootReady = new Promise(r => { resolveBoot = r; });
   const pctEl = document.getElementById('boot-pct');
   const fillEl = document.getElementById('boot-fill');
 
-  // ?boot=hold freezes the dial just before it hands over, for design review
-  const HOLD = new URLSearchParams(location.search).get('boot') === 'hold';
-
   let done = false;
   const finish = () => { if (done) return; done = true; root.remove(); resolveBoot(); };
 
-  if (!HOLD) setTimeout(finish, 9000);   // the console must never stay behind the overlay
+  setTimeout(finish, 9000);              // the console must never stay behind the overlay
   if (REDUCED) { finish(); return; }
 
   const C = 180;                          // centre of the 360×360 viewBox
@@ -63,35 +60,18 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     `<path class="boot-arc" d="${arcPath(C, C, s.r, s.a0, s.a1)}" stroke="${s.col}" stroke-width="${s.w}"/>`
   ).join('');
 
-  /* ── candidate field: little ringed worlds ──────────────────
-     Each is a <g> with no transform attribute of its own, so anime.js owns the
-     element's transform outright — a translate baked into the markup would be
-     overwritten on the first frame. Position lives in the children's
-     coordinates instead, and transform-box:fill-box puts the origin on the
-     planet, so scale and rotate pivot where you'd expect. */
-  const GRID = 6, SPACING = 35;
+  /* ── candidate field ────────────────────────────────────── */
+  const GRID = 7, SPACING = 26;
   const fieldRng = rngFor('boot|field');
   document.getElementById('boot-field').innerHTML = Array.from({ length: GRID * GRID }, (_, i) => {
     const gx = i % GRID, gy = Math.floor(i / GRID);
     const x = C + (gx - (GRID - 1) / 2) * SPACING;
     const y = C + (gy - (GRID - 1) / 2) * SPACING;
-
     const roll = fieldRng();
-    const col = roll > 0.965 ? '#FF4D4D' : roll > 0.90 ? '#F5A623' : '#4DFFD2';
-    const r = 2.9 + fieldRng() * 3.3;
-    const op = (0.5 + fieldRng() * 0.45).toFixed(2);
-    const ringed = fieldRng() < 0.46;
-    const tilt = (-62 + fieldRng() * 124).toFixed(1);
-
-    const ring = ringed
-      ? `<ellipse cx="${x}" cy="${y}" rx="${(r * 2.3).toFixed(2)}" ry="${(r * 0.66).toFixed(2)}"
-           transform="rotate(${tilt} ${x} ${y})" fill="none" stroke="${col}"
-           stroke-width="1" opacity="0.8"/>`
-      : '';
-
-    return `<g class="boot-particle" data-op="${op}" opacity="0">
-        ${ring}<circle cx="${x}" cy="${y}" r="${r.toFixed(2)}" fill="${col}"/>
-      </g>`;
+    const col = roll > 0.86 ? '#F5A623' : roll > 0.94 ? '#FF4D4D' : '#4DFFD2';
+    const r = 1.4 + fieldRng() * 1.8;
+    return `<circle class="boot-particle" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(2)}"
+      fill="${col}" opacity="0"/>`;
   }).join('');
 
   /* ── starting state ─────────────────────────────────────── */
@@ -132,7 +112,7 @@ const bootReady = new Promise(r => { resolveBoot = r; });
   /* the tick ring keeps turning for as long as the overlay is up */
   animate('#boot-ticks', { rotate: 360, duration: 48000, ease: 'linear', loop: true });
 
-  const tl = createTimeline({
+  createTimeline({
     defaults: { ease: 'inOut(3)' },
     onUpdate: self => {
       const p = self.progress;
@@ -162,10 +142,9 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     // thin arcs sweep in behind the instrument
     .add(arcs, { draw: ['0 0', '0 1', '1 1'], duration: 1600, delay: stagger(90), ease: 'inOut(3)' }, 760)
 
-    // the candidate field arrives from the centre outwards, each world
-    // growing from a point — a circle scaled from 0 is never a square
+    // the candidate field arrives from the centre outwards
     .add('.boot-particle', {
-      opacity: [0, t => +t.dataset.op],
+      opacity: [0, t => 0.35 + Number(t.getAttribute('r')) * 0.22],
       scale: [0, 1], duration: 620,
       delay: stagger(14, { grid: [GRID, GRID], from: 'center' }), ease: 'out(3)',
     }, 900)
@@ -188,17 +167,15 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     .add('.boot-readout, .boot-meter, .boot-corner', { opacity: 0, duration: 420 }, 3560)
     .add(root,           { opacity: 0, duration: 520, ease: 'outQuad' }, 3680);
 
-  if (HOLD) { tl.pause(); tl.seek(3300); }   // assembled, before the hand-over
-
   /* Blend composition: every particle keeps drifting on its own clock, and the
      drifts add rather than replace, so the field never snaps between states. */
   setTimeout(() => {
     if (done) return;
     animate('.boot-particle', {
-      x: () => utils.random(-38, 38),
-      y: () => utils.random(-38, 38),
-      rotate: () => utils.random(-75, 75),      // enough to tilt a ring, not spin it
-      scale: () => utils.random(0.65, 1.5),
+      x: () => utils.random(-70, 70),
+      y: () => utils.random(-70, 70),
+      rotate: () => utils.random(-180, 180),
+      scale: () => utils.random(0.5, 1.7),
       duration: () => utils.random(600, 1300),
       composition: 'blend',
       ease: 'inOut(2)',
