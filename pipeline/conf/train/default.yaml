@@ -5,6 +5,16 @@ epochs: 200
 shuffle_buffer: 1024
 prefetch: AUTOTUNE
 
+# Models trained per fold, averaged before calibration. At 1 a fold's score is a
+# single seed draw and the run carries no measure of its own reseeding noise —
+# which is what stage 10.5 needs more than 1 for: its outcome table is read
+# against a floor, and a floor from one draw is not a floor.
+#
+# Declared here rather than only defaulted in code so that overriding it works
+# at all: Hydra's struct mode refuses a CLI override of a key the config never
+# declared. Left at 1 so every existing run reproduces unchanged.
+n_models_per_fold: 1
+
 # mixed_float16 on the GPU burst (2-3x on Tensor Cores). Off by default:
 # neutral-at-best on CPU/Metal, and the output layer is already fp32-pinned.
 mixed_precision: false

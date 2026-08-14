@@ -66,10 +66,12 @@ from exoplanet_hunter.models import (
 )
 from exoplanet_hunter.training.calibration import PlattScaler, expected_calibration_error
 from exoplanet_hunter.training.mlflow_utils import (
+    MEMBER_SCORE_PREFIX,
     keras_callbacks,
     log_classification_artifacts,
     log_config,
     log_history,
+    member_checkpoint_name,
     setup_mlflow,
     start_root_run,
 )
@@ -307,7 +309,7 @@ def _run_cnn_fold(
     cal_path: Path,
     results_dir: Path,
     fold_idx: int,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Train one CNN on one fold, streaming all three splits from the shards."""
     import tensorflow as tf
 
@@ -378,14 +380,6 @@ def _run_cnn_fold(
     val_ds = make_dataset(shards, split=Split.VAL, **common)
     test_ds = make_dataset(shards, split=Split.TEST, **common)
 
-    model = build_cnn_dualview(
-        cfg.model,
-        global_input_length=metadata.global_bins,
-        local_input_length=metadata.local_bins,
-        aux_input_dim=aux_dim,
-    )
-    optimizer = instantiate(cfg.train.optimizer)
-
     if cfg.train.loss.type == "binary_crossentropy":
         loss = tf.keras.losses.BinaryCrossentropy()
     elif cfg.train.loss.type == "focal":
@@ -407,40 +401,84 @@ def _run_cnn_fold(
         class_weight = dict(zip(classes.tolist(), weights.tolist(), strict=False))
         log.info("[fold %d] class_weight=%s", fold_idx, class_weight)
 
-    metrics_map = {
-        "accuracy": "accuracy",
-        "auc": tf.keras.metrics.AUC(name="auc"),
-        "precision": tf.keras.metrics.Precision(name="precision"),
-        "recall": tf.keras.metrics.Recall(name="recall"),
-    }
-    model.compile(
-        optimizer=optimizer,
-        loss=loss,
-        metrics=[metrics_map[m] for m in cfg.train.metrics if m in metrics_map],
-    )
+    n_models = max(1, int(OmegaConf.select(cfg.train, "n_models_per_fold") or 1))
 
-    history = model.fit(
-        train_ds,
-        validation_data=val_ds,
-        epochs=int(cfg.train.epochs),
-        callbacks=keras_callbacks(cfg.train, ckpt_path),
-        class_weight=class_weight,
-        verbose=2,
-    )
-    log_history(history.history, results_dir)
+    def fit_member(member: int) -> tuple[np.ndarray, np.ndarray]:
+        """Train one member and return its **uncalibrated** val and test scores.
 
-    # Score what ships: the checkpoint on disk is the serving artefact, and
-    # in-memory weights after fit() are not guaranteed to match it (observed
-    # drift on cebb0fe6). All metrics/calibrators below describe this file.
-    model = tf.keras.models.load_model(str(ckpt_path), compile=False)
+        Averaging n independent draws shrinks seed variance by ~sqrt(n) and, more
+        to the point here, lets the run report the spread it averaged over — a
+        bar computed from one draw is not a bar. The branch trainer has done this
+        since stage 4; the dual-view one could not, which is why stage 10.5's
+        ensemble had no way to carry its own variance estimate (roadmap 4.1a).
+        """
+        # Reseeded only when there is more than one member. At n=1 this path
+        # must stay bit-identical to every dual-view run before 2026-08-14,
+        # including the incumbent's — a re-seed here would silently move the
+        # baseline every later result is compared against.
+        if n_models > 1:
+            tf.keras.utils.set_random_seed(int(cfg.seed) * 1_000 + member)
+
+        model = build_cnn_dualview(
+            cfg.model,
+            global_input_length=metadata.global_bins,
+            local_input_length=metadata.local_bins,
+            aux_input_dim=aux_dim,
+        )
+        # Both are per-member and neither may be hoisted: an optimizer carries
+        # slot variables, and Keras metric objects accumulate state across the
+        # models they are attached to. Sharing either would make member 1's
+        # reported metrics a function of member 0's training.
+        metrics_map: dict[str, Any] = {
+            "accuracy": "accuracy",
+            "auc": tf.keras.metrics.AUC(name="auc"),
+            "precision": tf.keras.metrics.Precision(name="precision"),
+            "recall": tf.keras.metrics.Recall(name="recall"),
+        }
+        model.compile(
+            optimizer=instantiate(cfg.train.optimizer),
+            loss=loss,
+            metrics=[metrics_map[m] for m in cfg.train.metrics if m in metrics_map],
+        )
+
+        member_ckpt = ckpt_path.parent / member_checkpoint_name(member, n_models, ckpt_path.name)
+        history = model.fit(
+            train_ds,
+            validation_data=val_ds,
+            epochs=int(cfg.train.epochs),
+            callbacks=keras_callbacks(cfg.train, member_ckpt),
+            class_weight=class_weight,
+            verbose=2,
+        )
+        log_history(
+            history.history,
+            results_dir if n_models == 1 else results_dir / f"member_{member}",
+        )
+
+        # Score what ships: the checkpoint on disk is the serving artefact, and
+        # in-memory weights after fit() are not guaranteed to match it (observed
+        # drift on cebb0fe6). All metrics/calibrators below describe this file.
+        fitted = tf.keras.models.load_model(str(member_ckpt), compile=False)
+        mlflow.log_artifact(str(member_ckpt))
+        return (
+            np.atleast_1d(fitted.predict(val_ds, verbose=0).squeeze()),
+            np.atleast_1d(fitted.predict(test_ds, verbose=0).squeeze()),
+        )
+
+    members = [fit_member(i) for i in range(n_models)]
+    val_members = np.stack([m[0] for m in members])
+    test_members = np.stack([m[1] for m in members])
 
     # Unshuffled streams yield examples in ascending index-row order, so
     # sort the fold indices the same way for positional alignment with
     # predict() output.
     val_y = y[np.sort(val_idx)]
     test_y = y[np.sort(test_idx)]
-    val_score = model.predict(val_ds, verbose=0).squeeze()
-    test_score = model.predict(test_ds, verbose=0).squeeze()
+    # One calibrator over the averaged score, not n calibrators averaged: the
+    # ensemble is the thing being served and the thing being measured, so the
+    # Platt fit has to describe it rather than any one member.
+    val_score = val_members.mean(axis=0)
+    test_score = test_members.mean(axis=0)
 
     calibrator = PlattScaler.from_validation(val_score, val_y)
     val_score_cal = calibrator.predict(val_score)
@@ -480,7 +518,7 @@ def _run_cnn_fold(
     import pandas as pd
 
     test_rows = np.sort(test_idx)
-    pd.DataFrame(
+    frame = pd.DataFrame(
         {
             "row": test_rows,
             "tic_id": groups[test_rows],
@@ -489,15 +527,30 @@ def _run_cnn_fold(
             "prob_raw": np.atleast_1d(test_score),
             "prob_calibrated": np.atleast_1d(test_score_cal),
         }
-    ).to_parquet(ckpt_path.parent / "predictions.parquet", index=False)
+    )
+    # Each member's own uncalibrated score, so the pooled out-of-fold statistic
+    # can be re-formed one member at a time and its spread read as the run's
+    # reseeding sd — the same `member_score_N` contract the branch trainer
+    # writes, so one reader serves both.
+    if n_models > 1:
+        for member in range(n_models):
+            frame[f"{MEMBER_SCORE_PREFIX}{member}"] = test_members[member]
+    frame.to_parquet(ckpt_path.parent / "predictions.parquet", index=False)
 
     log_classification_artifacts(
         test_y, test_score_cal, threshold=best_threshold, out_dir=results_dir
     )
-    mlflow.log_artifact(str(ckpt_path))
+    # The checkpoints are logged inside `fit_member`, one per member, because
+    # past n=1 there is no single file at `ckpt_path` to log — the members are
+    # numbered. Logging it here as well used to be harmless duplication at n=1
+    # and became a crash at n>1.
     mlflow.log_artifact(str(cal_path))
 
     return {
+        # The spread the ensemble averaged over. A bar computed from one draw is
+        # not a bar, and stage 10.5's outcome table is read against one.
+        "n_models_per_fold": n_models,
+        "model_roc_auc": [float(roc_auc_score(test_y, m)) for m in test_members],
         "test_roc_auc": float(roc_auc_score(test_y, test_score_cal)),
         "test_pr_auc": float(average_precision_score(test_y, test_score_cal)),
         "test_f1": float(
@@ -523,12 +576,28 @@ def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
         "platt_a",
         "platt_b",
     )
-    summary: dict[str, dict[str, float]] = {}
+    summary: dict[str, dict[str, Any]] = {}
     for k in keys:
         vals = np.array([m[k] for m in fold_rows], dtype=float)
         summary[k] = {"mean": float(np.mean(vals)), "std": float(np.std(vals))}
         mlflow.log_metric(f"cv_{k}_mean", summary[k]["mean"])
         mlflow.log_metric(f"cv_{k}_std", summary[k]["std"])
+
+    # The spread across members, in the schema `train_branches` already writes,
+    # so one reader serves both trainers. Without it an ensemble built from this
+    # model has no floor of its own and would have to borrow a single draw's —
+    # which is not a floor, it is a guess with an error bar drawn on it.
+    per_fold = [list(r.get("model_roc_auc") or []) for r in fold_rows]
+    fold_means = [float(np.mean(m)) for m in per_fold if m]
+    within = [float(np.std(m, ddof=1)) for m in per_fold if len(m) > 1]
+    summary["variance"] = {
+        "n_models_per_fold": int(fold_rows[0].get("n_models_per_fold", 1)) if fold_rows else 1,
+        "n_folds": len(fold_rows),
+        # None rather than 0.0 when there is one member per fold: "nobody
+        # measured this" must not read as "the noise is zero".
+        "seed_sd": float(np.mean(within)) if within else None,
+        "fold_sd": float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else None,
+    }
 
     cv_root.mkdir(parents=True, exist_ok=True)
     summary_path = cv_root / "cv_summary.json"

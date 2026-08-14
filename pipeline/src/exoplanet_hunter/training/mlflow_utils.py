@@ -206,6 +206,24 @@ def log_classification_artifacts(
     mlflow.log_artifact(str(cm_path))
 
 
+#: Column prefix for each member's own uncalibrated score in a run's
+#: `predictions.parquet`. Defined here rather than in either trainer because
+#: **both** write it and one reader consumes both — the stage-8 table and the
+#: variance floors are computed by re-forming the pooled out-of-fold set one
+#: member at a time, and two definitions that drifted apart would silently
+#: change how many draws a bar was computed from.
+MEMBER_SCORE_PREFIX = "member_score_"
+
+
+def member_checkpoint_name(index: int, n_models: int, base: str) -> str:
+    """One model per fold keeps the historical filename; an ensemble numbers them.
+
+    Leaving the single-model name untouched is what lets every run made before
+    multi-member training existed still be found, scored and served by path.
+    """
+    return base if n_models <= 1 else f"model_{index}_{base}"
+
+
 def log_history(history: dict[str, list[float]], out_dir: Path) -> None:
     """Plot Keras learning curves and log to MLflow."""
     out_dir.mkdir(parents=True, exist_ok=True)

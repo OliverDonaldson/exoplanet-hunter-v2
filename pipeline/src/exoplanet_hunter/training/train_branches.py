@@ -44,6 +44,10 @@ from exoplanet_hunter.eval.metrics import classification_metrics
 from exoplanet_hunter.eval.observation_bias import measure_observation_bias
 from exoplanet_hunter.models.cnn_branches import build_cnn_branches
 from exoplanet_hunter.training.calibration import PlattScaler, expected_calibration_error
+from exoplanet_hunter.training.mlflow_utils import (
+    MEMBER_SCORE_PREFIX,
+    member_checkpoint_name,
+)
 from exoplanet_hunter.training.splits import (
     assigned_group_kfold,
     assignment_mask,
@@ -88,15 +92,10 @@ VARIANCE_COMPONENTS = (
     ("model_gate_recall_at_1pct_fpr", "gate_recall_"),
 )
 
-#: Column prefix for each member's own uncalibrated score in
-#: `predictions.parquet`. They exist so the pooled out-of-fold statistic can be
-#: re-formed one member at a time — see `_pooled_member_draws`.
-MEMBER_SCORE_PREFIX = "member_score_"
-
 
 def _checkpoint_name(index: int, n_models: int) -> str:
     """One model per fold keeps the historical filename; an ensemble numbers them."""
-    return CHECKPOINT_NAME if n_models <= 1 else f"model_{index}_{CHECKPOINT_NAME}"
+    return member_checkpoint_name(index, n_models, CHECKPOINT_NAME)
 
 
 class _MemberRun(NamedTuple):

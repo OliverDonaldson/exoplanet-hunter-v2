@@ -43,3 +43,9 @@ cross_validation:
   shuffle: true
   random_state: ${seed}
   val_frac_within_fold: 0.12
+  # Path to a group->fold map that pins the outer split, replacing this run's
+  # own StratifiedGroupKFold. null keeps the historical behaviour. Set it when
+  # this trainer and train_branches.py must partition identically over their two
+  # different shard sets — no shared seed can do that, because they are not the
+  # same population. Rows the map does not cover are dropped from CV.
+  fold_assignment: null
