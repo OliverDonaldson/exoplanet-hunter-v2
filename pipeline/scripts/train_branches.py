@@ -93,6 +93,16 @@ def main() -> None:
         "attribution), e.g. 'periodogram' or 'gap_view,centroid_view'. Recorded in "
         "run_config.model_config; an unrecognised name raises",
     )
+    parser.add_argument(
+        "--fold-assignment",
+        type=Path,
+        default=None,
+        help="pin the outer split to a group->fold map built by "
+        "`splits.build_fold_assignment`, instead of this run's own "
+        "StratifiedGroupKFold. Rows whose group the map does not cover are DROPPED "
+        "from CV. Required whenever two trainers over different shard sets must "
+        "partition identically — stage 10.5's ensemble is measured across both",
+    )
     args = parser.parse_args()
 
     if not args.model_config.exists():
@@ -115,6 +125,7 @@ def main() -> None:
         augment=_augment_config(raw),
         baseline_intervention=args.baseline_intervention,
         baseline_strata=args.baseline_strata,
+        fold_assignment=str(args.fold_assignment) if args.fold_assignment else None,
     )
     if args.init_filters is not None:
         # Overridden in the resolved config rather than the YAML, so the run

@@ -44,7 +44,12 @@ from exoplanet_hunter.eval.metrics import classification_metrics
 from exoplanet_hunter.eval.observation_bias import measure_observation_bias
 from exoplanet_hunter.models.cnn_branches import build_cnn_branches
 from exoplanet_hunter.training.calibration import PlattScaler, expected_calibration_error
-from exoplanet_hunter.training.splits import stratified_inner_split
+from exoplanet_hunter.training.splits import (
+    assigned_group_kfold,
+    assignment_mask,
+    load_fold_assignment,
+    stratified_inner_split,
+)
 from exoplanet_hunter.utils.logging import get_logger
 from exoplanet_hunter.utils.provenance import git_provenance
 from exoplanet_hunter.validation.leakage import drop_quarantined, load_quarantine
@@ -270,6 +275,14 @@ class CVConfig:
     #: for propensity weighting and 8 reaches +0.0060 for stratified sampling,
     #: measured on the real TESS slice 2026-08-12.
     baseline_strata: int = 16
+    #: Path to a group→fold map that pins the outer split, or None for this
+    #: run's own `StratifiedGroupKFold`. Stage 10.5 needs two trainers over two
+    #: different shard sets to partition identically, which no shared seed can
+    #: deliver. Recorded here rather than passed loose so it lands in
+    #: `run_config`: stage 8 shipped two arms distinguishable only by
+    #: `n_examples` because the thing that differed between them was a path the
+    #: summary never recorded, and this is that same defect waiting to happen.
+    fold_assignment: str | None = None
 
 
 def _resolved_model_config(model_cfg: object) -> dict[str, Any] | None:
@@ -652,6 +665,34 @@ def run_cv(
             before,
             len(index),
         )
+    # Restriction runs *before* the intervention, not after. Propensity weights
+    # and the stratified resample are both fitted to whatever population they
+    # are handed; computing them over rows the fold assignment then discards
+    # would leave the surviving rows carrying weights calibrated for a
+    # population that never trained.
+    fold_map: dict[int, int] | None = None
+    if config.fold_assignment is not None:
+        fold_map, fold_provenance = load_fold_assignment(Path(config.fold_assignment))
+        keep_column = "group_tic" if "group_tic" in index.columns else "tic_id"
+        keep = assignment_mask(index[keep_column].to_numpy(), fold_map)
+        log.info(
+            "[train-branches] fold assignment %s: %d of %d rows covered (%d dropped), "
+            "%d groups over %d folds",
+            config.fold_assignment,
+            int(keep.sum()),
+            len(index),
+            int((~keep).sum()),
+            fold_provenance.get("n_groups", len(fold_map)),
+            fold_provenance.get("n_folds", config.n_splits),
+        )
+        if not keep.any():
+            raise ValueError(
+                f"the fold assignment at {config.fold_assignment} covers none of this "
+                "shard set's rows — it was almost certainly built over a different "
+                "population, and training on zero rows would be reported as a run"
+            )
+        index = index.loc[keep].reset_index(drop=True)
+
     index, sample_weights, intervention = _apply_baseline_intervention(index, config)
     y = index["label"].to_numpy().astype(int)
     # `group_tic` when the shard set carries it, `tic_id` otherwise.
@@ -678,13 +719,18 @@ def run_cv(
     # all 11 shards, and four live caches per fold.
     base = parse_viewset_shards(list_shards(shard_dir), metadata)
 
-    splitter = StratifiedGroupKFold(
-        n_splits=config.n_splits, shuffle=True, random_state=config.seed
-    )
+    # A pinned assignment replays one partition in both trainers; without one
+    # each builds its own over its own shard set, and two different populations
+    # never partition alike whatever the seed.
+    if fold_map is not None:
+        folds = assigned_group_kfold(groups, fold_map, n_splits=config.n_splits)
+    else:
+        folds = StratifiedGroupKFold(
+            n_splits=config.n_splits, shuffle=True, random_state=config.seed
+        ).split(np.arange(len(y)), y, groups)
     rows: list[dict] = []
     predictions: list[pd.DataFrame] = []
-    positions = np.arange(len(y))
-    for fold, (trainval, test_idx) in enumerate(splitter.split(positions, y, groups)):
+    for fold, (trainval, test_idx) in enumerate(folds):
         train_idx, val_idx = stratified_inner_split(
             trainval, y, groups, val_frac=config.val_frac, seed=config.seed * 1000 + fold
         )

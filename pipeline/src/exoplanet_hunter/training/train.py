@@ -74,7 +74,12 @@ from exoplanet_hunter.training.mlflow_utils import (
     start_root_run,
 )
 from exoplanet_hunter.training.precision import apply_precision_policy
-from exoplanet_hunter.training.splits import stratified_inner_split
+from exoplanet_hunter.training.splits import (
+    assigned_group_kfold,
+    assignment_mask,
+    load_fold_assignment,
+    stratified_inner_split,
+)
 from exoplanet_hunter.utils import ProjectPaths, get_logger, set_global_seed
 
 log = get_logger(__name__)
@@ -189,19 +194,43 @@ def _train_cnn_cv(cfg: DictConfig, paths: ProjectPaths) -> float:
     metadata = ShardMetadata.load(shard_dir)
     shards = list_shards(shard_dir)
     index = load_index(shard_dir)
-    y = index["label"].to_numpy().astype(int)
-    groups = index["tic_id"].to_numpy()
-    aux_cols = [c for c in index.columns if c.startswith("aux_")]
-    aux_all = index[aux_cols].to_numpy(dtype=np.float32) if aux_cols else None
 
     cv_cfg = cfg.model.cross_validation
     n_splits = int(cv_cfg.n_splits)
     val_frac = float(cv_cfg.val_frac_within_fold)
-    sgkf = StratifiedGroupKFold(
-        n_splits=n_splits,
-        shuffle=bool(cv_cfg.shuffle),
-        random_state=int(cv_cfg.random_state),
-    )
+
+    # An externally pinned outer split. This trainer's shard set and the branch
+    # trainer's are different populations — 5,380 against 5,426, sharing 5,375 —
+    # so no shared seed makes them partition alike, and an ensemble measured
+    # across two different out-of-fold populations is not a joint measurement.
+    # See `splits.build_fold_assignment` and roadmap 4.1a.
+    fold_assignment = OmegaConf.select(cv_cfg, "fold_assignment")
+    fold_map: dict[int, int] | None = None
+    if fold_assignment:
+        fold_map, fold_provenance = load_fold_assignment(Path(str(fold_assignment)))
+        keep = assignment_mask(index["tic_id"].to_numpy(), fold_map)
+        log.info(
+            "[train-cnn-cv] fold assignment %s: %d of %d rows covered (%d dropped), "
+            "%d groups over %d folds",
+            fold_assignment,
+            int(keep.sum()),
+            len(index),
+            int((~keep).sum()),
+            fold_provenance.get("n_groups", len(fold_map)),
+            fold_provenance.get("n_folds", n_splits),
+        )
+        if not keep.any():
+            raise ValueError(
+                f"the fold assignment at {fold_assignment} covers none of this shard "
+                "set's rows — it was almost certainly built over a different population, "
+                "and training on zero rows would still be reported as a run"
+            )
+        index = index.loc[keep].reset_index(drop=True)
+
+    y = index["label"].to_numpy().astype(int)
+    groups = index["tic_id"].to_numpy()
+    aux_cols = [c for c in index.columns if c.startswith("aux_")]
+    aux_all = index[aux_cols].to_numpy(dtype=np.float32) if aux_cols else None
 
     with start_root_run(f"cnn-cv-{cfg.data.name}") as parent:
         log_config(cfg)
@@ -218,7 +247,16 @@ def _train_cnn_cv(cfg: DictConfig, paths: ProjectPaths) -> float:
 
         fold_rows: list[dict] = []
         idx = np.arange(len(y))
-        for fold_idx, (trainval_idx, test_idx) in enumerate(sgkf.split(idx, y, groups)):
+        folds = (
+            assigned_group_kfold(groups, fold_map, n_splits=n_splits)
+            if fold_map is not None
+            else StratifiedGroupKFold(
+                n_splits=n_splits,
+                shuffle=bool(cv_cfg.shuffle),
+                random_state=int(cv_cfg.random_state),
+            ).split(idx, y, groups)
+        )
+        for fold_idx, (trainval_idx, test_idx) in enumerate(folds):
             inner_seed = int(cfg.seed) * 1000 + fold_idx
             train_idx, val_idx = stratified_inner_split(
                 trainval_idx, y, groups, val_frac=val_frac, seed=inner_seed
