@@ -18,8 +18,10 @@ Start with [OPERATING.md](OPERATING.md) if you want to *run* something, and
 | [data_provenance.md](data_provenance.md) | catalogue sources, label definitions, known archive quirks |
 | [pipeline_diagram.md](pipeline_diagram.md) | the refresh DAG |
 | [roadmap.md](roadmap.md) | the ExoMiner-inspired rebuild, staged — and the permanent old→new stage-number mapping |
-| [handover-2026-08-09.md](handover-2026-08-09.md) | **start here** — current stage, the open decisions, and the operational facts that live nowhere else |
-| [handover-2026-08-08.md](handover-2026-08-08.md) | the previous session's brief: what is being built, what "finished" means, the non-negotiables, the trap list. Dated, not stale — do not edit |
+| [handover-2026-08-14.md](handover-2026-08-14.md) | **start here** — stage 8 closed, stage 10.5 next, the open decisions, and the operational facts that live nowhere else |
+| [plan-2026-08-09.md](plan-2026-08-09.md) | the ordered plan from here to a finished product, with a kill criterion on every item |
+| [handover-stage-8-close.md](handover-stage-8-close.md) | superseded by 2026-08-14, which corrects two of its statements. Dated, not stale — do not edit |
+| [handover-stage-8.md](handover-stage-8.md), [handover-2026-08-09.md](handover-2026-08-09.md), [handover-2026-08-08.md](handover-2026-08-08.md) | earlier session briefs: what is being built, what "finished" means, the non-negotiables, the trap list. Dated, not stale — do not edit |
 | [audit-2026-08-07.md](audit-2026-08-07.md) | the full audit of the model and every recorded metric — read before interpreting any earlier result |
 | [figures/](figures) | generated performance and provenance figures |
 

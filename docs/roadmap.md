@@ -204,13 +204,13 @@ in HANDOVER.md.
 |---|---|---|
 | **1** *(old 0)* housekeeping, landmines | **done** | 71 GB staging reclaimed; two scripts that could silently write bad data deleted; four audit items fixed; TRICERATOPS vendored |
 | **2** *(old 1)* ExoMiner-grade inputs | **done** 2026-08-05 | 5,423 examples × 11 branches, 3.6 GB DV archive, DV scalars, Gaia RUWE, FFI recovery, seventh gate |
-| **3** *(old A)* re-baselined incumbent summary | **done** 2026-08-08; **its second half was not done until 2026-08-12** | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`. This row read "the gate returns decisions again instead of refusing" for four days and **that was false** — the summary existed but nothing routed the gate to it, so `promotion_gate.py` went on refusing every candidate on paperwork. `--incumbent-summary` closes it; see *The promotion gate was not calibrated* below |
+| **3** *(old A)* re-baselined incumbent summary | **done** 2026-08-08; **its second half was not done until 2026-08-12** | `evaluate.py summarise` → `models/cv/incumbent-rebaselined/`. This row read "the gate returns decisions again instead of refusing" for four days and **that was false** — the summary existed but nothing routed the gate to it, so `promotion_gate.py` went on refusing every candidate on paperwork. `--incumbent-summary` closes it; see *The promotion gate was not calibrated* below. **Re-verified 2026-08-14**: it regenerates byte-identical, and the "the label change invalidates it" note carried against it was wrong on both counts — see the stage 8 result |
 | **4** *(old 2(a))* per-diagnostic branches | runs 1, 2, 3 and the capacity arm all **REJECTED** — stage closed | run 3 reached the incumbent on TESS AUC (−0.0030, inside noise) and is better calibrated, but catches **less than half** as many planets at the shortlist threshold (0.145 vs 0.307). The capacity arm then falsified capacity as the cause: +19% params, paired d=−0.44 |
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
 | **6** recall variance + re-baseline | **done** 2026-08-09 | `pooled_gate_recall_seed_sd` **0.0292** → **a recall @1% FPR margin under ~0.034 is not a decision**. Run 3's rejection is sound at 4.8× the floor; the capacity arm's 0.145 → 0.236 was **real, not noise**, and stays unactionable. `models/cv/branches-20260808-rebaseline` is the control for every stage after it |
 | **7i** *(old D)* offline control-arm harness | **done** 2026-08-12 — criterion **NOT met**; the branch line has no measured advantage on either criterion | the instrument: `clean`/`flatten` → `inject_box_transit` → `build_view_set` → `write_viewset_shards` → `make_viewset_dataset` → a run directory's fold members and calibrator. It is **stage 8's measuring instrument**, which is why it leads |
 | **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving |
-| **8** *(old 3)* labels and negatives | not started, **moved ahead of stage 9**; runs second, behind 7i only | owns the observation-selection problem; its interventions change the training distribution, so stage 9 measured before it would need re-measuring |
+| **8** *(old 3)* labels and negatives | **done** 2026-08-14 — four arms measured 2026-08-13, prediction 4 on 2026-08-14; **all four pre-registered predictions falsified** | **propensity weighting eliminated the architecture's amplification of the baseline confound at no measurable cost** (gap +0.1265 → −0.0071, 3.3× its bar). Synthetic negatives null; arm S unreadable by construction. The control-arm split also fell (−0.0966, 1.3× its bar) but **threshold-free host-scoring did not move**, so that second win is recorded as *qualified*. Group (a), external catalogue negatives, deliberately not done |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
 | **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
 | **11** *(old 4)* serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
@@ -2105,9 +2105,9 @@ untouched and `ca906040` stays served.
 
 ### Stage 8 result — the amplification is reachable, the labels are not (2026-08-13)
 
-Four arms, `--n-models-per-fold 3`, ~2 h each. **Prediction 4 is still
-outstanding** — the control-arm split needs the stage 7i harness, which is the
-only piece of this stage not yet run.
+Four arms, `--n-models-per-fold 3`, ~2 h each. **Prediction 4 was measured on
+2026-08-14** through the stage 7i harness and is written up below; the stage is
+now complete.
 
 **The evaluation population is the full out-of-fold TESS slice the before-reading
 was taken on, n=2,399, identical rows for every arm.** Recorded because the first
@@ -2157,14 +2157,14 @@ reading" was correct and incomplete: it also makes the arm unreadable against a
 fixed evaluation slice. **A resampling intervention has to keep the evaluation
 population whole even when it changes the training one.**
 
-**Three of four predictions falsified.**
+**All four predictions falsified.**
 
 | # | prediction | outcome |
 |---|---|---|
 | 1 | N moves the gap most | **falsified** — N moved it least (0.1×), P most (3.3×) |
 | 2 | P moves the label correlation but not the gap | **falsified**, exactly backwards |
 | 3 | at least one arm costs shortlist recall beyond its floor | **falsified** — neither comparable arm did |
-| 4 | the control-arm split does not move | **not yet measured** |
+| 4 | the control-arm split does not move | **falsified** — it fell −0.0966, 1.3× its bar. See below, and read the limit with it |
 
 **Prediction 3 deserves its explanation, because it was written as a trap and the
 trap caught the wrong thing.** The pre-registration reasoned that an intervention
@@ -2176,6 +2176,86 @@ predicts the label in a test set drawn from those labels; but removing only the
 justify* — is free by construction, because over-use beyond the labels carries no
 predictive power on a test set built from them. Costless was the correct
 expectation for what P actually did.
+
+#### Prediction 4 — the split fell, and the construct behind it did not (2026-08-14)
+
+The stage 7i harness on both `stage8-control` and `stage8-propensity`: **580
+baseline-matched hosts x 3 periods = 1,740 rows per lane, 0 unscored**, the same
+sizing as stage 7i. The draw is byte-identical to stage 7i's — both arms' fold
+maps match `branches-20260808-rebaseline`'s exactly, so the seed-42 matcher
+reproduces the same host set. Verified by `tic_id` checksum in pandas *before*
+launching, rather than read out of the log afterwards.
+
+| lane | F1 cut | pass | planet hosts | FP hosts | **split** |
+|---|---:|---:|---:|---:|---:|
+| stage 7i, `branches-20260808-rebaseline` | 0.4486 | 0.1943 | 0.2540 | 0.1345 | **+0.1195** |
+| stage 8 control | 0.4047 | 0.2730 | 0.3575 | 0.1885 | **+0.1690** |
+| stage 8 propensity | 0.3841 | 0.2201 | 0.2563 | 0.1839 | **+0.0724** |
+
+**Prediction 4 is falsified.** Propensity against its own same-code control is
+**−0.0966**: **1.3x** the 0.0720 split bar pre-registered in stage 7i, and
+**1.6x** a 0.0592 paired bar computed on these hosts. A paired bootstrap over the
+580 hosts gives 95% CI **[−0.157, −0.039]**, not crossing zero. Per the
+pre-registered outcome table this reads as *"propensity weighting reduced
+host-scoring as well as amplification. A second, independent win."*
+
+**Running the control was load-bearing.** Stage 8's control splits at **+0.1690**,
+not the +0.1195 stage 7i measured on the same hosts with the same code — a
+**+0.0494** move from reseeding alone. Against the historical +0.1195 the
+propensity arm's +0.0724 is −0.0471, *inside* the bar and readable as level. The
+pre-registered comparison is against the same-code control, which is precisely
+what the control arm exists for; had only the propensity arm been run, that drift
+would have been credited to the intervention.
+
+**The limit, recorded because omitting it would overstate the result.** The split
+is a *thresholded* statistic and the arms do not sit at the same operating point.
+Threshold-free, on the same hosts, the model's ability to tell a planet host from
+an FP host on a transit-free light curve is **unchanged**:
+
+| lane | host-AUC, transit-free | 95% CI |
+|---|---:|---|
+| stage 7i rebaseline | 0.5876 | 0.5429–0.6329 |
+| stage 8 control | 0.6234 | 0.5812–0.6688 |
+| stage 8 propensity | 0.6045 | 0.5566–0.6451 |
+
+Paired over the 580 hosts, propensity minus control is **−0.0190, 95% CI
+[−0.060, +0.019]**, crossing zero at p≈0.33 — while the split difference over the
+*same* resamples does not. Propensity's scores on this population are shifted
+down (median 0.187 against 0.248) and its F1 cut sits at the **78.0th** percentile
+of them against the control's **72.7th**; a stricter operating point mechanically
+shrinks a planet-minus-FP pass split.
+
+**So the pre-registered statistic moved and the construct it stands for did
+not.** This is post-hoc and does **not** overturn the pre-registered reading —
+the same discipline stage 7i applied to its own common-cut diagnostic. What it
+does is set the terms on which the win may be banked: **not until a
+threshold-free measurement confirms it.** Recorded as a **qualified** second win,
+and the qualification is not optional.
+
+**The mechanism prediction 4 assumed does not hold either, and the reason is
+worth keeping.** It reasoned that baseline dependence and host-scoring are
+different defects because stage 7i showed the split survives baseline matching.
+But matching removes the confound from the *host draw*; it does not remove the
+*model's* learned reliance on baseline, and those are different operations. On
+these matched hosts the control's score↔baseline correlation is **+0.0269** — the
+matcher has already closed that channel (residual corr(baseline, label)
+**+0.0452**), so there was nothing left there for the intervention to remove.
+Propensity's is **−0.2528** on the same inputs while remaining **+0.3803** on the
+evaluation slice: the arm's baseline response **changes sign between the two
+populations**. Because the matcher's residual leaves planet hosts at a slightly
+longer median baseline (1,259 d against 1,118 d), a negative dependence suppresses
+planet hosts preferentially — consistent with the observed asymmetry, planet-host
+pass **−0.1011** against FP-host pass **−0.0046**. These are transit-free
+synthetic inputs and out of distribution, so the sign flip is not by itself a
+defect; it is unexplained, and it is the most likely thing driving the split.
+
+**One number here rests on a single draw.** The split's reseeding noise is
+characterised by exactly one control retrain (+0.0494), and that is half the
+effect being claimed — the same thinness already recorded against the three-draw
+floors below.
+
+Reproduction: `~/Downloads/.stage8-scratch/prediction4.py` rebuilds every figure
+in this subsection from the two `results/control_arm/stage8-*.parquet` files.
 
 **Two defects in the run's own record, found while reading it.**
 
@@ -2190,7 +2270,37 @@ expectation for what P actually did.
 
 **Cost, for future sizing.** ~2 h per arm at `--n-models-per-fold 3` on this
 machine, against the ~70 min the 2026-08-08 handover quoted — that figure is out
-by ~1.7× and should not be used for planning.
+by ~1.7× and should not be used for planning. The prediction-4 harness came in
+**at** its estimate for once: 48 min for the control arm and 49 for propensity,
+1 h 37 for both, against the ~50 min per arm stage 7i recorded.
+
+**The stage-3 incumbent summary needed no regeneration, and the reason it was
+thought to is worth recording.** It was carried as outstanding on the grounds
+that *"the label change invalidates it"*. Re-derived 2026-08-14: the summary
+regenerates **byte-identical** to the committed
+`models/cv/incumbent-rebaselined/cv_summary.json`, because the 2026-08-08 label
+refresh flipped **zero** labels across the 5,703 `tic_id`s common to
+`labels.previous.parquet` and `labels.parquet` — it added two rows and changed
+nothing else, and neither added row is in the incumbent's scored set. **And had
+labels moved, `summarise` could not have propagated it**: `load_predictions`
+re-joins only `mission`, taking `y_true` from the predictions parquet, so the
+label change would have needed `evaluate.py score`, not `summarise`. The
+anticipated label change was group (a), which was never run. The deliverable
+stands satisfied; the rationale attached to it did not survive checking.
+
+**What stage 8 deliberately did not do — decided by Ollie, 2026-08-14.**
+
+1. **External catalogue negatives (group a) were never started and will not be.**
+   EB and brown-dwarf catalogues plus the ephemeris-match test, budgeted at up to
+   8 h against an 8 h kill criterion. Arm P had already delivered the stage's
+   reachable deliverable, so the marginal case was weak. **Recorded as
+   deliberately not done, not as an oversight** — the negatives it would have
+   produced remain available to any later stage that wants them.
+2. **Arm S is not re-run.** Restoring the 680 dropped rows to the *test* split
+   would make it comparable for ~2 h of compute, and the question it would answer
+   has already been answered by P. The structural lesson stands in its place: **a
+   resampling intervention has to keep the evaluation population whole even when
+   it changes the training one.**
 
 **Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
 
