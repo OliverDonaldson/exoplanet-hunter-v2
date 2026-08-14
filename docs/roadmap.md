@@ -6,7 +6,36 @@ The UI redesign stays the locked final step.
 
 We reimplement and credit; we do not vendor their code (NASA NOSA licence).
 
-## Why ExoMiner
+## How to read this file
+
+**This is the single record of the project: what was measured, and what is
+left.** It absorbed `plan-2026-08-09.md` on 2026-08-14 — that document had
+gone stale (it predated stage 10.5 entirely, and its cost model was out by
+1.7x), and two documents disagreeing about what comes next is worse than one
+that is occasionally wrong. The deleted plan remains in git history.
+
+**Numbering.** Sections are `1, 2, 3`; their parts are `1a, 1b` or `3.1, 3.2`;
+sub-parts are `3.2a, 3.2b`. Section 3 is ordered by **when the work happened**,
+so it reads as provenance: each result sits after the pre-registration that
+fixed how it would be read.
+
+**Four conventions that are load-bearing.**
+
+1. **Pre-registration blocks are verbatim and are never rewritten.** They are
+   headed *Pre-registered before …* and carry the date nothing had been run.
+   A result landing outside its pre-registration is reported as falsified, not
+   re-specified. Their stage numbers are the ones current when they were
+   written; new numbers appear only in square brackets.
+2. **`W1`–`W14` are the weakness register** — see 1d. `W` is just *weakness*,
+   numbered and ranked by damage to the product's actual job.
+3. **Stage numbers were remapped once**, on 2026-08-08. The permanent old→new
+   table is 1c; run directories and commit messages still carry old labels.
+4. **Nothing promotes without being asked.** `ca906040` has served since
+   2026-07-19.
+
+## 1. Orientation
+
+### 1a. Why ExoMiner
 
 Its branches target pathologies we have *measured*, not guessed:
 
@@ -25,7 +54,7 @@ original **−0.003** was measured against `expected_transit_count`, the transit
 the ephemeris *predicts*; against the transits actually *captured* it is
 **−0.048**. The conclusion survives the correction, the number does not.
 
-## What we take, and what we do not
+### 1b. What we take, and what we do not
 
 **Adopt.** Per-diagnostic conv branches with scoped scalars; paired variance
 channels; unfolded-transit branch; secondary/centroid/trend/periodogram views;
@@ -47,7 +76,7 @@ own Optuna campaign rejected focal. Their static train/test split — our
 injection-recovery, control arm and since-confirmed holdout are a stronger
 evaluation than they publish, and remain the gate.
 
-## Stage numbering — the mapping, kept permanently
+### 1c. Stage numbering — the permanent old→new mapping
 
 Stages were inserted as they were discovered, so the scheme grew into `0, 1, A,
 2(a), 2(b), 2(c), C, D, 3, 2(d), G, 4, 5` — neither consecutive nor in execution
@@ -81,121 +110,90 @@ what was committed to at the time. Where one of those blocks points forward to a
 stage, the new number is added in **square brackets** — `stage 3 [now 8]` — which
 is an editorial insertion, not a rewrite.
 
-## Execution order — the dependency graph, and why it is not the numbering
+### 1d. The weakness register — what `W1`–`W14` mean
 
-**Raised 2026-08-09: the roadmap is not sequential.** It is correct, and the
-back-and-forth is real rather than cosmetic. Three backward edges existed in the
-plan as written:
+Every weakness the project has measured in itself, ranked by damage to the
+product's actual job: **ranking candidates for follow-up**. Each row is
+measured from this repo's own artefacts. The `W` labels are referenced
+throughout this file and in the handovers, which is the only reason they are
+codes rather than sentences.
 
-| edge | what it meant |
-|---|---|
-| **7 → 11** | stage 7's criterion needs a branch model scoreable from a light curve, which is stage 11's first half, four stages later |
-| **8 → 7** | stage 8 changes the training distribution, so stage 7's attribution numbers are invalidated after they are measured |
-| **9 → 7** | stage 9 adds a branch, so an attribution done at stage 7 describes a branch set that no longer exists |
+Merged here from `plan-2026-08-09.md` on 2026-08-14, with W1's status updated
+for the stage 8 result and W13's for the frontend work having landed.
 
-Each was recorded honestly and none was ever resolved into an *order*. The 7 → 11
-edge was worked around on 2026-08-09 by adopting the offline harness; the other
-two were left as knock-ons to absorb later.
+#### 1d.1 Tier 1 — defeats the product's purpose
 
-**Do not renumber a third time.** The numbers were already reassigned once
-(2026-08-08) and have since become *names*: run directories, commit messages and
-three documents refer to them, and `branches-20260809-drop-unfolded` would need
-two hops to resolve under a third scheme. What was missing was never a numbering
-scheme — it was a stated execution order. **The integers stay as stable
-identities; the order below is what is executed, and it is the primary artefact.**
+| # | weakness | evidence | owner |
+|---|---|---|---|
+| **W1** | **Ranking is driven by observation baseline, and the signal is in the labels** | corr(baseline, label) **+0.278 all, +0.387 TESS**. TESS confirmed planets median 1,495 d vs 430 d for FPs | **stage 8 — done 2026-08-14, half delivered** |
+| **W2** | **The model scores the star, not the transit** | **26.4%** of hosts pass with no injection — 46.7% planet hosts vs 12.3% FP hosts | **stage 7i** measured, **stage 8 did not move it**, **stage 9** attacks |
+| **W3** | **No branch model has ever beaten the incumbent where it is used** | five arms rejected, all on shortlist recall: 0.238 / 0.126 / 0.145 / 0.236 / 0.220 against **0.307** | **stage 10.5** tests *complement*, then **stage 10**, then a written decision |
 
-**One stage genuinely has parts, and splitting it removes every backward edge.**
-Stage 7 owes two different things: an *instrument* (the offline control-arm
-harness) and a *reading* (which branches earn their place). They have opposite
-dependencies — the instrument blocks stage 8, the reading depends on stages 8, 9
-and 10. Sub-steps as `i, ii` are the convention already set for exactly this
-case.
+W1 is the worst thing in the project. For the deployment use it is actively
+counterproductive: it promotes targets that already received follow-up over
+under-observed ones that may deserve it. No architecture can reach it.
 
-| order | stage | depends on | why it sits here |
-|---:|---|---|---|
-| 1 | **7i** offline control-arm harness | nothing outstanding | it is **stage 8's measuring instrument**, not only stage 7's — pre-commitment (d)'s "injection-recovery on matched hosts with baseline held constant" is this harness. Also the only way to get a pre-stage-8 before-reading |
-| 2 | **8** labels and negatives | 7i | the largest measured defect, and it invalidates everything measured before it — so it goes as early as its instrument allows |
-| 3 | **9** difference-image branch | 8 | the last genuine build. After the distribution settles, or it is measured twice |
-| 4 | **10** Optuna re-tune | 8, 9 | "on the winner, after the distribution is settled" — that is the settled architecture *and* the settled labels |
-| 5 | **7ii** branch attribution | 8, 9, 10, 7i | attribution describes a **finished** branch set on a **settled** distribution. Run before any of them it is measuring something about to change, which is what the all-null sweep already spent six hours discovering |
-| 6 | **11** serving parity + explainability | 7ii *(adjacency, not blocking)* | **stage 11's branch-occlusion and stage 7ii's leave-one-out are the same measurement at different granularity** — per-target against per-population. Running them adjacently validates the serving implementation against the population reading instead of leaving two independent attributions to disagree in public |
-| 7 | **12** UI redesign | 11 | presentation only, locked last |
+**Updated 2026-08-14, after stage 8.**
 
-**No edge in that table points backwards.** Stages 1–6 are done and are not in
-it. Stage 3's re-baselined incumbent summary is invalidated by stage 8 and needs
-regenerating — that is a **repeat of a repeatable path**, not a backward edge,
-and keeping stage 3 re-runnable rather than a one-off artefact is what makes it
-so.
+- **W1 is half closed.** The original wording said the label correlation sat
+  *"above every model"*. That is no longer true of arm P: propensity weighting
+  put the branch model **below** its own labels (gap −0.0071 against +0.1265).
+  **Target B — the architecture's amplification — is gone. Target A — the bias
+  in the labels — is untouched and unreachable**, since the label correlation on
+  a frozen evaluation slice is +0.3874 by definition. See 3.9b.
+- **W2 survived stage 8 and is unchanged.** Prediction 4's *split* fell, but the
+  threshold-free measure of the same construct did not move (host-AUC 0.6234 →
+  0.6045, CIs overlapping, p≈0.33). Stage 9 remains its only instrument. See 3.9c.
+- **W3 has a live route that is not stage 10.** Stage 10.5 asks whether the
+  branch line is a *complement* rather than a replacement. A favourable answer
+  reopens nothing about stage 4 — those rejections were about replacement.
 
-**The consequence for stage 7, stated plainly.** Its sweep has already run and is
-all-null; per the sequencing assessment below, no further stage-7 CV compute is
-bought before stage 8. Stage 7i finishes now, stage 7ii runs once, late, on a
-branch set and a distribution that have stopped moving.
+#### 1d.2 Tier 2 — blocks delivery
 
-**One open item is on no stage at all.** The narrow-span, high-count Kepler cell
-(+0.1446, unmoved by two bin resolutions, four fixed input defects, tied odd/even
-weights and a shared tower) is described in this file as "the sharpest
-unexplained thing in the model" and appears in no stage's contents. It needs an
-owner or an explicit decision to leave it unexplained; it is currently neither.
+| # | weakness | evidence | owner |
+|---|---|---|---|
+| **W4** | **A branch model cannot be scored from a light curve at all** | `TargetScorer` builds views with `preprocess.views`, not `preprocess.viewset`; `ScoringEnsemble.from_registry` loads `cnn_dualview.keras` | **stage 11** |
+| **W5** | **No score can be explained** | per-branch contributions do not exist; the UI has nothing to display | **stage 11** |
+| **W6** | **`score_std` is computed and thrown away** | not persisted, not in the catalogue, not surfaced per candidate — and it is a real differentiator (ExoMiner concedes theirs "is NOT a probability") | **finishing touches** |
 
-## What stages 7–11 are worth — ranked by impact, 2026-08-09
+#### 1d.3 Tier 3 — unexplained, and currently unowned
 
-Ranked against the product's actual job: **ranking candidates for follow-up**.
-Not by build effort, and not by roadmap position.
+| # | weakness | evidence | owner |
+|---|---|---|---|
+| **W7** | **The narrow-span, high-count Kepler cell** | **+0.1446**, moved by **0.0002** across two bin resolutions, four fixed input defects, tied odd/even weights and a shared tower | **finishing touches** — decide or explain |
+| **W8** | **The score does not track transit evidence** | corr(prob, transits caught) **−0.048**; the labels themselves sit at −0.073 | **stage 7ii** reports; no defensible target exists |
+| **W9** | **TESS is the weakest mission and the only one served** | TESS **0.9100** vs Kepler 0.9915 | **stage 10** |
 
-| rank | stage | answers | impact if done | cost / confidence |
-|---:|---|---|---|---|
-| **1** | **8** labels and negatives | defect 5 | **The largest measured defect, and the only stage that can reach it.** Baseline correlates +0.278 with the label itself and +0.387 on TESS — *above every model*, so no architecture can touch it. For the deployment use it is actively counterproductive: it promotes targets that already received attention over under-observed ones that may deserve it. It improves **any** model, including the served incumbent | 25–35 h, **low** — external catalogue ingestion, whose only precedent was 5× out |
-| **2** | **11** serving parity + explainability | delivery | **The only stage whose absence blocks shipping anything.** No branch model can be served at all until `TargetScorer` computes every branch live; `/score` returning per-branch contributions is what makes a shortlist justifiable per target rather than asserted; and stage 12 has nothing to display without it. Also carries `score_std`, provenance headers and precision@k | 10–15 h, medium. **No training compute** |
-| **3** | **9** difference-image branch | defect 2 | The direct test of *"is this even the star we think it is"* — a centroid shift under the transit is how a background eclipsing binary is caught, and that is the host-scoring pathology at its source rather than at its symptom. The last genuine build in the model | 10–14 h, medium. Blocked on re-gridding 11–17 px stamps |
-| **4** | **10** Optuna re-tune | defect 4 | Extracts what is left once architecture and distribution stop moving. Real but bounded — and it is the one stage that is almost entirely unattended, so it costs little attention | 12–15 h, medium-high, ~10–13 h of it unattended |
-| **5** | **7** branch attribution | defects 1, 2, 3 | **Lowest as scoped, and the split is why.** 7i (the harness) is genuinely load-bearing — it is stage 8's instrument. 7ii (the reading) has already spent six hours returning four nulls, and leave-one-out structurally cannot separate redundancy from irrelevance. Its lasting deliverable is the instrument, not the attribution | 7i small; 7ii ~7 h compute, once, late |
+#### 1d.4 Tier 4 — engineering and operational risk
 
-**Read rank 5 correctly.** Stage 7 being last by impact is not an argument for
-skipping it — attribution is what turns "eleven branches exist" into "these
-branches earn their place", which is a claim the project should be able to make.
-It is an argument for running it **once, at the end**, which is what the
-execution order above does.
+| # | weakness | evidence | severity |
+|---|---|---|---|
+| **W10** | **Repeated `run_cv` in one process slows without bound** | 86s → 108s → 161s → 190s on *identical* runs; one file did not finish in 3 h. `clear_session()` falsified as the fix; cause open | real hours lost, mitigated not fixed |
+| **W11** | **Eager `GradientTape` over the assembled model aborts the process** | `Fatal Python error: Aborted` in `_ConcatGradV2`, TF 2.17.1 / Keras 3.15.0 on Metal. Reproduced on unmodified HEAD | **does not block stage 11** — see below |
+| **W12** | ~~**No rate limiting on `/score`**~~ **CLOSED 2026-08-09** | each request triggers a network download + TF inference on a 2 GB box; public, unauthenticated | **fixed** — `api/app/ratelimit.py`, 12 tests |
+| **W13** | **4 npm advisories (3 high) in build tooling** | `postcss` path traversal + 3 others; `npm audit fix` available | low real exposure — build-time only, the deployed console is static. **Unblocked 2026-08-14** — see below |
+| **W14** | **`HANDOVER.md` is 2,077 lines, superseded and partly wrong** | carries old stage labels throughout; three documents point around it | **low — it opens with a SUPERSEDED banner.** Retiring it is a *finishing* task: it still holds the only copy of the stage-2 sizing measurements and the merge collision that dropped the transit counts, and `roadmap.md` points at those rather than duplicating them |
 
-## Is Exoplanet Hunter ready once stage 11 is done?
+**W11 does not block explainability, and this is worth stating because assuming
+otherwise would re-scope stage 11 for no reason.** Branch-occlusion is *forward
+passes* — mask a branch input, re-predict, take the difference. It never
+constructs a gradient. Only gradient-based attribution (saliency, integrated
+gradients) is blocked by the Metal abort, and that is not what stage 11 specifies.
 
-Against the seven-point "what finished means" contract in
-`handover-2026-08-08.md` — **yes, with two named exceptions.**
+**W13's blocker is gone — checked 2026-08-14.** `npm audit fix` was deferred
+because `frontend/package-lock.json` carried another session's uncommitted
+`animejs` addition, and running it would have entangled that work in a security
+commit. `frontend/` is now clean and the lockfile committed, so this is the one
+command it was always meant to be. Build-time only; **Ollie's call**.
 
-| # | contract item | after 11 |
-|---|---|---|
-| 1 | a promotion decision made on evidence | **satisfiable** — see the caveat below |
-| 2 | every number has an error bar | **done** — stage 6 delivered the recall floor; AUC had one already |
-| 3 | control-arm host-pass rate moved off 26.4%, **or explained** | **satisfiable** — 7i measures it, 7ii and 9 are the interventions. "Explained" is an accepted finished state |
-| 4 | ranking not driven by observation baseline | **stage 8's deliverable**, with the residual quantified rather than unknown |
-| 5 | the score is a probability | **done and shipping**, plus `score_std` surfaced at stage 11 |
-| 6 | every score can be explained | **stage 11's deliverable** — per-branch occlusion through `/score` |
-| 7 | evaluation reproducible from artefacts | **already true**, and it has stayed true through an audit |
+**W10 is live for stage 10.5.** Repeated `run_cv` in one process slows without
+bound, and 10.5 runs three CV passes. **One process per CV run**, without
+exception.
 
-**Caveat on item 1, stated because it is the likely outcome rather than the
-feared one.** Five arms have now been rejected — runs 1, 2, 3, the capacity arm
-and the re-baseline — every one of them on shortlist recall. The probable
-resolution of item 1 is **"the branch line is closed in writing and `ca906040`,
-or its stage-10 retune, stays served"**, not a promotion. That is explicitly one
-of the two finished states, and the handover already says so: only "we never
-found out" fails. The apparatus that can tell those apart is itself a deliverable.
 
-**Exception A — the narrow-span, high-count Kepler cell.** Unexplained across
-three architectures, on no stage, and named in this file as the sharpest
-unexplained thing in the model. It does not block shipping (Kepler is 0% of the
-deployment population) but "ready" should not quietly include an unexplained
-+0.1446.
+## 2. Where the project stands
 
-**Exception B — distribution, which is not an engineering gap.** The one genuine
-gap against ExoMiner is a published survey-scale catalogue with per-row
-uncertainty, a DOI and a citation ask. It is a publishing task, it is deliberately
-not on this roadmap, and stage 11 does not touch it.
-
-**So: after stage 11 the product is complete and stage 12 is pure presentation**
-— which is exactly the bar the contract sets. If the UI stage finds itself
-needing a number the API cannot produce, a stage before it was not finished.
-
-## Where the project stands
+### 2a. Stage status — one table, kept current
 
 One table, kept current. Detail for each row is in the stage sections below and
 in HANDOVER.md.
@@ -225,7 +223,7 @@ audit finding below — so what is left of both is attribution, which is stage 7
 in stages 1–5 has been promoted, and the registry has not been touched since
 2026-07-19.
 
-### What the 2026-08-07 audit changed about this table — 2026-08-08
+### 2b. What the 2026-08-07 audit changed about this table
 
 Three findings from reading the code rather than the plan. Each one invalidated a
 row above.
@@ -296,7 +294,7 @@ collision is dormant — but **a catalogue refresh is precisely what introduces
 multi-planet hosts**. The key must be fixed before the next refresh, and before
 the candidate rebuild, which is why stage 5 is ordered fix-then-rebuild.
 
-### Uncovered, fixed, and improved since stage 2 closed
+### 2c. Uncovered, fixed, and improved since stage 2 closed
 
 Findings, not features — each one is something that was silently wrong, or
 silently unmeasured, and is now neither.
@@ -325,7 +323,7 @@ silently unmeasured, and is now neither.
 Tests: **304 → 428** (396 pipeline + 32 api). ruff and mypy clean on the
 pre-commit config. Seven data gates pass.
 
-### The shared flux tower — 2026-08-07
+### 2d. The shared flux tower — 2026-08-07
 
 `local_view`, `odd_view`, `even_view` and `secondary_view` are the same
 measurement at 201 bins, and they now pass through **one** conv tower
@@ -340,7 +338,7 @@ incumbent's 227,641 rather than above it, so a Kepler gain can no longer be
 read as bought capacity. `centroid_view` is the same shape but carries a pixel
 shift in units of its own scatter, so it is not comparable and keeps its tower.
 
-### Audit of the recorded numbers — 2026-08-07
+### 2e. Audit of the recorded numbers — 2026-08-07
 
 Every numeric claim in this file was regenerated from the artefacts on disk.
 **All of run 1's numbers reproduce exactly**: the headline, both quartile
@@ -390,7 +388,127 @@ so the re-baseline **validates the earlier reading rather than overturning it** 
 run 2 loses on every mission, including the one it had 527 training rows for and
 the incumbent had none.
 
-## Stages
+### 2f. Execution order — the dependency graph, and why it is not the numbering
+
+**Raised 2026-08-09: the roadmap is not sequential.** It is correct, and the
+back-and-forth is real rather than cosmetic. Three backward edges existed in the
+plan as written:
+
+| edge | what it meant |
+|---|---|
+| **7 → 11** | stage 7's criterion needs a branch model scoreable from a light curve, which is stage 11's first half, four stages later |
+| **8 → 7** | stage 8 changes the training distribution, so stage 7's attribution numbers are invalidated after they are measured |
+| **9 → 7** | stage 9 adds a branch, so an attribution done at stage 7 describes a branch set that no longer exists |
+
+Each was recorded honestly and none was ever resolved into an *order*. The 7 → 11
+edge was worked around on 2026-08-09 by adopting the offline harness; the other
+two were left as knock-ons to absorb later.
+
+**Do not renumber a third time.** The numbers were already reassigned once
+(2026-08-08) and have since become *names*: run directories, commit messages and
+three documents refer to them, and `branches-20260809-drop-unfolded` would need
+two hops to resolve under a third scheme. What was missing was never a numbering
+scheme — it was a stated execution order. **The integers stay as stable
+identities; the order below is what is executed, and it is the primary artefact.**
+
+**One stage genuinely has parts, and splitting it removes every backward edge.**
+Stage 7 owes two different things: an *instrument* (the offline control-arm
+harness) and a *reading* (which branches earn their place). They have opposite
+dependencies — the instrument blocks stage 8, the reading depends on stages 8, 9
+and 10. Sub-steps as `i, ii` are the convention already set for exactly this
+case.
+
+| order | stage | depends on | why it sits here |
+|---:|---|---|---|
+| 1 | **7i** offline control-arm harness | nothing outstanding | it is **stage 8's measuring instrument**, not only stage 7's — pre-commitment (d)'s "injection-recovery on matched hosts with baseline held constant" is this harness. Also the only way to get a pre-stage-8 before-reading |
+| 2 | **8** labels and negatives | 7i | the largest measured defect, and it invalidates everything measured before it — so it goes as early as its instrument allows |
+| 3 | **9** difference-image branch | 8 | the last genuine build. After the distribution settles, or it is measured twice |
+| 4 | **10** Optuna re-tune | 8, 9 | "on the winner, after the distribution is settled" — that is the settled architecture *and* the settled labels |
+| 5 | **7ii** branch attribution | 8, 9, 10, 7i | attribution describes a **finished** branch set on a **settled** distribution. Run before any of them it is measuring something about to change, which is what the all-null sweep already spent six hours discovering |
+| 6 | **11** serving parity + explainability | 7ii *(adjacency, not blocking)* | **stage 11's branch-occlusion and stage 7ii's leave-one-out are the same measurement at different granularity** — per-target against per-population. Running them adjacently validates the serving implementation against the population reading instead of leaving two independent attributions to disagree in public |
+| 7 | **12** UI redesign | 11 | presentation only, locked last |
+
+**No edge in that table points backwards.** Stages 1–6 are done and are not in
+it. Stage 3's re-baselined incumbent summary is invalidated by stage 8 and needs
+regenerating — that is a **repeat of a repeatable path**, not a backward edge,
+and keeping stage 3 re-runnable rather than a one-off artefact is what makes it
+so.
+
+**The consequence for stage 7, stated plainly.** Its sweep has already run and is
+all-null; per the sequencing assessment below, no further stage-7 CV compute is
+bought before stage 8. Stage 7i finishes now, stage 7ii runs once, late, on a
+branch set and a distribution that have stopped moving.
+
+**One open item is on no stage at all.** The narrow-span, high-count Kepler cell
+(+0.1446, unmoved by two bin resolutions, four fixed input defects, tied odd/even
+weights and a shared tower) is described in this file as "the sharpest
+unexplained thing in the model" and appears in no stage's contents. It needs an
+owner or an explicit decision to leave it unexplained; it is currently neither.
+
+### 2g. What stages 7–11 are worth — ranked by impact, 2026-08-09
+
+Ranked against the product's actual job: **ranking candidates for follow-up**.
+Not by build effort, and not by roadmap position.
+
+| rank | stage | answers | impact if done | cost / confidence |
+|---:|---|---|---|---|
+| **1** | **8** labels and negatives | defect 5 | **The largest measured defect, and the only stage that can reach it.** Baseline correlates +0.278 with the label itself and +0.387 on TESS — *above every model*, so no architecture can touch it. For the deployment use it is actively counterproductive: it promotes targets that already received attention over under-observed ones that may deserve it. It improves **any** model, including the served incumbent | 25–35 h, **low** — external catalogue ingestion, whose only precedent was 5× out |
+| **2** | **11** serving parity + explainability | delivery | **The only stage whose absence blocks shipping anything.** No branch model can be served at all until `TargetScorer` computes every branch live; `/score` returning per-branch contributions is what makes a shortlist justifiable per target rather than asserted; and stage 12 has nothing to display without it. Also carries `score_std`, provenance headers and precision@k | 10–15 h, medium. **No training compute** |
+| **3** | **9** difference-image branch | defect 2 | The direct test of *"is this even the star we think it is"* — a centroid shift under the transit is how a background eclipsing binary is caught, and that is the host-scoring pathology at its source rather than at its symptom. The last genuine build in the model | 10–14 h, medium. Blocked on re-gridding 11–17 px stamps |
+| **4** | **10** Optuna re-tune | defect 4 | Extracts what is left once architecture and distribution stop moving. Real but bounded — and it is the one stage that is almost entirely unattended, so it costs little attention | 12–15 h, medium-high, ~10–13 h of it unattended |
+| **5** | **7** branch attribution | defects 1, 2, 3 | **Lowest as scoped, and the split is why.** 7i (the harness) is genuinely load-bearing — it is stage 8's instrument. 7ii (the reading) has already spent six hours returning four nulls, and leave-one-out structurally cannot separate redundancy from irrelevance. Its lasting deliverable is the instrument, not the attribution | 7i small; 7ii ~7 h compute, once, late |
+
+**Read rank 5 correctly.** Stage 7 being last by impact is not an argument for
+skipping it — attribution is what turns "eleven branches exist" into "these
+branches earn their place", which is a claim the project should be able to make.
+It is an argument for running it **once, at the end**, which is what the
+execution order above does.
+
+### 2h. Is Exoplanet Hunter ready once stage 11 is done?
+
+Against the seven-point "what finished means" contract in
+`handover-2026-08-08.md` — **yes, with two named exceptions.**
+
+| # | contract item | after 11 |
+|---|---|---|
+| 1 | a promotion decision made on evidence | **satisfiable** — see the caveat below |
+| 2 | every number has an error bar | **done** — stage 6 delivered the recall floor; AUC had one already |
+| 3 | control-arm host-pass rate moved off 26.4%, **or explained** | **satisfiable** — 7i measures it, 7ii and 9 are the interventions. "Explained" is an accepted finished state |
+| 4 | ranking not driven by observation baseline | **stage 8's deliverable**, with the residual quantified rather than unknown |
+| 5 | the score is a probability | **done and shipping**, plus `score_std` surfaced at stage 11 |
+| 6 | every score can be explained | **stage 11's deliverable** — per-branch occlusion through `/score` |
+| 7 | evaluation reproducible from artefacts | **already true**, and it has stayed true through an audit |
+
+**Caveat on item 1, stated because it is the likely outcome rather than the
+feared one.** Five arms have now been rejected — runs 1, 2, 3, the capacity arm
+and the re-baseline — every one of them on shortlist recall. The probable
+resolution of item 1 is **"the branch line is closed in writing and `ca906040`,
+or its stage-10 retune, stays served"**, not a promotion. That is explicitly one
+of the two finished states, and the handover already says so: only "we never
+found out" fails. The apparatus that can tell those apart is itself a deliverable.
+
+**Exception A — the narrow-span, high-count Kepler cell.** Unexplained across
+three architectures, on no stage, and named in this file as the sharpest
+unexplained thing in the model. It does not block shipping (Kepler is 0% of the
+deployment population) but "ready" should not quietly include an unexplained
++0.1446.
+
+**Exception B — distribution, which is not an engineering gap.** The one genuine
+gap against ExoMiner is a published survey-scale catalogue with per-row
+uncertainty, a DOI and a citation ask. It is a publishing task, it is deliberately
+not on this roadmap, and stage 11 does not touch it.
+
+**So: after stage 11 the product is complete and stage 12 is pure presentation**
+— which is exactly the bar the contract sets. If the UI stage finds itself
+needing a number the API cannot produce, a stage before it was not finished.
+
+
+## 3. The record — what was measured, in the order it happened
+
+Chronological. Pre-registrations sit immediately before the result they fixed
+the reading of, so the order on the page is the order the work was done in.
+
+### 3.1 Stages 1–3 — housekeeping, ExoMiner-grade inputs, the re-baselined summary
 
 **Stage 1 *(old 0)* — housekeeping, landmines, vendoring.** *(done)*
 71 GB of stitched-and-forgotten staging deleted and auto-cleanup added;
@@ -447,7 +565,12 @@ closed, (b) and (c) become attribution and are stage 7, (d) is still a genuine
 build and is stage 9, and the re-tune is stage 10. Every arm passes the promotion
 gate on CV AUC/Brier/ECE, the TESS slice, and injection-recovery completeness.
 
-### Stage 4 *(old 2(a))* run 1 — REJECTED (2026-08-05)
+
+### 3.2 Stage 4 — per-diagnostic branches: three runs and a capacity arm
+
+**Stage closed: every arm REJECTED**, all of them on shortlist recall.
+
+#### 3.2a Run 1 — REJECTED (2026-08-05)
 
 **The stop condition fired.** Ollie's third pre-committed case, recorded before
 the run: the branch model's all-mission gap is **+0.0222 in the incumbent's
@@ -545,7 +668,7 @@ trained with. Tuning stays out of run 2 deliberately — it would confound the
 resolution test, and it is the Optuna step at the end of the old stage 2 — now
 stage 10.
 
-### Pre-commitments recorded before the next result exists
+#### 3.2b Pre-commitments recorded before the next result exists
 
 Written down first so they cannot be adjusted to fit an outcome.
 
@@ -568,7 +691,7 @@ Note also that the resolution change moves the parameter count on its own, so it
 **partially subsumes the capacity question** — a confound to state rather than
 to claim as a bonus.
 
-#### The trigger, re-derived against run 3 — recorded 2026-08-08, before run 3 was read
+#### 3.2c The trigger, re-derived against run 3 — recorded 2026-08-08, before run 3 was read
 
 The trigger fired legitimately and is **not** being cancelled. Its antecedent is
 true even under the corrected comparison: re-baselined, run 2's Kepler gap is
@@ -641,7 +764,7 @@ baseline held CONSTANT.** It is the only causal measure of detection
 performance available here, and it is immune to the label-selection confound
 that moved to stage 3 [now 8]. Build it when 2(b) [now stage 7] is actually run.
 
-### K2 was unbenchmarked for 9.7% of training — now it is not
+#### 3.2d K2 was unbenchmarked for 9.7% of training — now it is not
 
 The incumbent's `predictions.parquet` holds 4,818 out-of-fold rows and **zero
 K2**: that run predates K2 in the catalogue. Every comparison against it
@@ -674,7 +797,7 @@ absent on **all 527** K2 rows, so that lane imputes.
 sets are compared, and names any mission an inner join drops entirely. A mission
 falling out of a comparison cannot be silent again.
 
-### Stage 4 *(old 2(a))* run 2 — the resolution fix, pre-registered 2026-08-06
+#### 3.2e Run 2 — the resolution fix, pre-registered 2026-08-06
 
 **One change, both halves together: global 301 → 2001, local 31 → 201.** They
 are the same mechanism testing the same hypothesis; splitting them costs two
@@ -721,7 +844,7 @@ resolution is the cause, that band improves too. It is 62 rows, so it cannot
 carry a decision on its own; it is recorded as a directional check that the
 mechanism is not a Kepler-only story.
 
-### Run 2 result — the resolution hypothesis is FALSIFIED (2026-08-07)
+#### 3.2f Run 2 result — the resolution hypothesis is FALSIFIED (2026-08-07)
 
 `models/cv/branches-20260807-2001`. Gate: **REJECT**. `ca906040` stays served.
 
@@ -749,7 +872,7 @@ which no longer exists. The obligation was re-derived against run 3 on
 2026-08-08, before run 3 was read: see "The trigger, re-derived against run 3"
 above.)*
 
-### Run 3 result — the fixed architecture on the fixed shards (2026-08-08)
+#### 3.2g Run 3 result — the fixed architecture on the fixed shards (2026-08-08)
 
 `models/cv/branches-20260807-shared`. Gate: **REJECT**, on shortlist recall.
 `ca906040` stays served; the registry is untouched.
@@ -779,7 +902,7 @@ comparably overall and is worse exactly where it is used.
 **The −0.0030 TESS win is not a win.** See the variance decomposition below: a
 margin under ~0.009 is inside the noise. Level is the honest reading.
 
-### The variance decomposition, measured for the first time
+#### 3.2h The variance decomposition, measured for the first time
 
 `--n-models-per-fold 3` makes `summary.variance` report the two components apart:
 
@@ -797,7 +920,21 @@ seed_sd 0.0081   fold_sd 0.0094   n_models_per_fold 3
 - Run 3 averages 3 models per fold, so the run-level reseeding sd is about
   `seed_sd/√3 ≈ 0.0047`. **A margin under ~0.009 is not a decision.**
 
-### Capacity arm result — capacity is NOT the constraint (2026-08-08)
+#### 3.2i The capacity arm — trigger fired, launched 2026-08-08
+
+Kepler is **+0.0451**, well past the ~0.020 threshold in the re-derived trigger
+above, so the arm is **mandatory** and running as
+`models/cv/branches-20260808-capacity` (`--init-filters 22`).
+
+**One correction to the pre-registration, recorded rather than absorbed.** The
+original prediction called `init_filters=22` "226,711 parameters, 0.4% from the
+incumbent's 227,641" — computed on the *four-tower* architecture. On the shared
+tower it is **256,711**, so this is a **+19% capacity test rather than the
+incumbent-parity test it was designed as**. That makes the falsification
+stronger, not weaker: if 19% more capacity does not close a +0.045 Kepler gap,
+capacity is not the binding constraint.
+
+#### 3.2j Capacity arm result — capacity is NOT the constraint (2026-08-08)
 
 `models/cv/branches-20260808-capacity`, `init_filters=22`, 256,711 params
 (+19% on run 3). Gate: **REJECT**. `ca906040` stays served.
@@ -836,21 +973,7 @@ specifically before anyone builds on it.
 Also of note: `fold_sd` rose 0.0094 → 0.0147 while `seed_sd` held at 0.0082.
 The extra capacity made folds diverge without making individual draws noisier.
 
-### The capacity arm — trigger fired, launched 2026-08-08
-
-Kepler is **+0.0451**, well past the ~0.020 threshold in the re-derived trigger
-above, so the arm is **mandatory** and running as
-`models/cv/branches-20260808-capacity` (`--init-filters 22`).
-
-**One correction to the pre-registration, recorded rather than absorbed.** The
-original prediction called `init_filters=22` "226,711 parameters, 0.4% from the
-incumbent's 227,641" — computed on the *four-tower* architecture. On the shared
-tower it is **256,711**, so this is a **+19% capacity test rather than the
-incumbent-parity test it was designed as**. That makes the falsification
-stronger, not weaker: if 19% more capacity does not close a +0.045 Kepler gap,
-capacity is not the binding constraint.
-
-### Three training-path changes that break comparability going forward
+#### 3.2k Three training-path changes that break comparability going forward
 
 Recorded here because this project's recurring injury is a comparison that is
 not like-for-like and does not say so.
@@ -896,7 +1019,7 @@ rebuild already forces a fresh baseline — **one re-baseline absorbs both chang
 instead of two**. Production was never at risk (~868 validation rows); it was
 the tiny test fixtures that exposed it.
 
-### The one cell three architectures have not moved
+#### 3.2l The one cell three architectures have not moved
 
 The narrow-span, high-count Kepler cell is unchanged across every run:
 
@@ -910,7 +1033,7 @@ shared tower move it by **0.0002**. Whatever drives that cell is not resolution
 towers. It is the sharpest unexplained thing in the model and it deserves its
 own investigation rather than another architecture pass.
 
-### What the run also uncovered: the noise floor was never measured
+#### 3.2m What the run also uncovered: the noise floor was never measured
 
 Fold 0 was re-run five times through `run_fold` with the trainer's own seeding,
 one process each:
@@ -989,7 +1112,7 @@ training targets. A future *training* view set rebuild is still cold — it was
 already, since those entries were unfindable — so the cache on disk now helps a
 candidate re-run and not a training one.
 
-### Stage 5 *(old C)* — the candidate view set, rebuilt — 2026-08-08
+### 3.3 Stage 5 — the candidate view set, rebuilt (2026-08-08)
 
 Done, cold, as budgeted: **5,346 rows at 2001/201, 309 MB, 95 minutes** for
 7,174 catalogue rows. `ViewSetArrays.validate()` reports it well-formed, every
@@ -1085,7 +1208,10 @@ arm — the same trap as `init_filters=22` being re-derived against run 3. This
 measures the thing underneath instead, on the architecture that exists, for one
 run instead of three.
 
-#### Pre-registered before the run — recorded 2026-08-08, run not yet launched
+
+### 3.4 Stage 6 — the recall noise floor
+
+#### 3.4a Pre-registered before the run — recorded 2026-08-08, run not yet launched
 
 Nobody is watching an autonomous session read its own result, so every number
 below is written down first.
@@ -1176,7 +1302,7 @@ untouched, `ca906040` stays served, and a favourable number here does not reopen
 stage 4 — only stage 7's leave-one-out runs, read against this re-baseline, can
 move anything.
 
-#### First launch failed on fold 0; the pre-registration is unchanged — 2026-08-09
+#### 3.4b First launch failed on fold 0; the pre-registration is unchanged — 2026-08-09
 
 The run died ~15 minutes in, in `fit_platt`, on the convergence guard added
 2026-08-08. The guard was right: `nll` clipped `p` while the analytic gradient
@@ -1209,7 +1335,7 @@ that is a **falsified prediction** and is reported as one. It is not re-read as
 an improvement or a regression: one run of a control cannot carry that, and stage
 7 re-baselines again anyway.
 
-### Stage 6 result — the recall noise floor, measured (2026-08-09)
+#### 3.4c Result — the recall noise floor, measured (2026-08-09)
 
 `models/cv/branches-20260808-rebaseline`, HEAD `6005506`, `git_dirty=False`,
 5,426 rows, `--n-models-per-fold 3`. **Every pre-registered prediction landed
@@ -1300,7 +1426,10 @@ itself; transit sensitivity moved further from zero at **−0.1467** (run 3:
 −0.1249). Both are reported diagnostics, both point at stage 8, and neither gates
 anything.
 
-### Stage 7's criterion is blocked on stage 11 — found 2026-08-09
+
+### 3.5 Stage 7 — the attribution sweep, and the criterion problem
+
+#### 3.5a Stage 7's criterion is blocked on stage 11 — found 2026-08-09
 
 **The control-arm host-pass rate cannot be measured for any branch model today,
 and nothing recorded this.** `roadmap.md` gates stage 7 on "26.4% must fall",
@@ -1330,7 +1459,7 @@ serving parity the hosts would not be matched on observation baseline.
 Three ways out were put to Ollie: pull stage 11's serving parity forward; build
 an **offline** injection/control harness; or re-scope and defer.
 
-#### Decided 2026-08-09: the offline harness, with the incumbent re-measured on it
+#### 3.5b Decided 2026-08-09: the offline harness, with the incumbent re-measured on it
 
 **Why not pull serving parity forward.** Stage 8 already invalidates stage 7's
 attribution numbers — that is why stage 8 was moved ahead of stage 9 — so
@@ -1415,7 +1544,7 @@ CV run each at `--n-models-per-fold 3`.
 **Its criterion is already specified and is not AUC**: the control-arm host-pass
 rate, 26.4%, must fall — **and is currently unmeasurable; see above.**
 
-#### Pre-registered before the sweep — recorded 2026-08-09, nothing launched
+#### 3.5c Pre-registered before the sweep — recorded 2026-08-09, nothing launched
 
 **Scope: three families, not eight, prioritised by uncertainty rather than
 completeness.** A full sweep spends hours confirming that `flux` and `global`
@@ -1494,7 +1623,7 @@ as a free consistency check. If they differ by more than the floor, that is a
 finding about running training across a suspend — worth having, and it is only
 available because the first run was not quietly thrown away.
 
-### Stage 7 sweep result — every arm null, and the one "PASS" is an artefact (2026-08-09)
+#### 3.5d Sweep result — every arm null, and the one "PASS" is an artefact (2026-08-09)
 
 Four runs against `branches-20260808-rebaseline`, read by the rule fixed before
 any of them existed. TESS slice, each run's own `per_mission.TESS` (n=2,399).
@@ -1554,7 +1683,7 @@ recall against a two-run bar of 0.0383, and by **+0.0002** in AUC against 0.0183
 they agree within noise on both. No evidence that suspending training across a
 hibernate perturbs it. The clean run remains authoritative as pre-registered.
 
-### Sequencing: should stage 8 come first? — assessed 2026-08-09
+#### 3.5e Sequencing: should stage 8 come first? — assessed 2026-08-09
 
 **The question, put by Ollie and never assessed.** Stage 8 invalidates stage 7's
 attribution numbers — this file says so twice, and it is why stage 8 was moved
@@ -1614,7 +1743,10 @@ session's own "the natural follow-up is a joint drop" should wait behind it.
 **Re-scoping is Ollie's call, so this is put as a recommendation and not acted
 on.**
 
-#### Pre-registered before the harness runs — recorded 2026-08-09, nothing built
+
+### 3.6 Stage 7i — the offline control-arm harness
+
+#### 3.6a Pre-registered before the harness runs — recorded 2026-08-09, nothing built
 
 The two limits already recorded under *Decided 2026-08-09* stand unchanged and
 must survive into the result: **`detection`/`ghost` run masked** (`dv_usable`
@@ -1692,7 +1824,7 @@ cached-FITS host pool is what it is. If a matched draw cannot fill its strata th
 result is reported at the size it reaches, with the unmatched rate beside it —
 not topped up from unmatched hosts.
 
-#### Pre-registered before the stage 7i measurement — recorded 2026-08-10, nothing run
+#### 3.6b Pre-registered before the measurement — recorded 2026-08-10, nothing run
 
 Both lanes exist and are smoke-tested; **no control-arm number has been produced
 for either model.** Written down first because nobody is watching an autonomous
@@ -1748,7 +1880,7 @@ the matcher exists.
 **Nothing promotes.** `models/registry.json` untouched, `ca906040` stays served.
 A favourable number here does not reopen stage 4.
 
-### Stage 7i result — the branch architecture does not score the star less (2026-08-12)
+#### 3.6c Result — the branch architecture does not score the star less (2026-08-12)
 
 `results/control_arm/`. **580 baseline-matched hosts x 3 periods = 1,740 rows per
 lane, 0 unscored**, exactly the sizing pre-registered before the run. Both limits
@@ -1851,7 +1983,7 @@ is the cheaper side of that trade.)*
 
 **Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
 
-### The promotion gate was not calibrated to its own noise floor (2026-08-12)
+### 3.7 The promotion gate was not calibrated to its own noise floor (2026-08-12)
 
 Audited on Ollie's instruction — *"inspect the promotion and rejection gates as
 well, I don't want any bias"* — rather than found by a failing test. **Three
@@ -1922,99 +2054,64 @@ call, not a bug fix.
 
 **Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
 
-### Stage 10.5 — the ensemble arm, pre-registered 2026-08-12, nothing run
+### 3.8 Observation baseline — a real problem architecture cannot fix
 
-**Why this exists.** Five arms have been rejected, every one on shortlist recall,
-and every one asked the same question: *does this replace the incumbent?* Nobody
-ever asked whether it **complements** it. Measured on the 2,367 shared TESS
-gating rows, at each model's own 1% FPR cut:
+Measured 2026-08-05, baseline as a span in **days**:
 
-| caught | n |
+| population | corr(score, baseline) |
 |---|---:|
-| both | 117 |
-| incumbent only | 282 |
-| branch only | 172 |
-| neither | 729 |
+| incumbent, 3,908 scored candidates | **+0.208** (+0.187 controlling period) |
+| incumbent, labelled CV set | +0.238 |
+| stage 4 branches, labelled CV set | +0.239 |
+| **the ground-truth label itself** | **+0.278**, and **+0.387** on TESS alone |
 
-Spearman agreement between the two scores is **0.654**. They are not a better
-and a worse model; they are right about different targets. Combining them:
+The correlation survives inside every TESS period band and is not a period
+artefact. TESS confirmed planets have a median baseline of **1,495 d against
+430 d** for false positives.
 
-| combiner | TESS AUC | recall @1% FPR |
-|---|---:|---:|
-| branch alone | 0.9215 | 0.2223 |
-| incumbent alone | 0.9100 | 0.3069 |
-| mean of probabilities | 0.9498 | 0.4292 |
-| **mean of logits** | **0.9537** | **0.4746** |
-| rank-average | 0.9535 | 0.4538 |
+**"Every model sits below the labels" was true on 2026-08-05 and is not true
+now.** This line said so until 2026-08-12 and had to be corrected twice over,
+because the crossing had already been recorded elsewhere in this file and never
+propagated back here. Stage 6 noted the re-baseline reached **+0.3025 pooled,
+above the +0.278 label figure**. Re-measured on 2026-08-12 with the same Spearman
+statistic, **per mission**, which is what pooling was hiding:
 
-**Every combiner beats both models.** Mean of logits is +0.168 recall over the
-incumbent — **5.7× the 0.0337 floor** — and needs no population statistics, so it
-is deployable as written.
+| series | all missions | **TESS** *(gates)* | Kepler | K2 |
+|---|---:|---:|---:|---:|
+| branch model, `branches-20260808-rebaseline` | +0.3025 | **+0.5155** | +0.0859 | −0.0064 |
+| incumbent `ca906040`, shared TESS rows | — | +0.3812 | — | — |
+| **the ground-truth label**, same rows | +0.2136 | **+0.3874** | +0.1025 | −0.1490 |
 
-**This is exploratory and is NOT a result.** One draw, no ensemble variance
-estimate; the two runs used different CV splits, so while no row's own label
-leaked (both scores are out-of-fold in their own run), it is not a clean joint-CV
-measurement. **A pre-registered confirmation run is required before any of it is
-read as a finding.**
+The label's TESS figure reproduces the recorded +0.387 to three places, so the
+slice is right and it is the *model* row that was stale. **On the mission that
+gates, the branch architecture sits +0.13 above the labels it learned from** —
+it does not merely inherit the confound, it amplifies it. The incumbent, at
++0.3812, still sits just below.
 
-**Sequenced after stage 8, on the same argument that put stage 8 ahead of stage
-9** — stage 8 changes the labels both models learn from, so measuring this first
-means measuring it twice. Ollie's decision, 2026-08-12.
+**Consequence for stage 8: there are two targets, not one.** The bias in the
+labels, and the branch architecture's amplification of it. An intervention that
+fixes the first and leaves the second is a partial result, and the pre-registration
+must be able to tell them apart.
 
-**Pre-registered now, before the run exists.**
+The mechanism is confirmation bias in the catalogue: a target observed across
+many sectors accumulates the follow-up that promotes it to confirmed, while a
+briefly-observed one stays a candidate or is retired. The model learned it
+because in the training labels it is true.
 
-*What is run.* Both models on a **common fold assignment**, the ensemble scored
-out-of-fold, `--n-models-per-fold 3` so the ensemble carries its own variance
-estimate rather than borrowing a single model's.
+**This is not "the correlation turned out to be fine".** It is a genuine defect
+with the wrong owner. For the deployment use — ranking candidates for follow-up
+— baseline dependence actively defeats the purpose, because it promotes targets
+that already received attention over under-observed ones that may deserve it.
+What changed is only *what can fix it*: no architecture can, because the signal
+is in the labels. The levers are **propensity-score weighting on observation
+baseline**, **baseline-stratified negative sampling**, and **synthetic negatives**
+that break the correlation by construction. All three are label-distribution
+interventions, and all three belong here.
 
-*What is measured.* TESS AUC and recall @1% FPR on the gate slice; the
-control-arm split through the stage 7i harness; and Spearman(score,
-`baseline_days`), because an ensemble that inherits the *worse* of its two
-members' baseline dependence is not an improvement for the deployment use.
 
-*The bar.* Recall @1% FPR against the incumbent's 0.307, read against the
-ensemble's own measured floor by the stage 6 rule. Nothing under **1×** the floor
-is a decision.
+### 3.9 Stage 8 — labels and negatives
 
-| outcome | reading |
-|---|---|
-| ensemble recall **above** incumbent beyond its floor | the branch line's value is as a **complement**, not a replacement. This reopens nothing about stage 4 — those rejections were about replacement and remain correct |
-| **within** its floor | the disjointness is real but does not convert into shortlist recall. Record it and close the branch line as the plan already anticipates |
-| ensemble recall **below** the incumbent | the exploratory reading was an artefact of the mismatched splits. Report it as falsified; do not re-specify |
-
-*Predictions, recorded so they can be wrong.*
-
-1. The confirmation run lands **below** the exploratory 0.4746, because the
-   mismatched-split version gave each model a slightly different training set
-   and that flatters an ensemble.
-2. It still clears the incumbent's 0.307 by more than its floor.
-3. Baseline sensitivity of the ensemble sits **between** its two members'
-   (+0.5155 branch, +0.3812 incumbent) rather than below both — averaging does
-   not remove a confound both models share.
-
-*Nothing promotes on this either.* A favourable ensemble number is an argument
-for a serving change, which is stage 11 work and Ollie's call.
-
-**Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
-negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
-built with our existing injection machinery. Plus the observation-selection
-problem below, which arrived here from the branch-model work.
-
-**Moved ahead of stage 9 on 2026-08-08.** Two reasons. Stage 8's
-interventions change the training distribution, so anything measured before it
-has to be re-measured after — and stage 9 is the expensive one, so the roadmap
-order paid for it twice. And on the evidence, two architecture runs have now
-been rejected while the largest measured defect sits at **+0.278 in the labels
-themselves, +0.387 on TESS** — above every model, and somewhere no architecture
-can reach. The original ordering was set before either of those facts existed.
-
-Two knock-ons to expect: changing the label distribution invalidates the
-re-baselined incumbent summary from stage 3, which will need regenerating — one
-command, and a reason to keep stage 3 a repeatable path rather than a one-off
-artefact — and it invalidates stage 7's attribution numbers, which is exactly why
-stage 8 sits ahead of stage 9.
-
-#### Pre-registered before stage 8 runs — recorded 2026-08-12, nothing built
+#### 3.9a Pre-registered before stage 8 runs — recorded 2026-08-12, nothing built
 
 Written before any intervention exists, because nobody is watching an autonomous
 session read its own result.
@@ -2103,7 +2200,7 @@ synthetic negatives alone. Not re-litigated here — executed.
 **Nothing promotes.** Whatever stage 8 measures, `models/registry.json` is
 untouched and `ca906040` stays served.
 
-### Stage 8 result — the amplification is reachable, the labels are not (2026-08-13)
+#### 3.9b Result — the amplification is reachable, the labels are not (2026-08-13)
 
 Four arms, `--n-models-per-fold 3`, ~2 h each. **Prediction 4 was measured on
 2026-08-14** through the stage 7i harness and is written up below; the stage is
@@ -2177,7 +2274,7 @@ justify* — is free by construction, because over-use beyond the labels carries
 predictive power on a test set built from them. Costless was the correct
 expectation for what P actually did.
 
-#### Prediction 4 — the split fell, and the construct behind it did not (2026-08-14)
+#### 3.9c Prediction 4 — the split fell, and the construct behind it did not (2026-08-14)
 
 The stage 7i harness on both `stage8-control` and `stage8-propensity`: **580
 baseline-matched hosts x 3 periods = 1,740 rows per lane, 0 unscored**, the same
@@ -2304,79 +2401,9 @@ stands satisfied; the rationale attached to it did not survive checking.
 
 **Nothing promotes.** `models/registry.json` untouched; `ca906040` stays served.
 
-**Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
-left in the model, with quality attention. Blocked on a known problem: the stamps
-are **11–17 px, not the fixed 33×33** the design assumed — that is Kepler's size
-— so they must be re-gridded to a fixed size first.
 
-**Stage 10 *(old G)* — Optuna re-tune.** On the winner, after the distribution is
-settled. `conf/train/tune.yaml` sets `timeout: 7200` **per invocation** and the
-study resumes, so this is several invocations rather than one. The existing
-campaign already rejected focal loss; do not re-litigate it without a reason.
+### 3.10 The UI scaffold, audited against the API — 2026-08-13
 
-### Observation baseline — a real problem architecture cannot fix
-
-Measured 2026-08-05, baseline as a span in **days**:
-
-| population | corr(score, baseline) |
-|---|---:|
-| incumbent, 3,908 scored candidates | **+0.208** (+0.187 controlling period) |
-| incumbent, labelled CV set | +0.238 |
-| stage 4 branches, labelled CV set | +0.239 |
-| **the ground-truth label itself** | **+0.278**, and **+0.387** on TESS alone |
-
-The correlation survives inside every TESS period band and is not a period
-artefact. TESS confirmed planets have a median baseline of **1,495 d against
-430 d** for false positives.
-
-**"Every model sits below the labels" was true on 2026-08-05 and is not true
-now.** This line said so until 2026-08-12 and had to be corrected twice over,
-because the crossing had already been recorded elsewhere in this file and never
-propagated back here. Stage 6 noted the re-baseline reached **+0.3025 pooled,
-above the +0.278 label figure**. Re-measured on 2026-08-12 with the same Spearman
-statistic, **per mission**, which is what pooling was hiding:
-
-| series | all missions | **TESS** *(gates)* | Kepler | K2 |
-|---|---:|---:|---:|---:|
-| branch model, `branches-20260808-rebaseline` | +0.3025 | **+0.5155** | +0.0859 | −0.0064 |
-| incumbent `ca906040`, shared TESS rows | — | +0.3812 | — | — |
-| **the ground-truth label**, same rows | +0.2136 | **+0.3874** | +0.1025 | −0.1490 |
-
-The label's TESS figure reproduces the recorded +0.387 to three places, so the
-slice is right and it is the *model* row that was stale. **On the mission that
-gates, the branch architecture sits +0.13 above the labels it learned from** —
-it does not merely inherit the confound, it amplifies it. The incumbent, at
-+0.3812, still sits just below.
-
-**Consequence for stage 8: there are two targets, not one.** The bias in the
-labels, and the branch architecture's amplification of it. An intervention that
-fixes the first and leaves the second is a partial result, and the pre-registration
-must be able to tell them apart.
-
-The mechanism is confirmation bias in the catalogue: a target observed across
-many sectors accumulates the follow-up that promotes it to confirmed, while a
-briefly-observed one stays a candidate or is retired. The model learned it
-because in the training labels it is true.
-
-**This is not "the correlation turned out to be fine".** It is a genuine defect
-with the wrong owner. For the deployment use — ranking candidates for follow-up
-— baseline dependence actively defeats the purpose, because it promotes targets
-that already received attention over under-observed ones that may deserve it.
-What changed is only *what can fix it*: no architecture can, because the signal
-is in the labels. The levers are **propensity-score weighting on observation
-baseline**, **baseline-stratified negative sampling**, and **synthetic negatives**
-that break the correlation by construction. All three are label-distribution
-interventions, and all three belong here.
-
-**Stage 11 *(old 4)* — serving parity and explainability.** `TargetScorer` computes every
-branch live; `/score` returns per-branch contributions via branch-occlusion.
-ExoMiner's explainability story, made interactive — which their batch pipeline
-cannot do.
-
-**Stage 12 *(old 5)* — the UI redesign.** Unchanged and last. Mission Control aesthetic,
-manus north star. It will have per-branch vetting evidence to display.
-
-### The UI scaffold, audited against the API — 2026-08-13
 
 A design scaffold exists (manus-generated, five pages: Home, Catalogue, Vetting,
 Model Performance, Upload). It is a **scaffold, not the product** — every number
@@ -2418,7 +2445,7 @@ so editing the trainer would have made the control arm and the intervention arms
 run different code — the exact comparability defect this project keeps paying
 for. Queued for immediately after the block.
 
-#### Which mission the console reports — decided 2026-08-13
+#### 3.10a Which mission the console reports — decided 2026-08-13
 
 The scaffold shows **ROC-AUC 0.955** as its headline on two pages. That is the
 pooled all-mission figure, and it should not be the headline. **The objection is
@@ -2467,7 +2494,7 @@ reads TESS 0.9202 / Kepler 0.9547 / K2 0.9351 — so the console's mission panel
 to be driven by whichever model is served rather than by a fixed three-column
 layout.
 
-#### Two things the project already computes and the scaffold does not show
+#### 3.10b Two things the project already computes and the scaffold does not show
 
 **Follow-up prioritisation.** `CandidateRow` already carries `tsm`, `esm`,
 `teq_k`, `insolation_earth` and the habitable-zone edges — Kempton (2018)
@@ -2480,7 +2507,7 @@ in the project and the console represents it nowhere. A per-candidate indicator
 that its score may be inflated by observation baseline would make the stage
 visible to a user instead of buried in this file.
 
-#### Not required before stage 11
+#### 3.10c Not required before stage 11
 
 File upload and coordinate resolution (the scaffold's Upload page offers three
 modes; only `/score/{tic_id}` exists), a fitted transit-model overlay on the
@@ -2488,12 +2515,381 @@ phase fold (this project classifies, it does not fit Mandel-Agol), and the
 momentum-dump and stellar-variability diagnostic flags. All real work, none
 blocking, all deferred with stage 12.
 
-## Considered and deferred
+
+## 4. The forward plan — what remains, in order
+
+Each item states **what**, **why**, **the deliverable**, and **what stops it**.
+Costs are working hours: `build` is hands-on, `compute` is unattended. Merged
+from `plan-2026-08-09.md` on 2026-08-14 and re-costed against what stage 8
+actually took.
+
+**Three rules it is built on**, unchanged from the plan:
+
+1. **Forward only.** No item depends on a later one.
+2. **Every item has a kill criterion.** This project's expensive failures were
+   runs that could not have changed a decision. An item that cannot state what
+   result would make it stop does not start.
+3. **The UI is last and is pure presentation.** If it needs a number the API
+   cannot produce, an earlier item was not finished.
+
+### 4.1 Stage 10.5 — the ensemble arm · next · build + ~8 h compute
+
+**Why this exists.** Five arms have been rejected, every one on shortlist recall,
+and every one asked the same question: *does this replace the incumbent?* Nobody
+ever asked whether it **complements** it. Measured on the 2,367 shared TESS
+gating rows, at each model's own 1% FPR cut:
+
+| caught | n |
+|---|---:|
+| both | 117 |
+| incumbent only | 282 |
+| branch only | 172 |
+| neither | 729 |
+
+Spearman agreement between the two scores is **0.654**. They are not a better
+and a worse model; they are right about different targets. Combining them:
+
+| combiner | TESS AUC | recall @1% FPR |
+|---|---:|---:|
+| branch alone | 0.9215 | 0.2223 |
+| incumbent alone | 0.9100 | 0.3069 |
+| mean of probabilities | 0.9498 | 0.4292 |
+| **mean of logits** | **0.9537** | **0.4746** |
+| rank-average | 0.9535 | 0.4538 |
+
+**Every combiner beats both models.** Mean of logits is +0.168 recall over the
+incumbent — **5.7× the 0.0337 floor** — and needs no population statistics, so it
+is deployable as written.
+
+**This is exploratory and is NOT a result.** One draw, no ensemble variance
+estimate; the two runs used different CV splits, so while no row's own label
+leaked (both scores are out-of-fold in their own run), it is not a clean joint-CV
+measurement. **A pre-registered confirmation run is required before any of it is
+read as a finding.**
+
+**Sequenced after stage 8, on the same argument that put stage 8 ahead of stage
+9** — stage 8 changes the labels both models learn from, so measuring this first
+means measuring it twice. Ollie's decision, 2026-08-12.
+
+**Pre-registered now, before the run exists.**
+
+*What is run.* Both models on a **common fold assignment**, the ensemble scored
+out-of-fold, `--n-models-per-fold 3` so the ensemble carries its own variance
+estimate rather than borrowing a single model's.
+
+*What is measured.* TESS AUC and recall @1% FPR on the gate slice; the
+control-arm split through the stage 7i harness; and Spearman(score,
+`baseline_days`), because an ensemble that inherits the *worse* of its two
+members' baseline dependence is not an improvement for the deployment use.
+
+*The bar.* Recall @1% FPR against the incumbent's 0.307, read against the
+ensemble's own measured floor by the stage 6 rule. Nothing under **1×** the floor
+is a decision.
+
+| outcome | reading |
+|---|---|
+| ensemble recall **above** incumbent beyond its floor | the branch line's value is as a **complement**, not a replacement. This reopens nothing about stage 4 — those rejections were about replacement and remain correct |
+| **within** its floor | the disjointness is real but does not convert into shortlist recall. Record it and close the branch line as the plan already anticipates |
+| ensemble recall **below** the incumbent | the exploratory reading was an artefact of the mismatched splits. Report it as falsified; do not re-specify |
+
+*Predictions, recorded so they can be wrong.*
+
+1. The confirmation run lands **below** the exploratory 0.4746, because the
+   mismatched-split version gave each model a slightly different training set
+   and that flatters an ensemble.
+2. It still clears the incumbent's 0.307 by more than its floor.
+3. Baseline sensitivity of the ensemble sits **between** its two members'
+   (+0.5155 branch, +0.3812 incumbent) rather than below both — averaging does
+   not remove a confound both models share.
+
+*Nothing promotes on this either.* A favourable ensemble number is an argument
+for a serving change, which is stage 11 work and Ollie's call.
+
+**Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
+negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
+built with our existing injection machinery. Plus the observation-selection
+problem below, which arrived here from the branch-model work.
+
+**Moved ahead of stage 9 on 2026-08-08.** Two reasons. Stage 8's
+interventions change the training distribution, so anything measured before it
+has to be re-measured after — and stage 9 is the expensive one, so the roadmap
+order paid for it twice. And on the evidence, two architecture runs have now
+been rejected while the largest measured defect sits at **+0.278 in the labels
+themselves, +0.387 on TESS** — above every model, and somewhere no architecture
+can reach. The original ordering was set before either of those facts existed.
+
+Two knock-ons to expect: changing the label distribution invalidates the
+re-baselined incumbent summary from stage 3, which will need regenerating — one
+command, and a reason to keep stage 3 a repeatable path rather than a one-off
+artefact — and it invalidates stage 7's attribution numbers, which is exactly why
+stage 8 sits ahead of stage 9.
+
+
+### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
+
+**Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
+left in the model, with quality attention. Blocked on a known problem: the stamps
+are **11–17 px, not the fixed 33×33** the design assumed — that is Kepler's size
+— so they must be re-gridded to a fixed size first.
+
+**What.** Re-grid the 11–17 px stamps to a fixed size, then the branch with
+quality attention. View-set rebuild (~95 min) plus 2 CV runs.
+
+**Why here.** The last genuine build in the model, and the direct instrument
+against **W2**: a centroid shift under the transit is how a background eclipsing
+binary is caught — the host-scoring pathology at its source rather than at its
+symptom. After stage 8, or the distribution moves under it and it is measured
+twice.
+
+**Deliverable.** A branch model carrying the difference-image branch, measured
+against a post-stage-8 control.
+
+**Stops if.** Re-gridding costs more than ~3 h or is lossy enough to need a
+design decision. That is a stop-and-ask, not a judgement call to make alone.
+
+
+### 4.3 Stage 10 — Optuna re-tune · 2 h build · 10–13 h compute
+
+**Stage 10 *(old G)* — Optuna re-tune.** On the winner, after the distribution is
+settled. `conf/train/tune.yaml` sets `timeout: 7200` **per invocation** and the
+study resumes, so this is several invocations rather than one. The existing
+campaign already rejected focal loss; do not re-litigate it without a reason.
+
+**What.** Re-tune on the winning architecture once the distribution is settled.
+Several invocations — `tune.yaml` sets `timeout: 7200` *per invocation* and the
+study resumes.
+
+**Why here.** It extracts what is left only once architecture *and* labels have
+stopped moving; run earlier it tunes to a distribution about to change. It is
+also the last chance to move **W3** and **W9** before the promote/close decision.
+
+**Deliverable.** Either a branch model that passes the gate on TESS AUC *and*
+recall @1% FPR, **or the written decision that closes the branch line** with
+`ca906040` (or its retune) staying served. Both are finished states.
+
+**Stops if.** The existing campaign already rejected focal loss — do not
+re-litigate it without a new reason.
+
+
+### 4.4 Stage 7ii — branch attribution · 1 h build · ~7 h compute
+
+**What.** Leave-one-out over the branch families on the final architecture and
+the settled distribution, at `--n-models-per-fold 3`. One pass.
+
+**Why here and not earlier.** Attribution describes a **finished** branch set.
+Run before stages 8, 9 and 10 it measures something about to change — which the all-null
+three-family sweep already spent six hours demonstrating. The unresolved question
+from that sweep is **redundancy**, which leave-one-out structurally cannot
+separate, so this pass should include the **joint drop** the previous session
+identified rather than five more single ones.
+
+**Deliverable.** Which branches earn their place, once, with error bars.
+
+**Stops if.** The result is null again. That is an answer — record "no branch is
+uniquely necessary" and proceed to stage 11. **Do not** commission a third sweep.
+Note the previous sweep's PASS/null split was decided by 3-draw error bars, so
+either use more members per fold or report the classification as indicative only.
+
+
+### 4.5 Stage 11 — serving parity and explainability · 10–15 h build · no compute
+
+**Stage 11 *(old 4)* — serving parity and explainability.** `TargetScorer` computes every
+branch live; `/score` returns per-branch contributions via branch-occlusion.
+ExoMiner's explainability story, made interactive — which their batch pipeline
+cannot do.
+
+**What.** `TargetScorer` computes every branch live; `/score` returns per-branch
+contributions via branch-occlusion.
+
+**Why here.** It closes **W4 and W5**, it is the only step whose absence blocks
+shipping anything, and it is what the UI displays. Adjacent to stage 7ii
+deliberately: **occlusion and leave-one-out are the same measurement at different
+granularity** — per-target against per-population — so running them together
+validates the serving implementation instead of leaving two attributions to
+disagree in public.
+
+**Deliverable.** A branch model scoreable from a light curve, with per-branch
+contributions through the API.
+
+**Stops if.** Nothing expected. W11's Metal abort does **not** apply — occlusion
+is forward passes.
+
+
+### 4.6 Finishing touches · 4–6 h · no compute
+
+Small, and each one closes a named weakness rather than polishing:
+
+| item | closes |
+|---|---|
+| persist `score_std`, surface it per candidate in the catalogue | **W6**, ExoMiner adoption 5 |
+| provenance headers written into every `results/*.csv` | ExoMiner adoption 6 |
+| precision@k alongside recall @1% FPR | reporting gap |
+| per-feature normalisation policy as a declared config artefact | ExoMiner adoption 2 |
+| **a written decision on the Kepler cell** — investigate or accept unexplained | **W7**, currently unowned |
+| retire `HANDOVER.md` — archive it and update every reference | **W14** |
+| versioned container with the model DOI in its labels | ExoMiner adoption 10 |
+
+**Why here.** Each needs the final model to exist. None blocks anything
+before it.
+
+
+### 4.7 Stage 12 — UI redesign · locked last
+
+**Stage 12 *(old 5)* — the UI redesign.** Unchanged and last. Mission Control aesthetic,
+manus north star. It will have per-branch vetting evidence to display.
+
+Mission Control aesthetic, manus north star. **Pure presentation** — per-branch
+vetting evidence that already exists, displayed well.
+
+**The test that it was sequenced correctly:** if this step needs a number the
+API cannot produce, a step before it was not finished.
+
+---
+
+### 4.8 Totals, and what "finished" means
+
+**Re-costed 2026-08-14.** The plan's original table is superseded: it omitted
+stage 10.5 entirely (pre-registered three days after the plan was written) and
+inherited a "~70 min per CV run" figure that stage 8 measured at ~2 h.
+
+| order | item | build | compute | total |
+|---|---|---:|---:|---:|
+| 1 | stage 10.5 ensemble arm | 8–10 h | ~8 h | **16–18 h** |
+| 2 | stage 9 difference-image branch | 6–9 h | 3–4 h | **9–13 h** |
+| 3 | stage 10 Optuna re-tune | 2 h | 10–13 h | **12–15 h** |
+| 4 | stage 7ii branch attribution | 1 h | ~7 h | **8 h** |
+| 5 | stage 11 serving parity | 10–15 h | — | **10–15 h** |
+| 6 | finishing touches | 4–6 h | — | **4–6 h** |
+| 7 | stage 12 UI redesign | *unestimated* | — | *unestimated* |
+| | | | | **~59–75 h** plus the UI |
+
+**Stage 10.5 carries two build items no earlier plan costed**, both found
+2026-08-14 and both reusable rather than one-offs: neither trainer can accept
+an external fold assignment, and the dual-view trainer has no
+`n_models_per_fold`. Stages 9 and 7ii face the same cross-run comparability
+problem the fold artefact solves.
+
+**One dependency worth stating.** If stage 10.5 clears its bar, the branch line
+survives as a **complement** rather than a replacement, and stage 11 then has
+to serve two models rather than one. Its 10–15 h assumes one. Partly mitigated
+by `ScoringEnsemble.from_registry` already loading `cnn_dualview.keras`, but it
+is not costed above.
+
+**Finished** is the seven-point contract in `handover-2026-08-08.md`. After the
+finishing touches all seven are satisfiable, with two exceptions named
+honestly: **W7** (the Kepler cell, which the finishing touches force a decision
+on rather than silently carrying) and **distribution** (a published catalogue
+with a DOI — a publishing task, deliberately not on this plan).
+
+**The likely shape of the ending, said plainly.** Five arms have been rejected,
+every one on shortlist recall, and stage 7i found no control-arm advantage
+either. The probable resolution is *"the branch line is closed in writing and
+`ca906040`, or its stage 10 retune, stays served"* — which is one of the two
+finished states, not a failure. Stage 10.5 is the one live route to a different
+ending, and it is a **complement** ending rather than a replacement one. What
+the project delivers either way is a calibrated, explainable, reproducible
+vetting service, the label-bias work that improves any model including the
+incumbent, and an evaluation apparatus that can tell a real improvement from
+noise. Only "we never found out" would be a failure.
+
+## 5. Standing audits
+
+Done, acted on, and kept here so they are not re-run from scratch. Merged from
+`plan-2026-08-09.md`; the dates are when each was performed.
+
+### 5.1 ExoMiner re-audit — not warranted, and the test applied
+
+`docs/exominer-comparison-2026-08-07.md` is a 42 KB deep dive: 10 ranked
+adoptions, six questions answered against their source, what v2 already does
+better, and an explicit "do not copy" list. A re-read would re-derive it.
+
+**What is actually outstanding is the delta, and it is already enumerated:** of
+the 10 adoptions, **6 are done** (shared conv tower, paired Wilcoxon, Cohen's *d*,
+N-models-per-fold with the presence gate, serialisable registered layers, code
+version pinned in the model config) and **4 are open** — declarative normalisation
+policy as an artefact, per-example uncertainty published, provenance headers in
+every CSV, versioned container with a DOI. All four are **finishing touches**.
+
+**The one thing worth a fresh look, and only when publishing becomes a goal:**
+their published TESS catalogue. That is the single genuine gap against them
+(distribution — a survey-scale catalogue with per-row uncertainty, a DOI and a
+citation ask), it is a publishing task rather than an engineering one, and it is
+deliberately not on this plan.
+
+### 5.2 Security audit — done and acted on, 2026-08-09
+
+| check | result |
+|---|---|
+| hardcoded secrets, keys, tokens across `.py/.yaml/.toml/.json/.ts/.tsx` | **clean** — only `js-tokens` false positives in a lockfile |
+| private keys, AWS-style credentials | **none** |
+| CORS | **correctly scoped** — explicit origin allowlist, `allow_methods=["GET"]`, no wildcard |
+| input bounds on `/score` | **already hardened** — TIC range, period/duration/epoch ceilings, server paths redacted from client errors |
+| auth on a public read-only scoring API | absent by design; defensible |
+| rate limiting | **was absent — now added**, `app/ratelimit.py`, 12 tests |
+| Python dependency CVEs | **30 across 8 packages** — triaged below, **not bulk-upgraded** |
+| npm dependency CVEs | **4 (1 moderate, 3 high)** — **deliberately not fixed tonight**, see below |
+
+**W12's severity was overstated when this plan was first written, and the
+correction matters.** `/score` already carries `_score_lock` (one score at a
+time, so concurrent callers queue rather than thrash the single serving CPU) and
+a 128-entry process-lifetime response cache (a repeated TIC is free). What
+neither bounds is a caller walking *distinct* TIC IDs — every one is a cache miss
+and a fresh MAST download, serialised into a slow drain of wall clock and egress.
+So the real exposure is **cost and availability, not a crash**, and the limiter
+is the third mitigation rather than the first.
+
+**Python CVEs — triaged by reachability rather than counted.** Bulk-upgrading
+this environment is the wrong move: TF 2.17.1 / Keras 3.15.0 on Metal is a
+working stack and the non-negotiable about environment integrity exists because
+it has been broken before.
+
+| package | advisories | reachable from the served image? |
+|---|---:|---|
+| `gitpython` | **14** | **no** — MLflow-side; `dvc` in this install does not require it, and it is not in `docker/constraints.txt` |
+| `protobuf` 4.25.9 | 1 | **yes — and the fix is blocked.** See below |
+| `aiohttp`, `cryptography`, `h2`, `pyasn1`, `setuptools`, `diskcache` | 15 | unpinned in the serving constraints; transitive, low reachability from a read-only scoring path |
+
+> **The one finding worth escalating: `protobuf` cannot be fixed as advised.**
+> PYSEC-2026-1805 lists fixes at **5.29.6 / 6.33.5**, and TensorFlow 2.17.1
+> requires **`protobuf <5.0.0dev`**. The advisory's remedy is therefore
+> uninstallable without moving TensorFlow, which moves the whole training stack.
+> Recorded as an **accepted, documented risk pending a TF upgrade** — not
+> silently skipped, and not forced.
+
+**npm — not fixed tonight, on purpose.** `npm audit fix` rewrites
+`package-lock.json`, and that file currently carries **another session's
+uncommitted `animejs` addition**. Running it would either entangle that work in a
+security commit or leave a tangled tree — the same class of mistake as the
+`git add docs/` trap, in a new place. The advisories are build-time only
+(`postcss` and friends; the deployed console is static), so the cost of waiting
+is near zero. **One command, Ollie's call, once the frontend work is committed.**
+
+### 5.3 Cleaning audit — done. The repo is clean; the disk is not
+
+| what | size | verdict |
+|---|---:|---|
+| `data/` | **74 GB** | mostly the 25 GB FITS cache and derived sets. The FITS cache is the harness's compute saving — **do not delete** |
+| `mlruns/` | **1.5 GB** | MLflow history; prunable, low value, **not re-derivable** — ask before touching |
+| `models/` | 380 MB | run directories. Every one is a baseline or a record |
+| tracked files | **257** | small and tidy for a project this size |
+| `.git` | 96 KB (worktree) | v2 is a **worktree** of `/Users/ollie/Project` |
+
+The 2026-08-08 sweep already reclaimed 395.9 MB of orphaned interim cache, and
+that was done with a disjointness assertion rather than a glob. There is **no
+second pile like it** — the earlier one was created by the `_cache_path`
+ephemeris key and that cost has been paid once.
+
+**Nothing is proposed for deletion.** Deleting non-re-derivable data is a
+stop-and-ask, and none of the above is worth the risk for the space it returns.
+
+---
+
+## 6. Considered and deferred
 
 Decisions recorded with their reasoning, so they are not re-litigated from
 scratch each time they come up.
 
-### Transit search on raw light curves
+### 6.1 Transit search on raw light curves
 
 **Status: possible today at single-target scale; deferred as a programme.**
 
@@ -2533,7 +2929,7 @@ duo-transit detection is an area where BLS structurally underperforms and where
 the community is still finding planets. If search ever enters this project,
 that is the door — not a general re-run of SPOC.
 
-### A large language model in the pipeline
+### 6.2 A large language model in the pipeline
 
 **Status: rejected for the core pipeline.**
 
@@ -2556,3 +2952,31 @@ the structured diagnostics. For explainability, stage 11's per-branch occlusion
 contributions are quantitative and faithful to what the model computed;
 narrating them with an LLM would add a layer that can be wrong about our own
 model, which is the opposite of the goal.
+
+## 7. Change log — the 2026-08-14 restructure
+
+Recorded because a reshuffle of the evidence record is exactly the kind of
+change that quietly loses a number.
+
+**Verified mechanically:** every non-heading, non-blank line of the previous
+`roadmap.md` is present in this one. Only heading text changed, plus the new
+prose in *How to read this file*, 1d, 4.8 and this section.
+
+| change | detail |
+|---|---|
+| numbered structure | flat `##`/`###` headings became `1`–`7` with `1a`/`3.2a` parts |
+| section 3 reordered to chronological | the capacity-arm **launch** now precedes its **result** (the file had them inverted); *Observation baseline* moved ahead of the stage 8 pre-registration it motivates; stage 10.5's pre-registration moved out of the middle of the record into the forward plan at 4.1 |
+| `plan-2026-08-09.md` deleted | its weakness register → 1d; its forward items → 4.2–4.7; its audits → 5.1–5.3; its totals rewritten at 4.8. The plan's own descriptions of hygiene, stage 7i and stage 8 were dropped as superseded by the recorded results in section 3 — they held estimates, not measurements. The file remains in git history |
+| forward paragraphs pulled out of the record | the stage 9, 10, 11 and 12 paragraphs that sat inside the stage 8 result and the observation-baseline section moved to 4.2, 4.3, 4.5 and 4.7 |
+| W1 status updated | the plan's "above every model" line no longer holds for arm P, which sits **below** its labels after propensity weighting |
+| W13 status updated | the `npm audit fix` blocker is gone — `frontend/` is clean and the lockfile committed |
+| totals re-costed | stage 10.5 added; the ~70 min per CV run figure replaced with the measured ~2 h |
+
+**Handovers dated before 2026-08-14 still reference the deleted plan** —
+`handover-2026-08-08.md`, `handover-stage-8.md` and `handover-stage-8-close.md`.
+They are historical records and the project does not edit them, so the references
+are left dangling on purpose; `docs/index.md` says where to read instead.
+`handover-2026-08-14.md` is the live one and was updated.
+
+**Not changed:** every pre-registration block, every measured number, and the
+stage-number mapping in 1c.
