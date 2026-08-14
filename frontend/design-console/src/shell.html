@@ -247,24 +247,24 @@ select option{background:#0A0C10;color:#F0EEE8;}
    ═══════════════════════════════════════════════════════════ */
 #hstat{
   position:absolute;right:clamp(1.5rem,4vw,3rem);bottom:5.5rem;z-index:3;
-  width:min(21rem,42vw);
+  width:min(17.5rem,36vw);
   border:1px solid rgba(255,255,255,0.10);background:rgba(10,12,16,0.72);
-  backdrop-filter:blur(10px);padding:1rem 1.1rem 0.95rem;
+  backdrop-filter:blur(10px);padding:0.8rem 0.9rem 0.75rem;
 }
-#hstat .row{display:flex;align-items:center;gap:0.6rem;}
-#hstat .label{font-family:'Space Grotesk',sans-serif;font-size:0.62rem;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;flex:1;min-width:0;}
-#hstat .detail{font-family:'JetBrains Mono',monospace;font-size:0.62rem;color:#8A8FA8;margin-top:0.45rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#hstat .foot{font-family:'Inter',sans-serif;font-size:0.66rem;line-height:1.5;color:rgba(240,238,232,0.42);margin-top:0.7rem;}
-#hstat .replay{background:none;border:1px solid rgba(255,255,255,0.12);color:#8A8FA8;font-family:'JetBrains Mono',monospace;font-size:0.62rem;line-height:1;padding:0.25rem 0.4rem;transition:all 150ms ease;flex:none;}
+#hstat .row{display:flex;align-items:center;gap:0.5rem;}
+#hstat .label{font-family:'Space Grotesk',sans-serif;font-size:0.55rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;flex:1;min-width:0;}
+#hstat .detail{font-family:'JetBrains Mono',monospace;font-size:0.56rem;color:#8A8FA8;margin-top:0.35rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#hstat .foot{font-family:'Inter',sans-serif;font-size:0.6rem;line-height:1.45;color:rgba(240,238,232,0.42);margin-top:0.55rem;}
+#hstat .replay{background:none;border:1px solid rgba(255,255,255,0.12);color:#8A8FA8;font-family:'JetBrains Mono',monospace;font-size:0.56rem;line-height:1;padding:0.2rem 0.34rem;transition:all 150ms ease;flex:none;}
 #hstat .replay:hover{border-color:rgba(77,255,210,0.4);color:#4DFFD2;}
 /* indeterminate: a travelling sliver, for the sub-2s and suspend-resume paths */
-#hstat .rail{position:relative;height:2px;background:rgba(255,255,255,0.07);margin-top:0.75rem;overflow:hidden;}
+#hstat .rail{position:relative;height:2px;background:rgba(255,255,255,0.07);margin-top:0.6rem;overflow:hidden;}
 #hstat .rail .sliver{position:absolute;top:0;bottom:0;width:34%;background:linear-gradient(90deg,transparent,#F5A623,transparent);}
 /* determinate: only for the ~90s ensemble load, where a bar means something */
 #hstat .rail .fill{position:absolute;top:0;bottom:0;left:0;width:0%;background:#F5A623;box-shadow:0 0 8px rgba(245,166,35,0.5);}
 #hstat .rail.ready .fill{background:#4DFFD2;box-shadow:0 0 8px rgba(77,255,210,0.5);}
-#hstat .eta{display:flex;justify-content:space-between;align-items:baseline;margin-top:0.45rem;font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#8A8FA8;font-variant-numeric:tabular-nums;}
-#hstat .ring{width:13px;height:13px;flex:none;}
+#hstat .eta{display:flex;justify-content:space-between;align-items:baseline;margin-top:0.35rem;font-family:'JetBrains Mono',monospace;font-size:0.54rem;color:#8A8FA8;font-variant-numeric:tabular-nums;}
+#hstat .ring{width:11px;height:11px;flex:none;}
 #hstat .ring circle{fill:none;stroke-width:2;}
 @media(max-width:900px){
   #hstat{position:static;width:100%;max-width:26rem;margin-top:2.5rem;backdrop-filter:none;}
@@ -383,6 +383,8 @@ select option{background:#0A0C10;color:#F0EEE8;}
           <stop offset="45%" stop-color="rgba(255,200,100,0.3)"/>
           <stop offset="100%" stop-color="rgba(255,180,50,0)"/>
         </radialGradient>
+        <!-- keeps the drifting field inside the instrument, whatever the scatter does -->
+        <clipPath id="discClip"><circle cx="180" cy="180" r="119"/></clipPath>
       </defs>
 
       <!-- glowing segmented outer ring — folds, calibration, gates -->
@@ -398,8 +400,8 @@ select option{background:#0A0C10;color:#F0EEE8;}
       <!-- thin concentric arcs, drawn on with a stagger -->
       <g id="boot-arcs" fill="none" stroke-linecap="round"></g>
 
-      <!-- candidate field: blend-composition scatter -->
-      <g id="boot-field"></g>
+      <!-- candidate field: ringed worlds, blend-composition scatter -->
+      <g id="boot-field" clip-path="url(#discClip)"></g>
 
       <!-- the transit motif at the centre -->
       <path id="boot-transit"

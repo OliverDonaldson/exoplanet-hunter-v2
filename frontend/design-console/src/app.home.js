@@ -170,10 +170,21 @@ function countUp(el) {
   });
 }
 
-/* procedural stand-in for the hero photograph */
+/* Procedural stand-in for the hero photograph (hero-space-bg_8e38c7b4.jpg,
+   which was not in the design hand-off). Rendered at the same 0.35 opacity and
+   sits under the same two gradient overlays as the original.
+
+   Cool nebula only — the warm highlight that used to sit top-right read as a
+   lens flare, which is a camera artefact rather than anything in the sky, so
+   it is gone. */
 function heroBackdrop() {
   const c = document.getElementById('hero-bg');
   if (!c) return;
+  const NEBULA = [
+    [0.72, 0.30, 0.55, 'rgba(60,90,140,0.30)'],
+    [0.86, 0.55, 0.42, 'rgba(120,80,150,0.20)'],
+    [0.60, 0.72, 0.48, 'rgba(30,70,90,0.22)'],
+  ];
   const paint = () => {
     const w = c.width = c.offsetWidth, h = c.height = c.offsetHeight;
     if (!w || !h) return;
@@ -181,16 +192,15 @@ function heroBackdrop() {
     let seed = 20260719;
     const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
     ctx.fillStyle = '#050608'; ctx.fillRect(0, 0, w, h);
-    [[0.72,0.30,0.55,'rgba(60,90,140,0.30)'],[0.86,0.55,0.42,'rgba(120,80,150,0.20)'],
-     [0.60,0.72,0.48,'rgba(30,70,90,0.22)'],[0.95,0.15,0.30,'rgba(200,150,120,0.10)']].forEach(([cx,cy,r,col]) => {
-      const g = ctx.createRadialGradient(cx*w, cy*h, 0, cx*w, cy*h, r*Math.max(w,h));
+    NEBULA.forEach(([cx, cy, r, col]) => {
+      const g = ctx.createRadialGradient(cx * w, cy * h, 0, cx * w, cy * h, r * Math.max(w, h));
       g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
     });
     for (let i = 0; i < 900; i++) {
-      const x = rnd()*w, y = rnd()*h, s = rnd()*1.3+0.2, o = rnd()*0.55+0.05;
+      const x = rnd() * w, y = rnd() * h, s = rnd() * 1.3 + 0.2, o = rnd() * 0.55 + 0.05;
       ctx.fillStyle = `rgba(240,238,232,${o})`;
-      ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
     }
   };
   paint();

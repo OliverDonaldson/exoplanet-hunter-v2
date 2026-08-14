@@ -148,6 +148,15 @@ with a specular highlight, thin concentric arcs drawn on with a stagger, and a
 particle field — rendered in our palette, with our motif at the centre (a
 planet transiting its star, tracing the light-curve dip).
 
+The field is a grid of little ringed worlds: each is a `<g>` holding a filled
+circle and a tilted ellipse. The group carries **no** `transform` attribute of
+its own — anime.js owns the element's transform, and a translate baked into the
+markup would be overwritten on the first frame — so position lives in the
+children's coordinates and `transform-box: fill-box` puts the origin on the
+planet. Each world scales in from 0, so it is a circle at every frame and never
+reads as a square. The whole field is clipped to the disc, which keeps the
+scatter inside the instrument however far a drift throws it.
+
 anime.js features used: `svg.createDrawable` with `draw` for the ring segments,
 arcs and the transit trace; `svg.createMotionPath` for the transiting planet;
 `stagger` with a `grid` for the particle field; `composition: 'blend'` so the
@@ -156,3 +165,53 @@ readout.
 
 Skipped entirely under `prefers-reduced-motion`. A 9 s hard timeout guarantees
 the console is never left behind the overlay if the animation stalls.
+
+**Reviewing it:** `dist/preview.html?boot=hold` freezes the dial fully assembled,
+just before it hands over, so the composition can be looked at without catching
+a 4-second animation.
+
+## Porting to React
+
+The prototype is plain DOM because it has to build to a single file. In
+`frontend/src` the same animations belong inside a `createScope()` bound to a
+root ref, so every instance is scoped to the component and torn down with it:
+
+```jsx
+import { animate, createScope, stagger, svg } from 'animejs';
+import { useEffect, useRef } from 'react';
+
+export function BootOverlay({ onDone }) {
+  const root = useRef(null);
+  const scope = useRef(null);
+
+  useEffect(() => {
+    scope.current = createScope({ root }).add(() => {
+      // selectors resolve inside <div ref={root}> only
+      animate(svg.createDrawable('.boot-seg'), {
+        draw: ['0 0', '0 1'],
+        delay: stagger(55),
+        ease: 'out(3)',
+        duration: 900,
+        onComplete: onDone,
+      });
+    });
+    // reverts every animation declared in the scope, and restores inline styles
+    return () => scope.current.revert();
+  }, [onDone]);
+
+  return <div ref={root}>{/* dial markup */}</div>;
+}
+```
+
+Two things that matter when moving this over:
+
+- **`revert()`, not `cancel()`.** `cancel()` stops an animation but leaves the
+  inline styles anime.js wrote on the element; `revert()` puts them back. In a
+  component that mounts more than once, `cancel()` leaves stuck transforms.
+- **Scope the selectors.** `createScope({ root })` makes `'.boot-seg'` resolve
+  inside the component, so two instances on one page cannot animate each other's
+  nodes.
+
+`createScope` also takes `mediaQueries`, which is the tidiest place to handle
+`prefers-reduced-motion` — `self.matches.reduced` inside the scope callback,
+rather than a `matchMedia` check scattered through the animation code.
