@@ -2111,6 +2111,30 @@ interventions, and all three belong here.
 
 ### 3.9 Stage 8 — labels and negatives
 
+**Why this stage exists, and why it was moved.** Recorded 2026-08-08,
+before any of it ran.
+
+**Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
+negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
+built with our existing injection machinery. Plus the observation-selection
+problem below, which arrived here from the branch-model work.
+
+**Moved ahead of stage 9 on 2026-08-08.** Two reasons. Stage 8's
+interventions change the training distribution, so anything measured before it
+has to be re-measured after — and stage 9 is the expensive one, so the roadmap
+order paid for it twice. And on the evidence, two architecture runs have now
+been rejected while the largest measured defect sits at **+0.278 in the labels
+themselves, +0.387 on TESS** — above every model, and somewhere no architecture
+can reach. The original ordering was set before either of those facts existed.
+
+Two knock-ons to expect: changing the label distribution invalidates the
+re-baselined incumbent summary from stage 3, which will need regenerating — one
+command, and a reason to keep stage 3 a repeatable path rather than a one-off
+artefact — and it invalidates stage 7's attribution numbers, which is exactly why
+stage 8 sits ahead of stage 9.
+
+
+
 #### 3.9a Pre-registered before stage 8 runs — recorded 2026-08-12, nothing built
 
 Written before any intervention exists, because nobody is watching an autonomous
@@ -2605,25 +2629,89 @@ is a decision.
 *Nothing promotes on this either.* A favourable ensemble number is an argument
 for a serving change, which is stage 11 work and Ollie's call.
 
-**Stage 8 *(old 3)* — labels and negatives.** EB-catalogue and brown-dwarf
-negatives, the ephemeris-match test, and scrambled/inverted synthetic negatives
-built with our existing injection machinery. Plus the observation-selection
-problem below, which arrived here from the branch-model work.
+#### 4.1a Amendment — recorded 2026-08-14, before anything was built or run
 
-**Moved ahead of stage 9 on 2026-08-08.** Two reasons. Stage 8's
-interventions change the training distribution, so anything measured before it
-has to be re-measured after — and stage 9 is the expensive one, so the roadmap
-order paid for it twice. And on the evidence, two architecture runs have now
-been rejected while the largest measured defect sits at **+0.278 in the labels
-themselves, +0.387 on TESS** — above every model, and somewhere no architecture
-can reach. The original ordering was set before either of those facts existed.
+**The pre-registration above stands verbatim.** This amendment settles four
+things it could not have anticipated, and it is recorded *before* the first line
+of the build so that none of it can be chosen after seeing a number.
 
-Two knock-ons to expect: changing the label distribution invalidates the
-re-baselined incumbent summary from stage 3, which will need regenerating — one
-command, and a reason to keep stage 3 a repeatable path rather than a one-off
-artefact — and it invalidates stage 7's attribution numbers, which is exactly why
-stage 8 sits ahead of stage 9.
+**1. Two ensemble arms, not one. Ollie's decision, 2026-08-14.** Stage 10.5 was
+sequenced after stage 8 on the argument that *"stage 8 changes the labels both
+models learn from"*. **It did not** — group (a) was skipped and the labels never
+moved (3.9b). What stage 8 changed is the training *weighting*, and arm P is the
+only thing the stage delivered. Which branch model enters the ensemble is
+therefore an open question the pre-registration does not answer, and picking one
+silently would confound the answer. Both run, against **one shared dual-view
+member on the same folds**:
 
+| arm | branch member | what it is for |
+|---|---|---|
+| **E-C** | the plain control, un-weighted | the like-for-like confirmation of the exploratory 0.4746 |
+| **E-P** | the propensity-weighted arm | the one carrying stage 8's deliverable |
+
+*How the pair reads — fixed now.*
+
+| outcome | reading |
+|---|---|
+| **both** arms clear their bar | the complement finding is robust to the weighting. Carry **E-P** forward, since it also carries stage 8's amplification fix |
+| **E-C** clears, **E-P** does not | propensity weighting costs the ensemble what it gained the single model. A real trade-off, reported as one — it does **not** retract stage 8, whose result is on a different statistic |
+| **E-P** clears, **E-C** does not | the exploratory reading was specific to the un-weighted branch model. Report it, and say plainly that the 0.4746 was not the thing confirmed |
+| **neither** clears | the disjointness is real but does not convert into shortlist recall. Close the branch line as 4.8 anticipates |
+
+**2. The bar is the ensemble's own dual-view member, not the incumbent's 0.307.
+Ollie's decision, 2026-08-14.** The pre-registration says *"recall @1% FPR
+against the incumbent's 0.307"*. That figure is `ca906040` on **its own folds and
+its own rows**. The common-fold dual-view is a different model trained on a
+restricted population, so measuring the ensemble against 0.307 would blend the
+ensemble effect with the refit effect — the confound stage 8's control arm exists
+to prevent, arriving in a new place. Stage 8 has just demonstrated what that
+costs: its control moved +0.0494 on a statistic through reseeding alone.
+
+**So: ensemble recall @1% FPR against the common-fold dual-view member's own
+recall, on the same folds, read against the ensemble's own measured floor by the
+stage 6 rule. The incumbent's 0.307 is reported beside it as the historical
+figure and does not gate.** This changes what the number is measured *against*,
+not how it reads; both outcome tables stand as written.
+
+**3. The evaluation population is the 5,375 tics both shard sets carry.**
+`data/processed/tfrecords` holds 5,380 examples and `data/processed/viewset_tfrecords`
+5,426; the intersection is **5,375**. Rows outside it are dropped from CV in both
+models, so each trains on a slightly smaller set than its solo run. That is the
+price of a joint measurement, recorded now rather than discovered in the reading.
+
+**4. The threshold-free host-AUC is reported beside the control-arm split.**
+Prediction 4 established that the split moves with operating-point placement
+independently of the construct it stands for (3.9c). The split remains the
+pre-registered statistic; the host-AUC over the same hosts, with a paired
+bootstrap, is reported alongside. An addition to the reporting, **not** a
+re-specification of the bar.
+
+**What has to be built before any of this can run, found 2026-08-14.**
+
+1. **Neither trainer accepts an external fold assignment.** `training/train.py`
+   and `training/train_branches.py` each construct their own
+   `StratifiedGroupKFold` over their own shard set, and the sets differ, so no
+   seed makes them agree. A shared fold artefact plus injection into both is the
+   blocking build. It is **reusable** — stages 9 and 7ii face the same cross-run
+   comparability problem.
+2. **The dual-view trainer has no `n_models_per_fold`.** The pre-registration
+   requires `--n-models-per-fold 3` *"so the ensemble carries its own variance
+   estimate rather than borrowing a single model's"*, and only
+   `train_branches.py` supports it. Either it is built on the dual-view side, or
+   the ensemble ships without the variance estimate its own bar depends on —
+   which would make the bar unreadable, so it is built.
+
+*Predictions for the second arm, recorded so they can be wrong.*
+
+1. **E-C and E-P land within each other's floor** on recall @1% FPR. Propensity
+   weighting moved amplification without moving AUC or recall on the single
+   model, and there is no measured reason for an ensemble to behave differently.
+2. **E-P's baseline sensitivity sits below E-C's**, because one of its two
+   members has had its amplification removed — but **both sit above the dual-view
+   member alone**, since averaging cannot remove a confound both members share.
+   This is prediction 3 of the original pre-registration, applied per arm.
+3. **Neither arm moves the control-arm host-AUC** off the ~0.60 that stage 8 left
+   it at. Host-scoring has now survived every intervention aimed at it.
 
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
