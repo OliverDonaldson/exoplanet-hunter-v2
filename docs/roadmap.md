@@ -2376,8 +2376,14 @@ characterised by exactly one control retrain (+0.0494), and that is half the
 effect being claimed — the same thinness already recorded against the three-draw
 floors below.
 
-Reproduction: `~/Downloads/.stage8-scratch/prediction4.py` rebuilds every figure
-in this subsection from the two `results/control_arm/stage8-*.parquet` files.
+Reproduction: `~/Downloads/.stage8-scratch/prediction4.py` rebuilds **the split
+table and its bars** from the two `results/control_arm/stage8-*.parquet` files.
+**It does not rebuild the threshold-free block** — the host-AUCs, either
+bootstrap CI, the median/percentile diagnostics or the sign-flip correlations
+have no recipe. *(Corrected 2026-08-15: this line previously claimed "every
+figure in this subsection", which was false. The audit re-derived the
+threshold-free block independently and it is correct — 0.5876 / 0.6234 / 0.6045,
+paired −0.0190 with a CI crossing zero — but nothing in the repo re-derives it.)*
 
 **Two defects in the run's own record, found while reading it.**
 
@@ -2403,7 +2409,15 @@ regenerates **byte-identical** to the committed
 `models/cv/incumbent-rebaselined/cv_summary.json`, because the 2026-08-08 label
 refresh flipped **zero** labels across the 5,703 `tic_id`s common to
 `labels.previous.parquet` and `labels.parquet` — it added two rows and changed
-nothing else, and neither added row is in the incumbent's scored set. **And had
+nothing else, and neither added row is in the incumbent's scored set.
+
+> **This no longer reproduces against the working tree, and the reason is not a
+> defect in the claim.** Audited 2026-08-15: a catalogue refresh ran at 09:00 on
+> 2026-08-15 and rotated `labels.parquet` into `labels.previous.parquet`, so the
+> working tree now shows **5,705 common / 0 added**, which reads as a
+> contradiction. Against the DVC pointer that was current when the claim was
+> written the figures are **exactly** 5,703 common / 0 flipped / 2 added. The
+> claim is correct; the artefact under it moved. See 5.4. **And had
 labels moved, `summarise` could not have propagated it**: `load_predictions`
 re-joins only `mission`, taking `y_true` from the predictions parquet, so the
 label change would have needed `evaluate.py score`, not `summarise`. The
@@ -2844,6 +2858,44 @@ way rather than dressed as a blind pre-registration.
 
 **Nothing promotes on this either**, and it changes no serving decision.
 
+##### Result — the finding is banked, on a floor that no longer depends on a choice
+
+| arm | margin | min | **mean** | max | x (mean) | x (max, the bar) | x (min, *not* the headline) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **E-C** | +0.1315 | 0.0340 | **0.0407** | 0.0523 | **3.2x** | **2.5x** | 3.9x |
+| **E-P** | +0.1177 | 0.0285 | **0.0469** | 0.0691 | **2.5x** | **1.7x** | 4.1x |
+
+**Both arms clear `1x` under the maximum-pairing floor, so per rule 2 the
+complement finding is banked.** The headline multipliers are **3.2x and 2.5x**,
+against the **3.9x and 4.1x** 3.11c reported. Every recall figure, margin, AUC and
+baseline sensitivity in 3.11c is unchanged — only the divisor moved.
+
+**The size of the error is worth stating plainly.** The pairing 3.11c used was the
+floor-minimising one on both arms, and on E-P it understated the floor by
+**1.6x** against the mean and **2.4x** against the max. On a margin this large it
+changes nothing. On a stage that landed at 1.5x it would have been the whole
+result.
+
+**All three predictions confirmed.**
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | both arms clear `1x` under the max-pairing floor | **confirmed** — 2.5x and 1.7x. *Known when written; not evidence* |
+| 2 | the mean sits nearer the midpoint of the six than either extreme | **confirmed** for both — the identity pairing is an outlier, not typical |
+| 3 | E-P's spread across pairings is wider than E-C's | **confirmed** — 0.0406 against 0.0184, tracking its larger `gate_recall_seed_sd` |
+
+**Prediction 2 of 3.11a re-reads as still confirmed**: E-C clears the incumbent's
+0.3069 by +0.1293, **3.2x** the mean floor and **2.5x** the max, against the
+`3.8x` 3.11c recorded.
+
+**What this says about the three-draw floors, now recorded a fourth time.** With
+three members the pairing choice moves E-P's floor by **2.4x** end to end. That
+sensitivity is a direct consequence of estimating an sd from three draws, and it
+is a second, independent reason to widen them before another stage leans here.
+
+Reproduction: `~/Downloads/.stage8-scratch/floor_marginalised.py`, which writes
+`floor_marginalised.json` beside itself.
+
 ## 4. The forward plan — what remains, in order
 
 Each item states **what**, **why**, **the deliverable**, and **what stops it**.
@@ -3141,6 +3193,38 @@ ephemeris key and that cost has been paid once.
 
 **Nothing is proposed for deletion.** Deleting non-re-derivable data is a
 stop-and-ask, and none of the above is worth the risk for the space it returns.
+
+### 5.4 The data-of-record moved mid-session, inside a docs commit — 2026-08-15
+
+**Found by audit.** `e337c1c`, whose message describes only stage 10.5's recall
+result, also bumps **three DVC pointers**: `data/catalogue.dvc`,
+`data/exofop.dvc` and `data/labels.dvc`. Nothing in the message mentions data.
+
+**What actually happened.** A catalogue refresh ran at **09:00 on 2026-08-15**,
+partway through the branch-propensity CV run. It rotated `labels.parquet` into
+`labels.previous.parquet` and wrote a new `labels.parquet` differing on
+**`snr`, 566 rows**. `label`, `mission` and `depth` are **unchanged**.
+
+**No measured number is affected, and this was checked rather than assumed.**
+The shard sets predate the refresh — `tfrecords` 2026-07-25,
+`viewset_tfrecords` 2026-08-07 — so no CV run read the new file. Stage 10.5's
+gate slice comes from `mission`, which did not move; the harness draw depends on
+`depth` and `label`, which did not move either. The 3.9b, 3.9c and 3.11c tables
+all re-derive unchanged, and the 4.1 draw still reproduces at 580 hosts.
+
+**Two consequences that are real.**
+
+1. **A committed claim stopped reproducing.** The stage-3 label finding in 3.9c
+   reads as contradicted against the working tree and is correct against the
+   superseded pointer. Annotated in place; both DVC versions are still in the
+   local cache.
+2. **Catalogue `snr` is aux index 7** in the 8/9-dim layout, so **any future
+   shard rebuild will not reproduce these runs.** Anything re-derived from
+   rebuilt shards is a different measurement and must be labelled one.
+
+**The rule this earns.** A DVC pointer move is a data change and gets its own
+commit, whatever else is in flight. Two lines in a `docs:` commit is how the
+data-of-record moves without anyone deciding that it should.
 
 ---
 
