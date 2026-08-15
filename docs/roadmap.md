@@ -2875,6 +2875,103 @@ is a second, independent reason to widen them before another stage leans here.
 Reproduction: `~/Downloads/.stage8-scratch/floor_marginalised.py`, which writes
 `floor_marginalised.json` beside itself.
 
+#### 3.11e Result — the control-arm pass, and the architecture nobody had measured (2026-08-15)
+
+The measurement 3.11a pre-registered and 4.1 carried: the control-arm split
+through the stage 7i harness, plus the threshold-free host-AUC 3.11b added
+beside it. Three lanes on the **identical** 580-host draw — 290 planet / 290 FP,
+1,051 routable in both runs, `tic_id` checksum matching stage 7i's — confirmed in
+pandas before any compute was spent, as 4.1 required.
+
+The ensemble's score is `sigmoid(mean of logits)` of its members' calibrated
+scores: the combiner 3.11c reported, put back on the probability scale the
+harness thresholds on. Monotonic, so it changes no ranking statistic. **Its
+operating points are derived from the ensemble's own out-of-fold predictions,
+not borrowed from a member** — the same argument 3.11b made for the floor.
+
+| lane | F1 cut | pass | planet | FP | **split** | **host-AUC** |
+|---|---:|---:|---:|---:|---:|---:|
+| dual-view alone | 0.4009 | 0.5448 | 0.6805 | 0.4092 | **+0.2713** | **0.7102** |
+| branch E-C alone | 0.4016 | 0.2655 | 0.3379 | 0.1931 | +0.1448 | 0.6184 |
+| branch E-P alone | 0.5001 | 0.1276 | 0.1506 | 0.1046 | +0.0460 | 0.5626 |
+| **ENSEMBLE E-C** | 0.5737 | 0.1649 | 0.2448 | 0.0851 | **+0.1598** | **0.7338** |
+| **ENSEMBLE E-P** | 0.5804 | 0.1339 | 0.2103 | 0.0575 | **+0.1529** | **0.6928** |
+
+**A3 is falsified, and it is the premise that was wrong rather than the
+prediction.** A3 said *neither arm moves the control-arm host-AUC off the ~0.60
+stage 8 left it at*. Nothing moved it — both ensembles sit inside their dual-view
+member's interval (E-C +0.0236, 95% CI [−0.008, +0.055]; E-P −0.0174, 95% CI
+[−0.052, +0.016], both crossing zero). But the level is **not ~0.60**. It is
+~0.71, because the dual-view member puts it there.
+
+**The ~0.60 was only ever the branch architecture's number.** Every control-arm
+measurement this project has taken — stage 7i, stage 8's arms, both branch lanes
+here — was a *branch* model, at 0.56 to 0.62. The dual-view architecture, **the
+one being served**, had never been read against them until now:
+
+| architecture | host-AUC, transit-free | paired d vs dual-view | 95% CI |
+|---|---:|---:|---|
+| **dual-view, stage 10.5 common folds** | **0.7102** | — | — |
+| **incumbent `ca906040`, dual-view** | **0.7123** | −0.0020 | [−0.020, +0.018] *crosses* |
+| branch E-C | 0.6184 | **+0.0919** | **[+0.029, +0.153]** *excludes* |
+| branch E-P | 0.5626 | **+0.1477** | **[+0.086, +0.215]** *excludes* |
+
+**Two independently trained dual-view runs, on different folds and a different
+population, land 0.0020 apart.** That is not one run's fluke. The gap to either
+branch model excludes zero. **The served architecture is materially the more
+host-scoring one, and this project has spent its control-arm budget measuring the
+other one.**
+
+**This reframes the branch line a second time, and W2 with it.** Stage 4 rejected
+the branch architecture on shortlist recall, and those rejections stand. But on
+the defect W2 names — *the model scores the star, not the transit* — the branch
+models are **better than the incumbent**, by a margin excluding zero on 580
+matched hosts. 3.11c found the branch line's value as a complement on recall;
+this is a second, independent axis, and on it the branch line is not
+complementary but superior.
+
+**The split's unreliability is now demonstrated rather than argued.** The
+incumbent splits at **+0.1218** and the stage 10.5 dual-view at **+0.2713** — a
+gap of +0.1495 — while their host-AUCs differ by 0.0020. Same architecture, same
+hosts, indistinguishable on the threshold-free construct, and the pre-registered
+statistic disagrees by more than the entire effect stage 8 reported. 3.9c warned
+that the split moves with operating-point placement independently of the
+construct it stands for. This is that warning, measured.
+
+**So stage 8's qualified second win should not be banked.** 3.9c set the terms:
+not until a threshold-free measurement confirms it. The threshold-free
+measurement it already had crossed zero, and the split is now shown to move by
++0.15 between two runs of one architecture that are threshold-free identical.
+**The qualification is not optional, and the case for banking has weakened rather
+than strengthened.**
+
+**What this does not say.** These are transit-free synthetic inputs and out of
+distribution. Host-AUC here is a *defect* measure, not a performance one — higher
+is worse. Nothing here bears on which model ranks real candidates better, and
+nothing here promotes. A serving change is stage 11 work and Ollie's call.
+
+**Two build defects, both found by running rather than reading.** Both were
+hard-coded assumptions that broke the moment the dual-view trainer numbered its
+checkpoints, and both blocked the measurement rather than corrupting one.
+
+1. `run_kind` matched the exact filename `cnn_dualview.keras`, so a multi-member
+   dual-view run could not be scored **at all**. The branch lane has globbed
+   since stage 4 and was never affected, which is how the asymmetry survived a
+   whole stage. Fixed in `4e8c90a`.
+2. `build_host_dualview` hard-coded the incumbent's 9-dim aux width against a run
+   trained on 13. It raised inside sklearn **after 12 min 35 s of view
+   building**. The width is now read from the run's own calibration bundle before
+   the build starts. Fixed in `f87ef83`.
+
+`47c4e61` predicted this shape exactly — *"one bug of that shape was found;
+assume it was not the only one"* — and there were two more.
+
+**Cost, measured.** Branch lanes 49 m 30 s and 49 m 25 s; the dual-view lane
+**12 m 21 s**, far cheaper because it needs no shard round-trip. 1 h 51 for all
+three, against ~2.5 h estimated.
+
+Reproduction: `~/Downloads/.stage8-scratch/analyse_41.py`.
+
 ## 4. The forward plan — what remains, in order
 
 Each item states **what**, **why**, **the deliverable**, and **what stops it**.
@@ -2891,30 +2988,62 @@ actually took.
 3. **The UI is last and is pure presentation.** If it needs a number the API
    cannot produce, an earlier item was not finished.
 
-### 4.1 Stage 10.5 *(continued)* — the control-arm pass · ~1 h build · ~2.5 h compute
+### 4.1 Stage 10.5 — **CLOSED 2026-08-15**
 
-**What is left of stage 10.5.** The recall result is in 3.11c. Outstanding is the
-measurement 3.11a pre-registered alongside it: **the control-arm split through
-the stage 7i harness**, plus the threshold-free host-AUC that 3.11b added beside
-it.
+Both halves are measured. Recall in **3.11c**, its floor corrected in **3.11d**,
+the control-arm pass in **3.11e**. A3 was the last open prediction and is
+falsified — on a premise nobody had checked rather than a prediction that failed.
 
-**Why it is not free, which the pre-registration assumed.** The harness scores a
-*run directory*, and an ensemble is not one. Measuring E-C and E-P means running
-it three times on the identical draw — the dual-view lane and both branch lanes —
-and combining per-row scores, with the ensemble's own operating points derived
-rather than borrowed from a member.
+Nothing promoted. The stage leaves two things for later items to answer:
 
-**Deliverable.** The control-arm split and host-AUC for both arms, on the same
-580 baseline-matched hosts stage 7i and prediction 4 used, so all three are
-directly comparable.
+1. **The served architecture is the more host-scoring one** (3.11e), which lands
+   on W2 and on stage 11's serving decision, not on this stage.
+2. **The control-arm split is not a trustworthy statistic** — it moved +0.15
+   between two runs of one architecture that are threshold-free identical. Any
+   later item planning to read it should read the host-AUC beside it, or instead.
 
-**Stops if.** The draw does not reproduce the 580 hosts / 1,051 eligible of
-stage 7i — that would mean the fold pinning changed which hosts are routable, and
-the comparison is then across populations rather than models.
+### 4.1a Calibrate the refresh loop to its own noise — · ~2 h build · ~3 h compute
 
-**It tests A3**, the one amendment prediction still open: *neither arm moves the
-control-arm host-AUC off the ~0.60 stage 8 left it at.* Host-scoring has survived
-every intervention aimed at it so far.
+**New, 2026-08-15, from Ollie's question: does the weekly refresh apply the same
+test each time?** The gate code is the same every run. The comparison is not.
+
+**Three defects, all verified in code rather than inferred.**
+
+1. **The evaluation population changes every refresh.** The candidate is scored
+   on the new catalogue; the incumbent's stored summary was computed on the old
+   one, so a ΔAUC blends the model effect with the population effect. The gate
+   does detect this — `_population_mismatch` and `_gate_population_drift` raise —
+   and 3.7 found it refusing to promote rather than compare mismatched rows.
+2. **The folds differ every refresh.** Each run builds its own
+   `StratifiedGroupKFold` over its own shard set, and `refresh_pipeline.py`
+   passes no `fold_assignment`. `fold_sd` is non-zero in every summary, so part
+   of any ΔAUC is only which rows landed where. **The capability to fix this
+   already exists** — `9e0c0a5` built it for stage 10.5 — and is simply not
+   wired in.
+3. **The refresh has no measured floor at all.** `conf/train/default.yaml` sets
+   `n_models_per_fold: 1` and the loop never overrides it, so a refresh candidate
+   measures no reseeding spread. `decision_floor` returns `recall=None` and the
+   gate falls back to `LEGACY_RECALL_TOLERANCE = 0.02` — the constant 3.7
+   measured at **0.68σ**, under which a candidate whose true recall *equals* the
+   incumbent's is rejected by noise about **31%** of the time, on the single
+   criterion that has rejected every branch arm.
+
+**What.** Raise `n_models_per_fold` on the refresh path so a candidate measures
+its own floor; pin the fold assignment across refreshes so successive candidates
+are comparable; keep a control lane so a promotion is attributable to the model
+rather than the data.
+
+**Why it is not cosmetic.** Until it lands, "promoted" and "rejected" from the
+weekly loop are decisions taken against an uncontrolled comparison with a
+tolerance already measured as too tight. Every deliberate result in this project
+is read against a measured floor; the one automated decision is not.
+
+**Deliverable.** A refresh run whose summary carries a real variance block, on
+folds shared with its predecessor, and a gate decision quoting its own floor.
+
+**Stops if.** The wider member count pushes a refresh past its window — in which
+case pin the folds alone, which is free, and take the floor from a periodic
+calibration run instead of every refresh.
 
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 

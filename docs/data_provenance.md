@@ -224,6 +224,43 @@ their stated form** (roadmap 3.11d). And E-P's ensemble baseline sensitivity is
 +0.4240, **above both its members** (+0.3880, +0.3956) — averaging created
 baseline dependence rather than inheriting it. Unexplained.
 
+### Host scoring by architecture — the control arm, 2026-08-15
+
+Measured on the identical 580 transit-free hosts. **Host-AUC here is a defect
+measure: higher is worse.** A model that separates planet hosts from FP hosts on
+a light curve with no transit in it is reading the star.
+
+| Architecture | Run | Host-AUC | Paired d vs dual-view | 95% CI |
+|---|---|---:|---:|---|
+| dual-view | stage 10.5 common folds | **0.7102** | — | — |
+| dual-view | incumbent `ca906040` | **0.7123** | −0.0020 | [−0.020, +0.018] crosses |
+| branch | E-C, un-weighted | 0.6184 | +0.0919 | [+0.029, +0.153] **excludes** |
+| branch | E-P, propensity | 0.5626 | +0.1477 | [+0.086, +0.215] **excludes** |
+
+**The served architecture is the more host-scoring one.** Two independently
+trained dual-view runs, on different folds over different populations, land
+0.0020 apart, so ~0.71 is a property of the architecture rather than of a run.
+Every earlier control-arm measurement in this project was a branch model at
+0.56–0.62, which is where the "~0.60" in the record comes from.
+
+Ensembling does not move it: E-C +0.0236 [−0.008, +0.055], E-P −0.0174 [−0.052,
++0.016], both crossing zero. Full reading in roadmap 3.11e.
+
+### Why the control-arm split is not trusted
+
+| Run | Architecture | Split | Host-AUC |
+|---|---|---:|---:|
+| incumbent `ca906040` | dual-view | **+0.1218** | 0.7123 |
+| stage 10.5 dual-view | dual-view | **+0.2713** | 0.7102 |
+
+Same architecture, same hosts, **0.0020 apart** on the threshold-free construct
+and **0.1495 apart** on the split — more than the entire effect stage 8 reported
+on this statistic. The split is thresholded and moves with operating-point
+placement independently of what it stands for. Read the host-AUC beside it, or
+instead.
+
+This is why stage 8's second win stays **qualified and unbanked**.
+
 ### Standing caveat on the noise floors
 
 The floors are estimated from three draws and are recorded four times now as too
