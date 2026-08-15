@@ -2736,6 +2736,12 @@ dual-view member `i` combined with branch member `i` — not either member's flo
 borrowed. That is what `n_models_per_fold` on the dual-view trainer was built
 for; without it this table would have no bar to be read against.
 
+> **The `3.9x` and `4.1x` in the table above are falsified in their stated
+> form.** The member pairing they rest on was never pre-registered, and it is
+> the pairing that minimises the floor. Audited 2026-08-15; see **3.11d**, which
+> supersedes those two multipliers and the `3.8x` in prediction 2 below. **The
+> recall numbers, the margins, and the finding itself are unaffected.**
+
 **Three of five predictions confirmed, one falsified, one confirmed in part.**
 
 | # | prediction | outcome |
@@ -2780,6 +2786,63 @@ architectures differ by more than 2x per run and should be sized separately.**
 Three draws is a thin sd. The margins here are 3.9x and 4.1x, so the conclusion
 survives a considerably wider floor, but the next stage to lean on this quantity
 should widen it first.
+
+#### 3.11d The floor's pairing was never pre-registered — the multipliers are falsified (2026-08-15)
+
+**Found by audit**, not by the session that produced 3.11c.
+
+**The defect.** 3.11c's floor is formed from three ensemble draws, where draw `i`
+pairs dual-view member `i` with branch member `i`. **That pairing appears nowhere
+in 3.11a or 3.11b.** It exists only in the docstring of an untracked scratch
+script. Both trainers seed members `seed * 1000 + i`, but the same integer on two
+different architectures over two different shard sets produces statistically
+independent draws — so member `i` on one side has no correspondence to member `i`
+on the other, and the pairing is arbitrary. With three members there are `3! = 6`
+equally defensible pairings, each giving a different floor.
+
+**Per the standing rule — a result outside its pre-registration is reported as
+falsified, never re-specified — the `3.9x` and `4.1x` are falsified in their
+stated form.** So is the `3.8x` in prediction 2, which divides by the same floor.
+What is *not* falsified: the recall figures, the margins, the AUCs, the baseline
+sensitivities, and the finding that both arms clear their bar. Those are
+independent of the pairing and reproduce exactly.
+
+**Full disclosure of what was already known when the rule below was fixed.** This
+is a re-analysis, not a fresh experiment, and pretending otherwise would be the
+same error one level up. At the moment the rule was written the audit had already
+computed, for both arms, the **minimum and maximum** floor over all six pairings,
+and had established that the margin clears `1x` under **every** one of them. The
+only quantity still unknown was the mean over the six. The rule is therefore
+fixed against an outcome that is already largely visible, and it is recorded that
+way rather than dressed as a blind pre-registration.
+
+*The replacement rule, fixed 2026-08-15 before the mean was computed.*
+
+1. The pairing is arbitrary, so the floor **marginalises over it**: the reported
+   floor is the **mean of the six per-pairing floors**, each computed by stage
+   6's rule, `2 x sd(draws) / sqrt(3)`.
+2. The **maximum**-pairing floor is reported beside it as the conservative bound.
+   **The finding is banked only if the margin clears `1x` under the maximum**,
+   not merely under the mean.
+3. The minimum-pairing floor is reported too, and is explicitly **not** the
+   headline, because it is the one 3.11c happened to use.
+4. This changes what the margin is divided by. It does **not** re-open the
+   outcome table in 3.11b, which is keyed on clearing the floor, not on the size
+   of the multiplier.
+
+*Predictions, recorded so they can be wrong.*
+
+1. Both arms still clear `1x` under the **maximum**-pairing floor, so the
+   complement finding is banked unchanged. *(Already known to be true when
+   written — recorded for completeness, not as evidence.)*
+2. The mean-pairing floor sits **nearer the midpoint of the six than either
+   extreme** for both arms, i.e. the identity pairing is an outlier rather than
+   typical. This one is genuinely open.
+3. **E-P's spread across pairings is wider than E-C's**, because its branch
+   member's own `gate_recall_seed_sd` is the larger of the two (0.0935 against
+   0.0677), so which member it pairs with matters more.
+
+**Nothing promotes on this either**, and it changes no serving decision.
 
 ## 4. The forward plan — what remains, in order
 
