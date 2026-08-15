@@ -170,6 +170,50 @@ def test_a_fold_with_no_dualview_checkpoint_returns_nothing(tmp_path):
     assert driver.dualview_members(_fold_0(tmp_path, "cv_summary.json") / "fold_0") == []
 
 
+# The aux width is a property of the run, not a constant. The incumbent serves
+# the 9-dim legacy layout; every dual-view run trained since the vetting
+# features landed expects 13. Assuming 9 raised inside sklearn's imputer *after*
+# the entire host view build had been paid for.
+
+
+class _FakePipeline:
+    def __init__(self, n):
+        self.n_features_in_ = n
+
+
+class _UndeclaredPipeline:
+    """An aux pipeline that does not say how wide it is. Module-level so joblib
+    can pickle it."""
+
+
+def _bundle(tmp_path: Path, pipeline) -> Path:
+    import joblib
+
+    fold = tmp_path / "fold_0"
+    fold.mkdir(parents=True, exist_ok=True)
+    joblib.dump({"aux_pipeline": pipeline, "calibrator": None}, fold / "cnn_calibrator.joblib")
+    return tmp_path
+
+
+def test_the_aux_width_comes_from_the_runs_own_pipeline(tmp_path):
+    assert driver.dualview_aux_dim(_bundle(tmp_path, _FakePipeline(13))) == 13
+
+
+def test_a_legacy_nine_dim_run_still_reads_as_nine(tmp_path):
+    assert driver.dualview_aux_dim(_bundle(tmp_path, _FakePipeline(9))) == 9
+
+
+def test_a_bundle_with_no_pipeline_falls_back_to_the_legacy_width(tmp_path):
+    assert driver.dualview_aux_dim(_bundle(tmp_path, None)) == 9
+
+
+def test_a_pipeline_that_declares_no_width_raises_rather_than_guessing(tmp_path):
+    """Guessing here is what produced the original failure. An undeclared width
+    is unknowable, and a wrong guess costs a full build before it surfaces."""
+    with pytest.raises(ValueError, match="n_features_in_"):
+        driver.dualview_aux_dim(_bundle(tmp_path, _UndeclaredPipeline()))
+
+
 # --------------------------------------------------------------------------
 # The scalar frame. A column short here still passes every downstream gate.
 # --------------------------------------------------------------------------

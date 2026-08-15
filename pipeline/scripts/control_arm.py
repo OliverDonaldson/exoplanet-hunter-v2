@@ -58,6 +58,7 @@ from exoplanet_hunter.eval.control_arm import (
     operating_points,
 )
 from exoplanet_hunter.eval.injection_recovery import inject_box_transit
+from exoplanet_hunter.features.aux import LEGACY_AUX_DIM
 from exoplanet_hunter.preprocess import clean_lightcurve, flatten_lightcurve
 from exoplanet_hunter.preprocess.viewset import build_view_set
 from exoplanet_hunter.utils import get_logger
@@ -279,6 +280,30 @@ def run_kind(run_dir: Path) -> str:
     )
 
 
+def dualview_aux_dim(run_dir: Path) -> int:
+    """How many aux features this run's own fitted pipeline expects.
+
+    Not a constant. The incumbent serves the 9-dim legacy layout, but any
+    dual-view run trained since the vetting features landed expects 13, and
+    handing its imputer a 9-dim row raises inside sklearn after the whole view
+    build has already been paid for. The run's calibration bundle is the
+    authority on its own width, so it is asked rather than assumed.
+    """
+    import joblib
+
+    bundle = joblib.load(run_dir / "fold_0" / "cnn_calibrator.joblib")
+    pipeline = bundle.get("aux_pipeline")
+    if pipeline is None:
+        return LEGACY_AUX_DIM
+    width = getattr(pipeline, "n_features_in_", None)
+    if width is None:
+        raise ValueError(
+            f"{run_dir}/fold_0 has an aux pipeline that does not declare "
+            "n_features_in_; its feature width cannot be established"
+        )
+    return int(width)
+
+
 def build_host_dualview(
     fits_path: Path,
     period: float,
@@ -286,8 +311,9 @@ def build_host_dualview(
     sigma_clip: float,
     window: int,
     polyorder: int,
+    aux_dim: int = LEGACY_AUX_DIM,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Global view, local view and the 9-dim aux row for the incumbent lane.
+    """Global view, local view and the aux row for a dual-view lane.
 
     The same host, the same cleaning and flattening and the same synthetic
     ephemeris as the branch lane — only the view builder and the feature layout
@@ -302,7 +328,7 @@ def build_host_dualview(
     """
     import lightkurve as lk
 
-    from exoplanet_hunter.features.aux import LEGACY_AUX_DIM, build_aux_row
+    from exoplanet_hunter.features.aux import build_aux_row
     from exoplanet_hunter.features.centroid import extract_centroid_offset
     from exoplanet_hunter.preprocess.views import build_views
 
@@ -320,8 +346,12 @@ def build_host_dualview(
     # Computed rather than left NaN: the live path computes it, and omitting it
     # would hand the incumbent a thinner feature vector than it serves with.
     centroid_snr = float(extract_centroid_offset(raw, period, t0, duration_d))
+    # Indices 9-12 of the 13-dim layout — the odd/even, secondary and duration
+    # statistics — are left unset for the same reason as depth: a transit-free
+    # synthetic light curve has no such measurement, and the fitted pipeline
+    # imputes them exactly as it did in training.
     aux = build_aux_row(
-        LEGACY_AUX_DIM,
+        aux_dim,
         teff=stellar.get("teff"),
         radius=stellar.get("radius"),
         logg=stellar.get("logg"),
@@ -453,6 +483,12 @@ def main() -> None:
     args = parser.parse_args()
     kind = run_kind(args.run_dir)
     log.info("[control-arm] %s is a %s run", args.run_dir.name, kind)
+    # Resolved before the build loop, not inside it: this raised after 12.5
+    # minutes of view building the first time a modern dual-view run was
+    # scored, and the width is knowable from the bundle before any host is read.
+    aux_dim = dualview_aux_dim(args.run_dir) if kind == "dualview" else 0
+    if kind == "dualview":
+        log.info("[control-arm] %s expects a %d-dim aux row", args.run_dir.name, aux_dim)
 
     labels_all = pd.read_parquet(args.labels)
     predictions = pd.read_parquet(args.run_dir / "predictions.parquet")
@@ -547,7 +583,13 @@ def main() -> None:
                     view_sets.append(views)
                 else:
                     gview, lview, aux = build_host_dualview(
-                        fits, period, host, args.sigma_clip, args.window_length, args.polyorder
+                        fits,
+                        period,
+                        host,
+                        args.sigma_clip,
+                        args.window_length,
+                        args.polyorder,
+                        aux_dim=aux_dim,
                     )
                     scalars = {"tic_id": tic_id, "mission": "TESS", "period": period}
                     dualview_rows.append(
