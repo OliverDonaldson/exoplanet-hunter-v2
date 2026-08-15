@@ -25,7 +25,7 @@ source of truth for *labels*, queried over its TAP service
 | `k2pandc` (K2 Planets & Candidates) | EPIC-keyed dispositions (CONFIRMED / FALSE POSITIVE / REFUTED / CANDIDATE) | K2 pos / neg / held-out |
 
 **ExoFOP** (`exofop.ipac.caltech.edu/tess`) is a *secondary, enrichment*
-source, not the label authority (`data/exofop.py`): the TOI + **CTOI** CSVs
+source, not the label authority (`data/csv/exofop.py`): the TOI + **CTOI** CSVs
 (community candidates not in the archive's `toi` table) populate the console's
 candidate catalogue, and supply the transit-SNR column joined onto TESS rows.
 
@@ -81,7 +81,7 @@ Counts (this build): 5,686 labelled targets — **2,656 TESS + 2,500 Kepler +
 
 The grey pool is TESS-only (TOIs/CTOIs from ExoFOP), so the Kepler and K2
 points sit outside it by construction — their held-out candidate pools live in
-`data/labels/candidates.parquet` instead (1,630 Kepler + 834 K2).
+`data/tables/labels/candidates.parquet` instead (1,630 Kepler + 834 K2).
 
 ## What the raw data actually looks like
 

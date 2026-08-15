@@ -23,7 +23,7 @@ from app.schemas import CandidatesPage
 router = APIRouter()
 log = logging.getLogger(__name__)
 
-# repo-root/data/catalogue/candidates.parquet, both locally and in the
+# repo-root/data/tables/catalogue/candidates.parquet, both locally and in the
 # container (where the repo root is /srv); override with CATALOGUE_PATH.
 _DEFAULT_PATH = Path(__file__).resolve().parents[3] / "data" / "catalogue" / "candidates.parquet"
 

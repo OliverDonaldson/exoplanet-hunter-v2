@@ -18,12 +18,12 @@ if [ "${SKIP_DVC_PULL:-0}" = "1" ]; then
     echo "[entrypoint] SKIP_DVC_PULL=1 — serving mounted artefacts"
 else
     echo "[entrypoint] pulling DVC artefacts from R2 (creds present: $([ -n "$AWS_ACCESS_KEY_ID" ] && echo yes || echo NO)) ..."
-    dvc pull -v data/catalogue.dvc models/cv/*.dvc || {
+    dvc pull -v data/tables/catalogue.dvc models/cv/*.dvc || {
         echo "[entrypoint] FATAL: dvc pull failed — check AWS_* secrets and R2 access"
         exit 1
     }
 fi
 echo "[entrypoint] artefacts ready:"
-ls models/cv/ data/catalogue/
+ls models/cv/ data/tables/catalogue/
 
 exec uvicorn app.main:app --app-dir api --host 0.0.0.0 --port "${PORT:-8000}"

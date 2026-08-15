@@ -2,9 +2,9 @@
 
 Four artefacts get validated before anything trains or serves:
 
-  * the **label catalogue** (`data/labels/labels.parquet`) that training
+  * the **label catalogue** (`data/tables/labels/labels.parquet`) that training
     consumes — column types, disposition/label domains, ephemeris sanity;
-  * the **candidate catalogue** (`data/catalogue/candidates.parquet`) that
+  * the **candidate catalogue** (`data/tables/catalogue/candidates.parquet`) that
     the API serves — the browse-table contract;
   * the **processed views** (views.npz / shard sets) — no all-NaN folds,
     label domain, shape consistency;

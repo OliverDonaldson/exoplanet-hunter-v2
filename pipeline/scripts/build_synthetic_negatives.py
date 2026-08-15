@@ -158,7 +158,7 @@ def main() -> None:
     parser.add_argument(
         "--scalars", type=Path, default=Path("data/processed/viewset_scalars.parquet")
     )
-    parser.add_argument("--labels", type=Path, default=Path("data/labels/labels.parquet"))
+    parser.add_argument("--labels", type=Path, default=Path("data/tables/labels/labels.parquet"))
     parser.add_argument("--raw", type=Path, default=Path("data/raw/tess/lightcurves"))
     parser.add_argument(
         "--out",

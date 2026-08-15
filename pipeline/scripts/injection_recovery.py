@@ -297,8 +297,10 @@ def plot_completeness(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--labels", type=Path, default=Path("data/labels/labels.parquet"))
-    parser.add_argument("--catalogue", type=Path, default=Path("data/catalogue/candidates.parquet"))
+    parser.add_argument("--labels", type=Path, default=Path("data/tables/labels/labels.parquet"))
+    parser.add_argument(
+        "--catalogue", type=Path, default=Path("data/tables/catalogue/candidates.parquet")
+    )
     parser.add_argument("--raw", type=Path, default=Path("data/raw/tess/lightcurves"))
     parser.add_argument("--out", type=Path, default=Path("results/injection_recovery.parquet"))
     parser.add_argument("--figure", type=Path, default=Path("docs/figures/completeness.png"))

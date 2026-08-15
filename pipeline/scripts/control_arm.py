@@ -432,7 +432,7 @@ def score_through_dualview(run_dir: Path, rows: list[dict], folds: dict) -> np.n
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
-    parser.add_argument("--labels", type=Path, default=Path("data/labels/labels.parquet"))
+    parser.add_argument("--labels", type=Path, default=Path("data/tables/labels/labels.parquet"))
     parser.add_argument(
         "--viewset-index", type=Path, default=Path("data/processed/viewset_tfrecords/index.parquet")
     )

@@ -35,8 +35,8 @@ it re-downloads on demand.
 
 | Piece | What it is | Where |
 |---|---|---|
-| Candidate catalogue | Every TOI/CTOI tracked, with follow-up metrics | `data/catalogue/` |
-| Label catalogue | Targets with known dispositions — training ground truth | `data/labels/` |
+| Candidate catalogue | Every TOI/CTOI tracked, with follow-up metrics | `data/tables/catalogue/` |
+| Label catalogue | Targets with known dispositions — training ground truth | `data/tables/labels/` |
 | Processed views | Cleaned, flattened, phase-folded inputs | `data/processed/` |
 | Models | One CNN per CV fold, each with a Platt calibrator | `models/cv/<run_id>/` |
 | Registry | JSON pointing at the promoted run — the one being served | `models/registry.json` |
@@ -153,7 +153,7 @@ than failing fast:
 ```bash
 docker run --rm -p 8010:8000 -e SKIP_DVC_PULL=1 \
   -v "$(pwd)/models:/srv/models:ro" \
-  -v "$(pwd)/data/catalogue:/srv/data/catalogue:ro" \
+  -v "$(pwd)/data/tables/catalogue:/srv/data/tables/catalogue:ro" \
   exoplanet-hunter-api
 ```
 

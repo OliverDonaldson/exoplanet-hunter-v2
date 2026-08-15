@@ -178,9 +178,9 @@ def publish() -> None:
         [
             DVC,
             "add",
-            "data/exofop",
-            "data/catalogue",
-            "data/labels",
+            "data/csv/exofop",
+            "data/tables/catalogue",
+            "data/tables/labels",
             "data/processed/views.npz",
             "data/processed/tfrecords",
         ]

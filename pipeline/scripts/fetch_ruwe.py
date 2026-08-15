@@ -1,6 +1,6 @@
 """Fetch Gaia DR3 RUWE for the pipeline's TESS targets.
 
-    python pipeline/scripts/fetch_ruwe.py --out data/gaia/ruwe.parquet
+    python pipeline/scripts/fetch_ruwe.py --out data/tables/gaia/ruwe.parquet
 
 Needs network (MAST for TIC->Gaia DR2, Gaia TAP for DR2->DR3). Re-running skips
 TICs already in `--out`.

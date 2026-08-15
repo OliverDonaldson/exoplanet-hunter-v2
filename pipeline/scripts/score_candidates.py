@@ -1,6 +1,6 @@
 """Bulk-score held-out planet candidates with the promoted 5-fold ensemble.
 
-Scores every row of ``data/labels/candidates.parquet`` through the same
+Scores every row of ``data/tables/labels/candidates.parquet`` through the same
 preprocessing and aux layout the API serves (``features/aux.py``), in whatever
 width the registered bundle was trained on, and reports a richer uncertainty
 breakdown than a single /score call: ensemble mean/std, p10/p90, between-fold

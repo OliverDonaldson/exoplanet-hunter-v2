@@ -1,6 +1,6 @@
 """Prospective evaluation: score held-out candidates whose labels arrived later.
 
-The training build wrote its unlabelled PCs to data/labels/candidates.parquet;
+The training build wrote its unlabelled PCs to data/tables/labels/candidates.parquet;
 the refreshed TOI catalogue now carries final dispositions for some of them.
 Those targets were never trained on and their labels post-date the model —
 the closest thing to a real-world test the archive offers.
@@ -46,8 +46,12 @@ def flipped_holdout(holdout_path: Path, catalogue_path: Path) -> pd.DataFrame:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--holdout", type=Path, default=Path("data/labels/candidates.parquet"))
-    parser.add_argument("--catalogue", type=Path, default=Path("data/catalogue/candidates.parquet"))
+    parser.add_argument(
+        "--holdout", type=Path, default=Path("data/tables/labels/candidates.parquet")
+    )
+    parser.add_argument(
+        "--catalogue", type=Path, default=Path("data/tables/catalogue/candidates.parquet")
+    )
     parser.add_argument("--out", type=Path, default=Path("results/since_confirmed.parquet"))
     parser.add_argument("--limit", type=int, default=None, help="score at most N targets")
     args = parser.parse_args()

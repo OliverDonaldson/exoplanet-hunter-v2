@@ -41,7 +41,7 @@ paths:
   data_raw_k2:    ${paths.root}/data/raw/k2/lightcurves
   data_interim:   ${paths.root}/data/interim
   data_processed: ${paths.root}/data/processed
-  data_labels:    ${paths.root}/data/labels
+  data_labels:    ${paths.root}/data/tables/labels
   models:         ${paths.root}/models
   results:        ${paths.root}/results
 

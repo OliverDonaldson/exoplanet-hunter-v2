@@ -29,7 +29,10 @@ RUN pip install --no-cache-dir -c docker/constraints.txt ./api
 # DVC pointers + config and the model registry (all tiny, all in git).
 COPY .dvc/config .dvc/config
 COPY .dvcignore ./
-COPY data/catalogue.dvc data/
+# Destination mirrors the source tree. The entrypoint pulls this pointer by its
+# repo-relative path, so a pointer copied to a different directory produces a
+# clean build and a container that dies at boot.
+COPY data/tables/catalogue.dvc data/tables/
 COPY models/ models/
 COPY docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 RUN chmod +x /usr/local/bin/api-entrypoint.sh
@@ -39,7 +42,7 @@ RUN chmod +x /usr/local/bin/api-entrypoint.sh
 # its startup log spam is silenced.
 ENV MODEL_DIR=/srv/models \
     DATA_RAW_DIR=/srv/data/raw/tess/lightcurves \
-    CATALOGUE_PATH=/srv/data/catalogue/candidates.parquet \
+    CATALOGUE_PATH=/srv/data/tables/catalogue/candidates.parquet \
     OMP_NUM_THREADS=2 \
     TF_CPP_MIN_LOG_LEVEL=2 \
     DVC_NO_ANALYTICS=1

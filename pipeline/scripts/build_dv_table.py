@@ -66,7 +66,7 @@ SCALARS = (
 def _periods(root: Path) -> dict[int, float]:
     """Catalogue period per TIC, for picking the right TCE."""
     periods: dict[int, float] = {}
-    for name in ("data/labels/labels.parquet", "data/labels/candidates.parquet"):
+    for name in ("data/tables/labels/labels.parquet", "data/tables/labels/candidates.parquet"):
         path = root / name
         if not path.exists():
             continue

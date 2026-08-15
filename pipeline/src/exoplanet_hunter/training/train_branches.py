@@ -654,7 +654,7 @@ def run_cv(
     # which `eval_since_confirmed.py` scores separately. Letting it into any fold
     # destroys that holdout and leaks a future label into training. The gate
     # recorded these; until 2026-08-07 nothing read them back.
-    quarantined = load_quarantine(labels_dir or Path("data/labels"))
+    quarantined = load_quarantine(labels_dir or Path("data/tables/labels"))
     if quarantined:
         before = len(index)
         index = drop_quarantined(index, quarantined)

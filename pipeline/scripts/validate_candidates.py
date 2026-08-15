@@ -11,13 +11,13 @@ Needs the optional dependency and network access (MAST + TIC):
 
 Usage (terminal-first — this is minutes per target):
     python scripts/validate_candidates.py \
-        --candidates data/labels/candidates.parquet \
+        --candidates data/tables/labels/candidates.parquet \
         --shortlist results/candidates_scored.parquet \
         --top 20 --out results/candidates_validated.csv
 
 ``--candidates`` supplies the ephemeris (tic_id, period, t0, duration, depth) —
 the held-out candidate table `score_candidates.py` scores, NOT the ExoFOP
-`data/catalogue` table (different column names/units);
+`data/tables/catalogue` table (different column names/units);
 ``--shortlist`` (optional) ranks by ``prob_mean`` to pick ``--top`` TESS
 targets. Rows that fail (no SAP light curve, TIC gaps) are logged and skipped;
 output is written incrementally so a long run is resumable-by-rerun.
@@ -211,7 +211,9 @@ def _validate_row(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--candidates", type=Path, default=Path("data/labels/candidates.parquet"))
+    parser.add_argument(
+        "--candidates", type=Path, default=Path("data/tables/labels/candidates.parquet")
+    )
     parser.add_argument("--shortlist", type=Path, default=None)
     parser.add_argument("--top", type=int, default=20)
     parser.add_argument("--mission", default="TESS")
@@ -236,7 +238,7 @@ def main() -> None:
     parser.add_argument(
         "--trilegal-cache",
         type=Path,
-        default=Path("data/trilegal"),
+        default=Path("data/csv/trilegal"),
         help="Directory of saved TRILEGAL background populations, one per target. "
         "TRILEGAL is a Monte Carlo galaxy simulation, so re-querying gives a "
         "different population and a different background prior — caching makes "

@@ -3305,8 +3305,8 @@ stop-and-ask, and none of the above is worth the risk for the space it returns.
 ### 5.4 The data-of-record moved mid-session, inside a docs commit — 2026-08-15
 
 **Found by audit.** `e337c1c`, whose message describes only stage 10.5's recall
-result, also bumps **three DVC pointers**: `data/catalogue.dvc`,
-`data/exofop.dvc` and `data/labels.dvc`. Nothing in the message mentions data.
+result, also bumps **three DVC pointers**: `data/tables/catalogue.dvc`,
+`data/csv/exofop.dvc` and `data/tables/labels.dvc`. Nothing in the message mentions data.
 
 **What actually happened.** A catalogue refresh ran at **09:00 on 2026-08-15**,
 partway through the branch-propensity CV run. It rotated `labels.parquet` into

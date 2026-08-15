@@ -55,9 +55,9 @@ def _gate(name: str, fn: Callable[[], object]) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--labels", type=Path, default=Path("data/labels/labels.parquet"))
+    parser.add_argument("--labels", type=Path, default=Path("data/tables/labels/labels.parquet"))
     parser.add_argument(
-        "--candidates", type=Path, default=Path("data/catalogue/candidates.parquet")
+        "--candidates", type=Path, default=Path("data/tables/catalogue/candidates.parquet")
     )
     parser.add_argument("--views", type=Path, default=Path("data/processed/views.npz"))
     parser.add_argument("--dv", type=Path, default=Path("data/raw/tess/dv"))

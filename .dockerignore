@@ -4,10 +4,10 @@
 # this guards local `docker build` against the 64 GB FITS cache.
 data/raw/
 data/interim/
-data/labels/
+data/tables/labels/
 data/processed/
-data/catalogue/
-data/exofop/
+data/tables/catalogue/
+data/csv/exofop/
 # Docker strips the trailing slash, so this also swallows the *.dvc pointer
 # files the entrypoint pulls with — re-include them explicitly.
 models/cv/*/

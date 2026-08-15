@@ -258,7 +258,7 @@ def main() -> None:
     score = sub.add_parser("score", help="a run's folds over a shard set")
     score.add_argument("--run", type=Path, required=True)
     score.add_argument("--shard-dir", type=Path, default=Path("data/processed/tfrecords"))
-    score.add_argument("--labels", type=Path, default=Path("data/labels/labels.parquet"))
+    score.add_argument("--labels", type=Path, default=Path("data/tables/labels/labels.parquet"))
     score.add_argument("--protocol", choices=["oof", "zeroshot"], required=True)
     score.add_argument("--mission", default=None, help="restrict to one mission")
     score.add_argument("--out", type=Path, required=True)
