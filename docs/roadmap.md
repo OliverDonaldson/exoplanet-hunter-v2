@@ -3002,7 +3002,7 @@ Nothing promoted. The stage leaves two things for later items to answer:
    between two runs of one architecture that are threshold-free identical. Any
    later item planning to read it should read the host-AUC beside it, or instead.
 
-### 4.1a Calibrate the refresh loop to its own noise — · ~2 h build · ~3 h compute
+### 4.1a Calibrate the refresh loop to its own noise — **BUILT 2026-08-16**, one part open
 
 **New, 2026-08-15, from Ollie's question: does the weekly refresh apply the same
 test each time?** The gate code is the same every run. The comparison is not.
@@ -3044,6 +3044,40 @@ folds shared with its predecessor, and a gate decision quoting its own floor.
 **Stops if.** The wider member count pushes a refresh past its window — in which
 case pin the folds alone, which is free, and take the floor from a periodic
 calibration run instead of every refresh.
+
+#### Built 2026-08-16 — defects 2 and 3 closed, defect 1 still open
+
+`da44ced`. The refresh now trains `N_MODELS_PER_FOLD` (default 3) so the gate
+reads a floor **this run measured**, instead of falling back to the 0.68-sigma
+constant. And the outer split is pinned across refreshes — but **rolling**, not
+fixed, which is the part worth recording because both obvious options are wrong:
+
+| approach | what breaks |
+|---|---|
+| rebuild the map each refresh | candidate and incumbent land on different partitions; part of every margin is only which rows fell where |
+| pin one fixed map | uncovered groups are *dropped*, so every target the catalogue gains vanishes from training and the set shrinks weekly |
+| **extend it** | neither — the shared population keeps its folds, new targets still enter |
+
+`extend_fold_assignment` keeps every already-assigned group in the fold that has
+always held it out, and places only new ones, into the fold currently holding
+the fewest of their own class. **No group ever moves**, and the guard raises
+rather than reconciling: a group that moved would be scored by a fold that had
+trained on it, which is leakage wearing a split's clothes.
+
+Verified on the real index — built over 5,426 groups at
+`[1085, 1085, 1085, 1085, 1086]`; a simulated refresh adding 300 targets gives
+**0 moved** and `[1146, 1145, 1145, 1145, 1145]`.
+
+**Defect 1 is not fixed and is not wiring.** The evaluation population itself
+grows every refresh, so a delta still blends the model effect with the data
+effect. Isolating it needs a **control lane** — the incumbent re-scored on the
+new population — which is compute, and is the open remainder of this item.
+Until it lands, a weekly promotion is attributable to "the model or the data",
+not to the model.
+
+**Also outstanding: the calibration run.** Nothing has yet been trained at
+`n_models_per_fold=3` on the refresh path, so the wider floor is wired but not
+measured. ~4–5 h of compute, and it is the first thing that should run.
 
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
@@ -3111,7 +3145,7 @@ Note the previous sweep's PASS/null split was decided by 3-draw error bars, so
 either use more members per fold or report the classification as indicative only.
 
 
-### 4.5 Stage 11 — serving parity and explainability · 10–15 h build · no compute
+### 4.5 Stage 11 — serving parity and explainability · 12–18 h build · no compute
 
 **Stage 11 *(old 4)* — serving parity and explainability.** `TargetScorer` computes every
 branch live; `/score` returns per-branch contributions via branch-occlusion.
@@ -3167,26 +3201,46 @@ API cannot produce, a step before it was not finished.
 
 ### 4.8 Totals, and what "finished" means
 
-**Re-costed 2026-08-14.** The plan's original table is superseded: it omitted
-stage 10.5 entirely (pre-registered three days after the plan was written) and
-inherited a "~70 min per CV run" figure that stage 8 measured at ~2 h.
+**Re-costed 2026-08-16**, after stage 10.5 closed and 4.1a was built. Done work
+is struck out; everything below the rule is what remains.
 
-| order | item | build | compute | total |
-|---|---|---:|---:|---:|
-| 1 | stage 10.5 ensemble arm | 8–10 h | ~8 h | **16–18 h** |
-| 2 | stage 9 difference-image branch | 6–9 h | 3–4 h | **9–13 h** |
-| 3 | stage 10 Optuna re-tune | 2 h | 10–13 h | **12–15 h** |
-| 4 | stage 7ii branch attribution | 1 h | ~7 h | **8 h** |
-| 5 | stage 11 serving parity | 10–15 h | — | **10–15 h** |
-| 6 | finishing touches | 4–6 h | — | **4–6 h** |
-| 7 | stage 12 UI redesign | *unestimated* | — | *unestimated* |
-| | | | | **~59–75 h** plus the UI |
+| # | item | build | compute | total | blocked on |
+|---|---|---:|---:|---:|---|
+| ~~—~~ | ~~stage 10.5, both halves (3.11c–e)~~ | ~~8–10 h~~ | ~~11 h~~ | ~~**done**~~ | — |
+| ~~—~~ | ~~4.1a wiring: rolling folds + members~~ | ~~2 h~~ | ~~—~~ | ~~**done**~~ | — |
+| **1** | **4.1a remainder** — calibration run, then the control lane | 2–3 h | 5–9 h | **7–12 h** | nothing |
+| **2** | stage 9 — difference-image branch | 6–9 h | 3–4 h | **9–13 h** | stamp re-grid |
+| **3** | stage 10 — Optuna re-tune | 2 h | 10–13 h | **12–15 h** | stage 9 |
+| **4** | stage 7ii — branch attribution | 1 h | ~7 h | **8 h** | nothing |
+| **5** | stage 11 — serving parity | 12–18 h | — | **12–18 h** | see below |
+| **6** | finishing touches | 4–6 h | — | **4–6 h** | W7 decision |
+| **7** | stage 12 — UI redesign | *unestimated* | — | *unestimated* | everything |
+| | | | | **~52–72 h** plus the UI | |
 
-**Stage 10.5 carries two build items no earlier plan costed**, both found
-2026-08-14 and both reusable rather than one-offs: neither trainer can accept
-an external fold assignment, and the dual-view trainer has no
-`n_models_per_fold`. Stages 9 and 7ii face the same cross-run comparability
-problem the fold artefact solves.
+**Item 1 is first and is not optional.** The weekly gate is the one automated
+decision in the project and it is the only one still read against an
+uncontrolled comparison. Order within it: the calibration run (measures the
+floor that is now wired but unmeasured), then the control lane (isolates the
+model effect from the data effect).
+
+**Stage 11's estimate has moved from 10–15 h to 12–18 h.** 3.11c established the
+branch line as a complement, so stage 11 serves **two** models rather than one;
+3.11e then showed the two architectures differ on host-scoring by a margin
+excluding zero, which is a fact the explainability surface has to represent
+rather than average away. Partly mitigated by `ScoringEnsemble.from_registry`
+already loading `cnn_dualview.keras`.
+
+**Three items now share one prerequisite that already exists.** Stages 9, 7ii
+and every future refresh face the same cross-run comparability problem, and the
+fold artefact plus `extend_fold_assignment` solves it for all of them. That was
+built for stage 10.5 and is the most reusable thing this project has produced.
+
+**Two carried decisions that are Ollie's, not schedulable.**
+
+| decision | why it is open |
+|---|---|
+| the `data/processed` DVC drift | three tracked artefacts differ from their pointers since 2026-08-07; a fresh `dvc pull` gives different bytes than this machine, and stage 10.5 trained on the on-disk version |
+| stage 8's qualified second win | 3.11e weakened the case rather than strengthening it; banking it needs more draws, not another lane |
 
 **One dependency worth stating.** If stage 10.5 clears its bar, the branch line
 survives as a **complement** rather than a replacement, and stage 11 then has
