@@ -56,4 +56,4 @@ because a second copy silently produced wrong data (9-dim aux into a 13-dim
 build; a hardcoded request that dropped every K2 row).
 
 See [docs/index.md](../docs/index.md) for the documentation map and
-[docs/features.md](../docs/features.md) for what the model consumes.
+[docs/model_specs.md](../docs/model_specs.md) for what the model consumes.

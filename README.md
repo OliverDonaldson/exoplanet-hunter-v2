@@ -7,7 +7,7 @@ React vetting console. Governing principle: **beat the baseline before you
 cheer** — every component must beat the simplest thing that already works,
 or it doesn't ship.
 
-Architecture reference: `docs/architecture.md` (the V2 design document).
+Architecture reference: [docs/model_pipeline.md](docs/model_pipeline.md) and [docs/model_specs.md](docs/model_specs.md).
 
 ## Layout
 

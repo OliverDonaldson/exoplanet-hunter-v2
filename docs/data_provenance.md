@@ -1,16 +1,14 @@
-# Data provenance — where our data comes from and where the model has looked
+# Data Provenance
 
-This note documents the *origins* of the data behind Exoplanet Hunter V2: the
-authoritative catalogues we pull labels from, the archives the raw light
-curves come from, and — visually — which patch of sky the served model has
-actually been trained on versus everything that has been observed. It exists
-because "where did the training distribution come from?" is a first-order
-question for interpreting anything the model says.
+Where the data comes from, where the model has looked, and the measured
+findings that describe both. "Where did the training distribution come from?"
+is a first-order question for interpreting anything the model says, and §6 is
+the ledger of every headline number this project has measured against it.
 
 All figures are regenerated from the live artefacts by
-`pipeline/scripts/plot_provenance.py`; the sky positions are read straight
-from the `RA_OBJ`/`DEC_OBJ` keywords in each target's FITS header (5,414 of
-the 5,686 training targets resolved).
+`pipeline/scripts/plot_provenance.py`; sky positions are read from the
+`RA_OBJ`/`DEC_OBJ` keywords in each target's FITS header (5,414 of the 5,686
+training targets resolved).
 
 ## Sources of truth
 
@@ -135,3 +133,177 @@ Now implemented (kept here for provenance):
   habitable-zone columns computed in `features/followup.py` from the archive's
   formulae (`stellar_luminosity_lsun` / `insolation_flux_earth` /
   `habitable_zone_au`) and cross-checked against our own Teq recipe.
+
+## Measured findings — the metrics ledger
+
+Every headline number the project has measured, with the artefact it came from
+and where its full reading is recorded. **This table is the index; the
+narrative, the pre-registration each result was read against, and the
+qualifications all live in [roadmap.md](roadmap.md).** Nothing enters here that
+was not measured from an artefact in this repository.
+
+Two conventions carry through all of it. A margin is reported against the noise
+floor measured **in the same run**, by the rule `2 x sd / sqrt(n_models_per_fold)`.
+And a number that landed outside the terms fixed before it was run is recorded
+as falsified rather than re-specified.
+
+### Served model
+
+| Metric | Value | Source |
+|---|---|---|
+| Run | `ca906040`, serving since 2026-07-19 | `models/registry.json` |
+| CV ROC-AUC | 0.9581 ± 0.0057 | `cv_summary.json` |
+| Brier | 0.0791 | `cv_summary.json` |
+| ECE | 0.0276; pooled out-of-fold 0.0129 | `cv_summary.json` |
+| TESS recall @1% FPR | 0.3069 | out-of-fold predictions |
+| Injection–recovery | 50% complete at S/N ≈ 15, 90% at S/N ≈ 44 | injection-recovery run |
+
+Mission separation matters and is not cosmetic: TESS AUC trails Kepler by
+several points, and a pooled figure hides it.
+
+### Observation-baseline dependence
+
+The model reads how long a target was observed, not only how much transit
+evidence was collected. Measured on the TESS out-of-fold slice, n = 2,399.
+
+| Quantity | Value | Recorded in |
+|---|---|---|
+| Spearman(score, baseline) — branch, before intervention | +0.5155 | roadmap 3.9a |
+| Spearman(label, baseline) — the labels' own bias | +0.3874 | roadmap 3.9a |
+| Amplification gap (score − label) | +0.1281 | roadmap 3.9a |
+| Gap after propensity weighting | **−0.0071**, a −0.1336 move at 3.3x its bar | roadmap 3.9b |
+| Cost of that fix in AUC / recall | level on both (0.8x, 0.3x) | roadmap 3.9b |
+
+Propensity weighting removed the architecture's *amplification* of the confound
+at no measurable cost. The bias **in the labels** is untouched and cannot be
+reached this way — it is +0.3874 by definition on a frozen evaluation slice.
+
+### Host scoring — the control arm
+
+Synthetic transit-free light curves at real host positions. A model that scores
+these is reading the star, not the transit. 580 baseline-matched hosts,
+290 planet / 290 false-positive.
+
+| Lane | Planet-minus-FP split | Host-AUC (threshold-free) |
+|---|---|---|
+| Stage 7i rebaseline | +0.1195 | 0.5876 |
+| Stage 8 control | +0.1690 | 0.6234 |
+| Stage 8 propensity | +0.0724 | 0.6045 |
+
+The split fell by −0.0966 (1.3x its pre-registered bar) but the threshold-free
+host-AUC did not move (−0.0190, CI crossing zero). **The pre-registered
+statistic moved and the construct behind it did not**, so the second win is
+recorded as qualified and is not banked until a threshold-free measurement
+confirms it. Full reading in roadmap 3.9c.
+
+Reseeding alone moved the control's split by +0.0494 — half the effect being
+claimed. Running a same-code control arm was load-bearing.
+
+### Ensembling — stage 10.5
+
+Dual-view and branch models on a pinned common fold assignment, 5,375 shared
+targets, n = 2,367 on the TESS gate slice.
+
+| Model | TESS AUC | Recall @1% FPR |
+|---|---|---|
+| Dual-view, common folds — the bar | 0.9187 | 0.3046 |
+| Branch, un-weighted | 0.9250 | 0.2831 |
+| Branch, propensity-weighted | 0.9165 | 0.2000 |
+| **Ensemble E-C** (mean of logits) | 0.9549 | **0.4362** |
+| **Ensemble E-P** (mean of logits) | 0.9527 | **0.4223** |
+
+Margins of +0.1315 and +0.1177 against floors of 0.0407 and 0.0469 — **3.2x and
+2.5x**, and 2.5x / 1.7x against the conservative bound. Both clear.
+
+**The branch line's value is as a complement, not a replacement.** This reopens
+nothing about the architecture rejections, which were about replacement.
+
+Two qualifications travel with it. The originally reported 3.9x / 4.1x rested on
+an un-pre-registered pairing that minimised the floor and are **falsified in
+their stated form** (roadmap 3.11d). And E-P's ensemble baseline sensitivity is
++0.4240, **above both its members** (+0.3880, +0.3956) — averaging created
+baseline dependence rather than inheriting it. Unexplained.
+
+### Standing caveat on the noise floors
+
+The floors are estimated from three draws and are recorded four times now as too
+thin for the decisions they carry. Measured `gate_recall_seed_sd` came in at
+roughly double the earlier stage-6 figure (0.0677 and 0.0935 against 0.0337), and
+with three members the ensemble floor moves by up to 2.4x depending on an
+arbitrary pairing. Conclusions to date survive the wider floors; the next result
+to lean on this quantity should widen them first.
+
+### Data Validation coverage
+
+Measured over the built DV scalars table: 6,484 rows across 5,766 targets, 0
+parse failures.
+
+| Quantity | Value |
+|---|---|
+| `dv_usable` true | 92.9% |
+| Rows where the best-matching TCE is a **different signal** | 452 (7.0%) |
+| Rows unverifiable (no catalogue period) | 8 |
+| Median observed/expected transit ratio | **0.29** |
+| Reports catching every predicted transit | **12%** |
+
+The 452 mismatched rows must be masked, not trained on: attaching another
+signal's bootstrap FAP, ghost statistic and transit counts to our candidate is
+invisible to everything downstream.
+
+The 0.29 median is the completeness thesis in one number. **Two targets with
+identical folded views can differ by a factor of three in how much real transit
+evidence they contain** — invisible in a fold, which is precisely what the
+unfolded view exists to expose.
+
+### Gaia astrometry coverage
+
+| Quantity | Value |
+|---|---|
+| Targets with a Gaia counterpart | 7,177 / 7,204 (99.6%) |
+| Targets with RUWE | 7,071 (98.5%) |
+| Median RUWE | 1.028 |
+| Above the 1.4 unresolved-binary cut | 1,166 (16.5%) |
+| Targets with more than one DR3 candidate | 499 (7.0%) |
+
+Two hops are required because the catalogues do not line up: TIC v8 carries a
+Gaia **DR2** source id and `ruwe` is a **DR3** column, so the join routes through
+`gaiadr3.dr2_neighbourhood`. That table is many-to-many — 7.0% of targets have
+more than one DR3 candidate, meaning DR3 resolved a blend DR2 saw as a single
+source. The nearest match is kept and `n_dr3_candidates` recorded; taking an
+arbitrary row would attach a *neighbour's* RUWE to the target.
+
+Coverage is **0% on Kepler and K2**. That is recorded as absent rather than
+imputed as zero, because a missing branch otherwise poisons every row of its
+mission.
+
+### The bug that passed every gate
+
+Kept because it is the strongest argument in the project for verifying by
+executing rather than by reading a green run.
+
+The DV scalars table publishes its **own** observed/expected transit counts. The
+side-table merge left both unrenamed, so pandas suffixed ours *and* theirs to
+`_x`/`_y`, and the shard writer's `if c in scalars.columns` filter then wrote
+**13 scalars instead of 15 without a word**.
+
+The two columns lost were `observed_transit_count` and `expected_transit_count`
+— exactly the pair the unfolded branch exists to provide, and the pair that
+stage's success criterion was to be measured on. The build succeeded, all seven
+gates passed, and the shards were wrong. It was caught only by counting the
+scalars in `metadata.json` against `FEATURE_COLUMNS`.
+
+### Null and negative results
+
+Recorded because they constrain what the model is, and because a project that
+only records its wins cannot be trusted about them.
+
+| Result | Outcome |
+|---|---|
+| 13-dim vetting-feature retrain | ΔAUC −1.3×10⁻⁵ — a flat null. Rejected, not rationalised |
+| Per-diagnostic branch architecture, as a *replacement* | rejected across three runs and a capacity arm |
+| Capacity as the explanation for that | falsified — +19% params, paired d = −0.44 |
+| Synthetic negatives against baseline dependence | moved the gap least of any arm (0.1x) |
+| Stratified negatives | structurally unreadable — dropped rows leave the evaluation population incomplete |
+
+A resampling intervention has to keep the evaluation population whole even when
+it changes the training one. That lesson stands in place of the re-run.

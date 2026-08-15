@@ -1,7 +1,7 @@
 """Follow-up metrics pinned to the NExScI worked example (TOI-664.01).
 
 Every expected value below comes from the provenance table in
-"Supplementary ExoFOP Calculations" (docs/exofop_calculations.pdf):
+"Supplementary ExoFOP Calculations" (NASA ExoFOP documentation):
 M*=1.516 Msun, log g=3.72765, R*=2.79 Rsun, P=4.736 d, a=0.0634 AU,
 T*=5302 K, Teq=1699 K, Rp=14.03 Re, mJ=6.616, mK=6.122, Mp=128 Me,
 K=36.9 m/s, TSM scale=1.15, TSM=257, ESM=132.

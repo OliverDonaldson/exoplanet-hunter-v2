@@ -1,0 +1,138 @@
+% Exoplanet Hunter — bibliography
+% Works this project's design, inputs and evaluation draw on directly.
+
+@article{shallue2018,
+  author  = {Shallue, Christopher J. and Vanderburg, Andrew},
+  title   = {Identifying Exoplanets with Deep Learning: A Five-planet Resonant
+             Chain around {Kepler}-80 and an Eighth Planet around {Kepler}-90},
+  journal = {The Astronomical Journal},
+  volume  = {155},
+  number  = {2},
+  pages   = {94},
+  year    = {2018},
+  doi     = {10.3847/1538-3881/aa9e09},
+  note    = {The dual-view (global + local) phase-fold representation this
+             project's served model uses.}
+}
+
+@article{valizadegan2022,
+  author  = {Valizadegan, Hamed and Martinho, Miguel J. S. and Wilkens, Laurent S.
+             and Jenkins, Jon M. and others},
+  title   = {{ExoMiner}: A Highly Accurate and Explainable Deep Learning
+             Classifier that Validates 301 New Exoplanets},
+  journal = {The Astrophysical Journal},
+  volume  = {926},
+  number  = {2},
+  pages   = {120},
+  year    = {2022},
+  doi     = {10.3847/1538-4357/ac4399},
+  note    = {The per-diagnostic branch architecture the rebuild is modelled on.}
+}
+
+@article{valizadegan2025,
+  author  = {Valizadegan, Hamed and Martinho, Miguel J. S. and others},
+  title   = {{ExoMiner++}: Enhanced Transit Classification with Difference
+             Imaging and Unfolded Views},
+  journal = {The Astronomical Journal},
+  year    = {2025},
+  note    = {Difference-image and unfolded-transit inputs; the source of the
+             outstanding branch work in the roadmap.}
+}
+
+@article{jenkins2016,
+  author  = {Jenkins, Jon M. and Twicken, Joseph D. and McCauliff, Sean and others},
+  title   = {The {TESS} Science Processing Operations Center},
+  journal = {Proc. SPIE},
+  volume  = {9913},
+  pages   = {99133E},
+  year    = {2016},
+  doi     = {10.1117/12.2233418},
+  note    = {SPOC, its Data Validation reports, and the diagnostic statistics
+             carried through the prediction table.}
+}
+
+@article{giacalone2021,
+  author  = {Giacalone, Steven and Dressing, Courtney D. and others},
+  title   = {Validation of 50 New Exoplanets from {K2} with {TRICERATOPS}},
+  journal = {The Astronomical Journal},
+  volume  = {161},
+  number  = {1},
+  pages   = {24},
+  year    = {2021},
+  doi     = {10.3847/1538-3881/abc6af},
+  note    = {The FPP / NFPP statistical validation layer, and the thresholds
+             used for it.}
+}
+
+@article{twicken2018,
+  author  = {Twicken, Joseph D. and Catanzarite, Joseph H. and Clarke, Bruce D.
+             and others},
+  title   = {{Kepler} Data Validation {I}: Architecture, Diagnostic Tests, and
+             Data Products for Vetting Transiting Planet Candidates},
+  journal = {Publications of the Astronomical Society of the Pacific},
+  volume  = {130},
+  number  = {988},
+  pages   = {064502},
+  year    = {2018},
+  doi     = {10.1088/1538-3873/aab694},
+  note    = {Centroid, odd/even, weak-secondary and ghost diagnostics.}
+}
+
+@article{thompson2018,
+  author  = {Thompson, Susan E. and Coughlin, Jeffrey L. and Hoffman, Kelsey and
+             others},
+  title   = {Planetary Candidates Observed by {Kepler}. {VIII}. A Fully
+             Automated Catalog with Measured Completeness and Reliability Based
+             on {Data Release 25}},
+  journal = {The Astrophysical Journal Supplement Series},
+  volume  = {235},
+  number  = {2},
+  pages   = {38},
+  year    = {2018},
+  doi     = {10.3847/1538-4365/aab4f9},
+  note    = {DR25 and the Robovetter score used to certify this project's
+             Kepler negatives.}
+}
+
+@article{lightkurve2018,
+  author  = {{Lightkurve Collaboration}},
+  title   = {Lightkurve: {Kepler} and {TESS} time series analysis in {Python}},
+  journal = {Astrophysics Source Code Library},
+  year    = {2018},
+  note    = {Light-curve retrieval and handling.}
+}
+
+@article{platt1999,
+  author  = {Platt, John},
+  title   = {Probabilistic Outputs for Support Vector Machines and Comparisons
+             to Regularized Likelihood Methods},
+  journal = {Advances in Large Margin Classifiers},
+  year    = {1999},
+  note    = {The calibration method used. Chosen over temperature scaling, which
+             has no bias term and cannot correct a distribution shift.}
+}
+
+@article{gal2016,
+  author  = {Gal, Yarin and Ghahramani, Zoubin},
+  title   = {Dropout as a {Bayesian} Approximation: Representing Model
+             Uncertainty in Deep Learning},
+  journal = {Proceedings of the 33rd International Conference on Machine
+             Learning},
+  year    = {2016},
+  note    = {MC-Dropout, the source of the per-score uncertainty band.}
+}
+
+@misc{nasa_exoplanet_archive,
+  author       = {{NASA Exoplanet Science Institute}},
+  title        = {{NASA} Exoplanet Archive},
+  howpublished = {\url{https://exoplanetarchive.ipac.caltech.edu}},
+  note         = {Label source of truth, queried over TAP.}
+}
+
+@misc{exofop,
+  author       = {{NASA Exoplanet Science Institute}},
+  title        = {{ExoFOP-TESS}},
+  howpublished = {\url{https://exofop.ipac.caltech.edu/tess}},
+  note         = {TOI and CTOI candidate tables; enrichment only, not the label
+                  authority.}
+}

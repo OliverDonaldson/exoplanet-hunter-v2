@@ -1,61 +1,223 @@
-## Exoplanet Hunter V2
+# Exoplanet Hunter Pipeline Outputs
 
-# What it is
-An automated, cloud-hosted machine-learning system that decides which transit signals in NASA's TESS, Kepler and K2 data are likely to be real planets — and, crucially, tells you how much to trust each decision.
+For pipeline version 2.
 
-The framing from your own architecture doc still holds: V1 was about where things live (moving storage and orchestration off the laptop). V2 is about making the whole thing run itself — self-refreshing, self-validating, self-serving, with a live inference layer anyone can hit in a browser. The governing principle, borrowed from your DATA305 sequence-modelling lecture, is beat the baseline before you cheer: every component has to beat the simplest thing that already works, or it doesn't ship.
+## 1. Introduction
 
-# The problem it addresses
-When a space telescope watches a star and the brightness dips periodically, that's a transit — possibly a planet crossing in front. Most of the time it isn't. The dip could be an eclipsing binary star, a background star's eclipse bleeding into the aperture, instrumental systematics, or stellar variability.
+Exoplanet Hunter is an end-to-end pipeline for the vetting of transiting planet
+candidates in NASA's TESS, Kepler and K2 data. Given a target and an ephemeris
+it returns a calibrated probability that the signal is a planet, together with
+the diagnostic evidence behind that probability.
 
-Separating these is called vetting, and it's the bottleneck. TESS produces far more candidates than humans can examine. Each one traditionally needs an expert to look at phase-folded light curves, centroid motion, odd-versus-even transit depths, and secondary eclipses. There are currently ~7,000 unvetted TESS candidates in the catalogue this system tracks.
+The pipeline is designed for triage. A space telescope produces far more
+candidates than can be examined by hand, and most periodic brightness dips are
+not planets — they are eclipsing binaries, background eclipses bleeding into the
+aperture, instrumental systematics, or stellar variability. Separating these is
+called vetting, and it is the bottleneck. The purpose of the pipeline is to rank
+a candidate queue so that human attention goes where it pays, and to attach a
+probability that can be acted on rather than a bare yes or no.
 
-The purpose is to triage that queue: rank candidates so human attention goes where it pays, and attach a calibrated probability rather than a bare yes/no.
+The pipeline generates three products: a **prediction table** carrying scores
+for every evaluated target, a **cross-validation summary** recording how the
+model that produced them was measured, and a **scoring response** served over
+HTTP, which carries the diagnostic panels a human vetter reads. This document
+describes those outputs. It does not describe how to run the pipeline — see
+[getting-started.md](getting-started.md) — nor how the model is built, which is
+[model_pipeline.md](model_pipeline.md) and [model_specs.md](model_specs.md).
 
-# How it works, end to end
-1. Catalogue refresh. Pulls labelled targets from the NASA Exoplanet Archive via TAP — confirmed planets and false positives from TESS (TOI), Kepler (KOI) and K2 (k2pandc) — plus the unvetted candidate list from ExoFOP. Kepler negatives are restricted to DR25-certified false positives, so the "not a planet" class is genuinely certain rather than merely unconfirmed. Current data of record: 5,686 labelled targets (2,656 TESS / 2,500 Kepler / 530 K2) yielding 5,380 training examples.
+## 2. Prediction Table
 
-2. Validation gates. Five Pandera-based gates run before anything trains: schema checks on the label and candidate catalogues, structural checks on the processed views, a leakage guard that quarantines label flips into a prospective holdout, and a shrink guard that fails the run if the catalogue loses more than 10% of its rows or drops a mission entirely. That last one exists because a bug once silently rewrote the catalogue from 5,686 rows to 1,000.
+The prediction table is the primary product of a cross-validation run. It is
+written as `predictions.parquet` in the run directory and holds one row per
+evaluated target, scored **out of fold** — every row is predicted by a model
+that did not train on it.
 
-3. Preprocessing. Downloads the light curve, cleans it, then flattens with a Savitzky-Golay filter with the transit masked out so the detrending can't eat the signal it's meant to preserve. Phase-folds at the known ephemeris into two views: a global view (2,001 bins, full orbit) and a local view (201 bins, ±3 transit durations). Adds a 13-dimensional auxiliary vector — stellar temperature, radius, surface gravity, magnitude, transit depth/duration/period, plus vetting diagnostics.
+### 2.1 Identity and label columns
 
-4. Training. A dual-view 1D CNN — two convolutional towers, one per view, fused with the auxiliary features. Trained 5-fold cross-validated with MC-Dropout for uncertainty, then Platt-scaled for calibration (not temperature scaling — temperature has no bias term and can't correct a distribution shift, which cost an 0.136 ECE regression before it was fixed).
+| Column | Description |
+|---|---|
+| `tic_id` | TIC identifier of the target (integer scalar). K2 targets carry their EPIC identifier in this column. |
+| `mission` | Source mission: `TESS`, `Kepler` or `K2` (string). |
+| `label` | Ground truth: `1` planet, `0` false positive. Candidates are held out of training and do not appear. |
+| `fold` | Cross-validation fold that held this target out (integer, 0–4). |
 
-5. The promotion gate. A new run only becomes the served model if it beats the incumbent's cross-validated ROC-AUC without degrading Brier score or calibration error. It has rejected two of your own retrains — that's the discipline working, not failing.
+### 2.2 Score columns
 
-6. Serving. FastAPI on Fly.io (exoplanet-hunter-api.fly.dev), scale-to-zero. GET /score/{tic_id} fetches the light curve, runs the full preprocessing and ensemble, and returns a calibrated probability plus the diagnostic panels. A React console on Render presents it for human vetting.
+| Column | Description |
+|---|---|
+| `score` | Calibrated planet probability in [0, 1]. This is the served number. |
+| `member_score_N` | Uncalibrated score from ensemble member `N`. Present once a run trains more than one model per fold; the spread across members is the run's reseeding noise. |
 
-7. Automation. A weekly Saturday job refreshes the catalogue, runs the gates, retrains only if the data changed materially, runs the promotion gate, and versions everything to Cloudflare R2 via DVC.
+Members are averaged and calibrated **once over the average**, not calibrated
+individually and averaged afterwards: the ensemble is what is served, so the
+Platt fit has to describe it rather than any one member.
 
-8. Statistical validation. For the top-ranked candidates, a TRICERATOPS layer computes false-positive probability (FPP) and nearby-FPP (NFPP) from the actual pixel data and surrounding stars — the background-eclipsing-binary discrimination a light-curve-only CNN is structurally blind to. That's the run in your terminal right now.
+### 2.3 Ephemeris and observation columns
 
-# Where it stands
-Model ca906040, live: 5-fold CV ROC-AUC 0.9581 ± 0.0057, Brier 0.0791, ECE 0.0276. Pooled out-of-fold ECE 0.0129 — well-calibrated, meaning a stated 0.9 really does mean roughly 90%.
+| Column | Description |
+|---|---|
+| `period` | Orbital period in days (float scalar). |
+| `duration` | Transit duration in days (float scalar). |
+| `depth` | Transit depth as a fraction of stellar flux. |
+| `observed_transit_count` | Transits actually present in the light curve. |
+| `expected_transit_count` | Transits predicted over the observation baseline. |
+| `transit_completeness` | Observed over expected. |
+| `n_sectors_observed` | Number of TESS sectors covering the target. |
+| `lc_source` | Archive the light curve was drawn from. |
 
-Sensitivity, measured not assumed: injection–recovery gives 50% completeness at S/N ≈ 15 and 90% at S/N ≈ 44. That's a defensible sensitivity statement of the kind cross-validated AUC cannot give you.
+`expected_transit_count` and `period` together give the **observation baseline**
+in days, the quantity the pipeline's own bias measurements are computed against.
+See [data_provenance.md](data_provenance.md).
 
-Candidate shortlist: 3,919 TESS candidates scored, 50 above probability 0.9, currently undergoing FPP/NFPP validation.
+### 2.4 Data Validation columns
 
-# What makes it distinctive
-Honestly, not the CNN — dual-view CNNs for transit classification are well-trodden. Three other things are:
+Where the mission pipeline publishes a Data Validation report, its diagnostic
+statistics are carried through unmodified. These are inputs to the branch models
+and are recorded so that any score can be traced to the evidence available when
+it was produced.
 
-It runs itself. Refresh, validate, retrain-if-warranted, gate, publish, serve. Most student ML projects are a notebook and a number.
+| Group | Columns |
+|---|---|
+| Detection strength | `max_multiple_event_sigma`, `max_single_event_sigma`, `max_ses_in_mes`, `model_fit_snr`, `robust_statistic` |
+| Statistical significance | `bootstrap_significance`, `bootstrap_threshold_pfa`, `chi_square_gof`, `chi_square_gof_dof` |
+| Odd–even | `odd_even_statistic`, `odd_even_significance` |
+| Weak secondary | `weak_secondary_max_mes`, `weak_secondary_depth_ppm`, `weak_secondary_robust_statistic`, `albedo_comparison_statistic` |
+| Ghost diagnostic | `ghost_core_statistic`, `ghost_core_significance`, `ghost_halo_statistic`, `ghost_halo_significance` |
+| Centroid | `mean_sky_offset`, `mean_sky_offset_uncertainty`, `control_sky_offset`, `control_sky_offset_uncertainty` |
+| Period aliasing | `longer_period_statistic`, `shorter_period_statistic`, `matched_period_days`, `period_mismatch_frac` |
+| Difference imaging | `n_difference_images`, `diff_image_min_px`, `diff_image_max_px`, `diff_quality_median` |
+| Stellar parameters | `effective_temp`, `log_g`, `log_metallicity`, `stellar_density`, `stellar_radius`, `stellar_mass`, `tess_mag` |
+| Astrometry | `ruwe`, `has_ruwe`, `n_dr3_candidates` |
+| Coverage | `dv_usable`, `summary_quality_fraction`, `dv_observed_transit_count`, `dv_expected_transit_count` |
 
-It's calibrated and interactive. Not a leaderboard score but a live service returning probabilities you can act on, with the diagnostic evidence attached.
+`dv_usable` is `False` where no Data Validation report was available. The
+remaining columns in that row are then null, and are imputed downstream rather
+than dropped, so a target is never silently excluded for missing diagnostics.
 
-It is adversarial about its own results. This is the part I'd put first. Three examples:
+## 3. Cross-Validation Summary
 
-The injection–recovery run includes a zero-depth control arm, which revealed that 26.4% of hosts pass threshold with no injected signal at all (46.7% for planet hosts, 12.3% for false-positive hosts). The model is partly scoring the star, not the transit.
-Scoring the real candidates confirmed it independently: probability correlates with observation baseline at +0.21 but with the number of transits actually observed at −0.003. It rewards how long a target was watched, not how much transit evidence was collected.
-A 13-dimensional vetting-feature retrain came back a dead-flat null (ΔAUC −1.3×10⁻⁵) and was rejected rather than rationalised.
-Negative results like these are what separate a system you can trust from one that merely reports a good number.
+Each run writes `cv_summary.json` beside its prediction table. It records what
+the run measured and the configuration that produced it, so two runs can be
+compared without reading either one's code.
 
-# What it aims to achieve
-Near term — a trustworthy shortlist. Rank the ~7,000 unvetted TESS candidates, attach FPP/NFPP to the top of that list, and produce a defensible set worth human follow-up. Not "discover a planet" — narrow the search space with stated confidence.
+### 3.1 Headline metrics
 
-The current push — close the gap the measurements exposed. The system knows two concrete things about its own weakness: it reads the host rather than the transit, and TESS AUC (0.906) trails Kepler (0.989) by 8 points on the mission that actually matters. The rebuild, inspired directly by NASA's ExoMiner++, addresses both by restructuring inputs and architecture: per-diagnostic convolutional branches instead of one fused aux vector, a branch that sees each transit separately rather than only the stacked fold, and difference-image data that locates the signal at pixel level. The success criterion is explicit and falsifiable — the transit-count correlation must move off zero, and the 26.4% control rate must fall.
+`summary` carries mean and standard deviation across folds for `test_roc_auc`,
+`test_pr_auc`, `test_f1`, `test_brier` and `test_ece`.
 
-Longer term — a genuine vetting instrument. Per-branch explanations in the console so a human sees why the model said what it said; a prospective holdout that scores candidates before their dispositions are published, which is the only honest test of a vetting system; and the Mission Control interface redesign, deliberately held until last so it's built around real evidence rather than rebuilt twice.
+`per_mission` repeats those per mission and adds the operating points the
+shortlist is read at — `recall_at_1pct_fpr`, `recall_at_5pct_fpr`,
+`recall_at_10pct_fpr` — with `n` and `n_positive`, for each of `TESS`, `Kepler`,
+`K2` and `all`. Mission separation is not cosmetic: the missions differ by
+several points of AUC, and a pooled figure hides it.
 
-# Honest limitations
-It vets known ephemerides — it does not search raw light curves for undiscovered signals. Its labels inherit the archive's biases. It's blind to anything requiring pixel-level information, which is exactly why the TRICERATOPS layer exists and why difference images are the priority upgrade. And it has never been evaluated prospectively on candidates whose true disposition was unknown at scoring time; that clock started 25 July when the weekly refresh first published successfully.
+### 3.2 Variance block
+
+A margin cannot be read without the noise it sits against, so every run reports
+its own.
+
+| Field | Description |
+|---|---|
+| `fold_sd` | Spread of AUC across folds — fold difficulty. |
+| `seed_sd` | Spread of AUC across members within a fold — reseeding noise. |
+| `recall_fold_sd`, `recall_seed_sd` | The same decomposition, for recall. |
+| `gate_recall_fold_sd`, `gate_recall_seed_sd` | The same, on the TESS gating slice the shortlist is drawn from. |
+| `pooled_gate_recall` | Gate recall for each member's complete out-of-fold set. |
+| `pooled_gate_recall_seed_sd` | Spread of those pooled draws — the run-level reseeding noise, directly. |
+| `n_models_per_fold` | Members trained per fold. |
+
+The decision rule is `2 x sd / sqrt(n_models_per_fold)`. **A margin smaller than
+that is not a result.** The rule has correctly rejected several of this
+project's own changes.
+
+### 3.3 Run configuration
+
+`run_config` records `n_splits`, `val_frac`, `epochs`, `batch_size`, `patience`,
+`learning_rate`, `seed`, `n_models_per_fold`, the augmentation settings, any
+`baseline_intervention`, the `fold_assignment` file when the outer split was
+pinned, `view_shapes`, `n_examples`, the full `model_config`, and the git
+provenance of the code that ran (`git_sha`, `git_dirty`, `git_branch`).
+
+Two runs differing only in their fold assignment are distinguishable from their
+summaries alone. This matters because comparing models trained on different
+splits compares populations rather than models.
+
+## 4. Scoring Response
+
+`GET /score/{tic_id}` downloads the light curve, runs the full preprocessing
+path and the ensemble, and returns the result as JSON. It is the same code path
+that produced the prediction table, so a served score and a recorded score are
+the same quantity.
+
+### 4.1 Headline fields
+
+| Field | Description |
+|---|---|
+| `tic_id` | Target identifier. |
+| `ephemeris` | `period_days`, `epoch`, `duration_days`, and `source` — `catalogue`, `bls` or `user`. |
+| `prob_calibrated` | The calibrated probability. This is the number to act on. |
+| `prob_mean`, `prob_std` | Mean and standard deviation over MC-Dropout passes — the model's own uncertainty. |
+| `per_fold` | Each fold model's probability, so agreement across folds is visible. |
+| `decision_threshold` | The operating point the verdict was rendered at. |
+
+### 4.2 Diagnostic panels
+
+The response carries the series a human vetter reads, so the console can render
+evidence rather than a number alone.
+
+| Field | Description |
+|---|---|
+| `global_view` | Phase-folded flux over the full orbit. |
+| `local_view` | Phase-folded flux around the transit. |
+| `odd_view`, `even_view` | Odd- and even-numbered transits folded separately. A depth difference indicates an eclipsing binary at twice the period. |
+| `centroid_track` | Flux-weighted centroid motion through transit. Motion indicates the signal originates off-target. |
+| `periodogram` | Frequency-domain power, for whether the period is real beyond the transit itself. |
+
+### 4.3 Cautions
+
+Each caution block reports its statistic, its threshold, and a boolean. They are
+advisory and do not alter the probability.
+
+| Block | What it tests |
+|---|---|
+| `centroid` | Centroid shift in transit — background eclipsing binary. |
+| `odd_even` | Odd/even depth and timing difference — binary at twice the period. |
+| `secondary` | Occultation at phase 0.5, with an albedo comparison — self-luminous companion. |
+| `duration_check` | Observed duration against the circular-orbit expectation — implausible geometry. |
+| `false_alarms` | SWEET test, transit asymmetry, depth mean-median ratio, gap fraction. BLS-found ephemerides only. |
+
+A block is `null` when the raw light curve lacks the columns it needs. Absence
+is reported rather than imputed, because a caution that silently defaults to
+"clear" is worse than no caution at all.
+
+## 5. Known Limitations
+
+Stated here rather than in a footnote, because they bound what the outputs mean.
+
+**The pipeline vets known ephemerides; it does not search.** It answers "is this
+signal a planet", not "is there a planet here".
+
+**The labels inherit the archive's biases.** Targets enter the training set only
+once a human or pipeline has already dispositioned them, so the training
+distribution is dispositioned candidates, not a random sample of observed stars.
+Bright-star and short-period selection effects are built in.
+
+**The model partly scores the star rather than the transit.** A zero-depth
+control arm — synthetic transit-free light curves at real host positions — is
+passed by a measurable fraction of hosts, and more often by planet hosts than
+false-positive hosts. Score correlates with how long a target was observed more
+strongly than with how much transit evidence was collected. This is measured,
+tracked and partly reduced; it is not solved. Current figures are in
+[data_provenance.md](data_provenance.md).
+
+**Pixel-level information is largely absent.** Distinguishing an on-target
+transit from a blended background eclipse ultimately requires the pixels. The
+difference-image branch is outstanding work in [roadmap.md](roadmap.md).
+
+**It has not been evaluated prospectively at scale.** The only honest test of a
+vetting system is scoring candidates before their dispositions are published.
+That clock started on 2026-07-25.
+
+## 6. References
+
+Bibliography in [references.bib](references.bib).

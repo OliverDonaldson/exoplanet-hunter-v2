@@ -6,32 +6,12 @@ The UI redesign stays the locked final step.
 
 We reimplement and credit; we do not vendor their code (NASA NOSA licence).
 
-## How to read this file
-
-**This is the single record of the project: what was measured, and what is
-left.** It absorbed `plan-2026-08-09.md` on 2026-08-14 — that document had
-gone stale (it predated stage 10.5 entirely, and its cost model was out by
-1.7x), and two documents disagreeing about what comes next is worse than one
-that is occasionally wrong. The deleted plan remains in git history.
-
-**Numbering.** Sections are `1, 2, 3`; their parts are `1a, 1b` or `3.1, 3.2`;
-sub-parts are `3.2a, 3.2b`. Section 3 is ordered by **when the work happened**,
-so it reads as provenance: each result sits after the pre-registration that
-fixed how it would be read.
-
-**Four conventions that are load-bearing.**
-
-1. **Pre-registration blocks are verbatim and are never rewritten.** They are
-   headed *Pre-registered before …* and carry the date nothing had been run.
-   A result landing outside its pre-registration is reported as falsified, not
-   re-specified. Their stage numbers are the ones current when they were
-   written; new numbers appear only in square brackets.
-2. **`W1`–`W14` are the weakness register** — see 1d. `W` is just *weakness*,
-   numbered and ranked by damage to the product's actual job.
-3. **Stage numbers were remapped once**, on 2026-08-08. The permanent old→new
-   table is 1c; run directories and commit messages still carry old labels.
-4. **Nothing promotes without being asked.** `ca906040` has served since
-   2026-07-19.
+The single record of what was measured and what remains. Four conventions are
+load-bearing: **pre-registration blocks are verbatim and never rewritten**, and
+a result landing outside one is reported as falsified rather than re-specified;
+**`W1`–`W14`** is the weakness register at 1d; **stage numbers were remapped
+once**, on 2026-08-08, with the permanent mapping at 1c; and **nothing promotes
+without being asked**.
 
 ## 1. Orientation
 
@@ -172,7 +152,7 @@ under-observed ones that may deserve it. No architecture can reach it.
 | **W11** | **Eager `GradientTape` over the assembled model aborts the process** | `Fatal Python error: Aborted` in `_ConcatGradV2`, TF 2.17.1 / Keras 3.15.0 on Metal. Reproduced on unmodified HEAD | **does not block stage 11** — see below |
 | **W12** | ~~**No rate limiting on `/score`**~~ **CLOSED 2026-08-09** | each request triggers a network download + TF inference on a 2 GB box; public, unauthenticated | **fixed** — `api/app/ratelimit.py`, 12 tests |
 | **W13** | **4 npm advisories (3 high) in build tooling** | `postcss` path traversal + 3 others; `npm audit fix` available | low real exposure — build-time only, the deployed console is static. **Unblocked 2026-08-14** — see below |
-| **W14** | **`HANDOVER.md` is 2,077 lines, superseded and partly wrong** | carries old stage labels throughout; three documents point around it | **low — it opens with a SUPERSEDED banner.** Retiring it is a *finishing* task: it still holds the only copy of the stage-2 sizing measurements and the merge collision that dropped the transit counts, and `roadmap.md` points at those rather than duplicating them |
+| **W14** | ~~**`HANDOVER.md` is 2,077 lines, superseded and partly wrong**~~ **CLOSED 2026-08-15** | carried old stage labels throughout; three documents pointed around it | **retired.** Its unique content — the DV and Gaia coverage measurements, and the merge collision that dropped the transit counts past all seven gates — was extracted into `data_provenance.md` first; the file itself is in git history |
 
 **W11 does not block explainability, and this is worth stating because assuming
 otherwise would re-scope stage 11 for no reason.** Branch-occlusion is *forward
@@ -195,8 +175,7 @@ exception.
 
 ### 2a. Stage status — one table, kept current
 
-One table, kept current. Detail for each row is in the stage sections below and
-in HANDOVER.md.
+One table, kept current. Detail for each row is in the stage sections below.
 
 | stage | status | what closed it, or what is left |
 |---|---|---|
@@ -467,8 +446,8 @@ execution order above does.
 
 ### 2h. Is Exoplanet Hunter ready once stage 11 is done?
 
-Against the seven-point "what finished means" contract in
-`handover-2026-08-08.md` — **yes, with two named exceptions.**
+Against the seven-point "what finished means" contract, restated in the table
+below — **yes, with two named exceptions.**
 
 | # | contract item | after 11 |
 |---|---|---|
@@ -546,7 +525,7 @@ leaves instead. And **difference-image stamps are 11-17 px, not a fixed
 33x33**; that is Kepler's size, and stage 9 must re-grid.
 
 Full detail, and the merge collision that silently dropped the transit counts
-past all seven gates, in HANDOVER.md (2026-08-05).
+past all seven gates, in `data_provenance.md`.
 
 **Stage 3 *(old A)* — the re-baselined incumbent summary.** *(done 2026-08-08)*
 `evaluate.py summarise` writes `models/cv/incumbent-rebaselined/cv_summary.json`
@@ -3038,7 +3017,6 @@ Small, and each one closes a named weakness rather than polishing:
 | precision@k alongside recall @1% FPR | reporting gap |
 | per-feature normalisation policy as a declared config artefact | ExoMiner adoption 2 |
 | **a written decision on the Kepler cell** — investigate or accept unexplained | **W7**, currently unowned |
-| retire `HANDOVER.md` — archive it and update every reference | **W14** |
 | versioned container with the model DOI in its labels | ExoMiner adoption 10 |
 
 **Why here.** Each needs the final model to exist. None blocks anything
@@ -3087,7 +3065,7 @@ to serve two models rather than one. Its 10–15 h assumes one. Partly mitigated
 by `ScoringEnsemble.from_registry` already loading `cnn_dualview.keras`, but it
 is not costed above.
 
-**Finished** is the seven-point contract in `handover-2026-08-08.md`. After the
+**Finished** is the seven-point contract at 2h. After the
 finishing touches all seven are satisfiable, with two exceptions named
 honestly: **W7** (the Kepler cell, which the finishing touches force a decision
 on rather than silently carrying) and **distribution** (a published catalogue
@@ -3111,9 +3089,10 @@ Done, acted on, and kept here so they are not re-run from scratch. Merged from
 
 ### 5.1 ExoMiner re-audit — not warranted, and the test applied
 
-`docs/exominer-comparison-2026-08-07.md` is a 42 KB deep dive: 10 ranked
-adoptions, six questions answered against their source, what v2 already does
-better, and an explicit "do not copy" list. A re-read would re-derive it.
+The 2026-08-07 comparison established 10 ranked adoptions, six questions
+answered against their source, what this project already does better, and an
+explicit "do not copy" list. A re-read would re-derive it, so it is not repeated
+here; the outstanding delta is enumerated below.
 
 **What is actually outstanding is the delta, and it is already enumerated:** of
 the 10 adoptions, **6 are done** (shared conv tower, paired Wilcoxon, Cohen's *d*,
@@ -3297,7 +3276,9 @@ contributions are quantitative and faithful to what the model computed;
 narrating them with an LLM would add a layer that can be wrong about our own
 model, which is the opposite of the goal.
 
-## 7. Change log — the 2026-08-14 restructure
+## 7. Change log
+
+### 7.1 The 2026-08-14 record restructure
 
 Recorded because a reshuffle of the evidence record is exactly the kind of
 change that quietly loses a number.
@@ -3316,13 +3297,26 @@ prose in *How to read this file*, 1d, 4.8 and this section.
 | W13 status updated | the `npm audit fix` blocker is gone — `frontend/` is clean and the lockfile committed |
 | totals re-costed | stage 10.5 added; the ~70 min per CV run figure replaced with the measured ~2 h |
 
-**Amended 2026-08-15.** Stage 10.5's pre-registration and its amendment moved from 4.1 into **3.11a/3.11b**, so they sit with the result they fixed the reading of, per section 3's own convention. 4.1 is now the *outstanding* part of that stage — the control-arm pass. Reproduction for 3.11c: `~/Downloads/.stage8-scratch/ensemble.py`, written before the runs finished.
+**Amended 2026-08-15.** Stage 10.5's pre-registration and its amendment moved
+from 4.1 into **3.11a/3.11b**, so they sit with the result whose reading they
+fixed. 4.1 is now the *outstanding* part of that stage.
 
-**Handovers dated before 2026-08-14 still reference the deleted plan** —
-`handover-2026-08-08.md`, `handover-stage-8.md` and `handover-stage-8-close.md`.
-They are historical records and the project does not edit them, so the references
-are left dangling on purpose; `docs/index.md` says where to read instead.
-`handover-2026-08-14.md` is the live one and was updated.
+Reproduction for 3.11c is `ensemble.py` in the out-of-repo scratch directory.
+It is **untracked**, and its own claim to have been written before the runs
+finished cannot be verified — its mtime is three minutes after the last run
+exited. The audit re-derived every number in 3.11c independently and they hold;
+the floor it computed did not, and that is 3.11d.
 
-**Not changed:** every pre-registration block, every measured number, and the
-stage-number mapping in 1c.
+**Not changed by either restructure:** every pre-registration block, every
+measured number, and the stage-number mapping in 1c.
+
+### 7.2 The 2026-08-15 documentation restructure
+
+`docs/` was reorganised for a public reader: eight documents, no duplication,
+no superseded copies. `HANDOVER.md` and five dated handovers were retired
+(**W14** closed), along with the standalone architecture, features, deploy,
+operating, pipeline-diagram and comparison documents, whose content was
+consolidated into `getting-started.md`, `model_specs.md`, `model_pipeline.md`,
+`overview.md` and `troubleshooting.md`. Measured findings and coverage
+statistics are indexed in `data_provenance.md`, which is now the metrics ledger;
+this file remains the record and the plan. Everything removed is in git history.

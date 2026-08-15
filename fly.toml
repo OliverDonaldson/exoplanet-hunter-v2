@@ -1,6 +1,6 @@
 # Fly.io config for the serving API. `fly launch` reads this; edit `app` to a
 # unique name first. Secrets (AWS_* for the R2 dvc pull) are NOT here — set
-# them with `fly secrets set`. See docs/DEPLOY.md.
+# them with `fly secrets set`. See docs/getting-started.md.
 app = "exoplanet-hunter-api"
 primary_region = "syd"
 
