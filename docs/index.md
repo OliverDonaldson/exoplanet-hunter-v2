@@ -18,7 +18,8 @@ Start with [OPERATING.md](OPERATING.md) if you want to *run* something, and
 | [data_provenance.md](data_provenance.md) | catalogue sources, label definitions, known archive quirks |
 | [pipeline_diagram.md](pipeline_diagram.md) | the refresh DAG |
 | [roadmap.md](roadmap.md) | the ExoMiner-inspired rebuild, staged — and the permanent old→new stage-number mapping |
-| [handover-2026-08-14.md](handover-2026-08-14.md) | **start here** — stage 8 closed, stage 10.5 next, the open decisions, and the operational facts that live nowhere else |
+| [handover-2026-08-15.md](handover-2026-08-15.md) | **start here** — audit the 2026-08-14/15 session first, then finish stage 10.5's control-arm pass |
+| [handover-2026-08-14.md](handover-2026-08-14.md) | superseded by 2026-08-15. Dated, not stale — do not edit |
 | ~~plan-2026-08-09.md~~ | **deleted 2026-08-14, merged into `roadmap.md`** — the ordered plan is now §4, the weakness register §1d, the standing audits §5. Handovers dated before 2026-08-14 still point at it; they are historical records and are not edited, so read §4 instead |
 | [handover-stage-8-close.md](handover-stage-8-close.md) | superseded by 2026-08-14, which corrects two of its statements. Dated, not stale — do not edit |
 | [handover-stage-8.md](handover-stage-8.md), [handover-2026-08-09.md](handover-2026-08-09.md), [handover-2026-08-08.md](handover-2026-08-08.md) | earlier session briefs: what is being built, what "finished" means, the non-negotiables, the trap list. Dated, not stale — do not edit |
