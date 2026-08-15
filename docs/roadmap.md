@@ -127,7 +127,7 @@ for the stage 8 result and W13's for the frontend work having landed.
 |---|---|---|---|
 | **W1** | **Ranking is driven by observation baseline, and the signal is in the labels** | corr(baseline, label) **+0.278 all, +0.387 TESS**. TESS confirmed planets median 1,495 d vs 430 d for FPs | **stage 8 — done 2026-08-14, half delivered** |
 | **W2** | **The model scores the star, not the transit** | **26.4%** of hosts pass with no injection — 46.7% planet hosts vs 12.3% FP hosts | **stage 7i** measured, **stage 8 did not move it**, **stage 9** attacks |
-| **W3** | **No branch model has ever beaten the incumbent where it is used** | five arms rejected, all on shortlist recall: 0.238 / 0.126 / 0.145 / 0.236 / 0.220 against **0.307** | **stage 10.5** tests *complement*, then **stage 10**, then a written decision |
+| **W3** | **No branch model has ever beaten the incumbent where it is used** — *as a replacement. As a complement it now does* | five arms rejected, all on shortlist recall: 0.238 / 0.126 / 0.145 / 0.236 / 0.220 against **0.307**. But the **ensemble** reaches **0.4362**, 3.9x its floor (3.11c) | **stage 10.5 answered it 2026-08-15**; stage 10, then a written decision |
 
 W1 is the worst thing in the project. For the deployment use it is actively
 counterproductive: it promotes targets that already received follow-up over
@@ -209,6 +209,7 @@ in HANDOVER.md.
 | **7i** *(old D)* offline control-arm harness | **done** 2026-08-12 — criterion **NOT met**; the branch line has no measured advantage on either criterion | the instrument: `clean`/`flatten` → `inject_box_transit` → `build_view_set` → `write_viewset_shards` → `make_viewset_dataset` → a run directory's fold members and calibrator. It is **stage 8's measuring instrument**, which is why it leads |
 | **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving |
 | **8** *(old 3)* labels and negatives | **done** 2026-08-14 — four arms measured 2026-08-13, prediction 4 on 2026-08-14; **all four pre-registered predictions falsified** | **propensity weighting eliminated the architecture's amplification of the baseline confound at no measurable cost** (gap +0.1265 → −0.0071, 3.3× its bar). Synthetic negatives null; arm S unreadable by construction. The control-arm split also fell (−0.0966, 1.3× its bar) but **threshold-free host-scoring did not move**, so that second win is recorded as *qualified*. Group (a), external catalogue negatives, deliberately not done |
+| **10.5** the ensemble arm | **recall measured 2026-08-15 — BOTH ARMS CLEAR**; the control-arm pass is outstanding (4.1) | **the branch line's value is as a complement, not a replacement.** Mean-of-logits recall @1% FPR **0.4362** (E-C) and **0.4223** (E-P) against the common-fold dual-view member's 0.3046 — **3.9x and 4.1x** their own floors. Reopens nothing about stage 4, whose rejections were about replacement. Nothing promotes |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
 | **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
 | **11** *(old 4)* serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
@@ -2540,23 +2541,10 @@ momentum-dump and stellar-variability diagnostic flags. All real work, none
 blocking, all deferred with stage 12.
 
 
-## 4. The forward plan — what remains, in order
 
-Each item states **what**, **why**, **the deliverable**, and **what stops it**.
-Costs are working hours: `build` is hands-on, `compute` is unattended. Merged
-from `plan-2026-08-09.md` on 2026-08-14 and re-costed against what stage 8
-actually took.
+### 3.11 Stage 10.5 — the ensemble arm
 
-**Three rules it is built on**, unchanged from the plan:
-
-1. **Forward only.** No item depends on a later one.
-2. **Every item has a kill criterion.** This project's expensive failures were
-   runs that could not have changed a decision. An item that cannot state what
-   result would make it stop does not start.
-3. **The UI is last and is pure presentation.** If it needs a number the API
-   cannot produce, an earlier item was not finished.
-
-### 4.1 Stage 10.5 — the ensemble arm · next · build + ~8 h compute
+#### 3.11a Pre-registered — recorded 2026-08-12, nothing run
 
 **Why this exists.** Five arms have been rejected, every one on shortlist recall,
 and every one asked the same question: *does this replace the incumbent?* Nobody
@@ -2629,7 +2617,7 @@ is a decision.
 *Nothing promotes on this either.* A favourable ensemble number is an argument
 for a serving change, which is stage 11 work and Ollie's call.
 
-#### 4.1a Amendment — recorded 2026-08-14, before anything was built or run
+#### 3.11b Amendment — recorded 2026-08-14, before anything was built or run
 
 **The pre-registration above stands verbatim.** This amendment settles four
 things it could not have anticipated, and it is recorded *before* the first line
@@ -2712,6 +2700,127 @@ re-specification of the bar.
    This is prediction 3 of the original pre-registration, applied per arm.
 3. **Neither arm moves the control-arm host-AUC** off the ~0.60 that stage 8 left
    it at. Host-scoring has now survived every intervention aimed at it.
+
+
+#### 3.11c Result — the ensemble confirms, on both arms (2026-08-15)
+
+Three CV runs on the common fold assignment, `--n-models-per-fold 3`: one
+dual-view member shared by both arms, and one branch member per arm. **The joint
+measurement is joint** — all three agree on which fold holds each of the 5,375
+tics, 0 mismatches, checked against the pinned map from three independent code
+paths before any ensemble number was formed.
+
+| model | TESS AUC | recall @1% FPR |
+|---|---:|---:|
+| dual-view, common folds — **the bar** | 0.9187 | **0.3046** |
+| branch, E-C *(un-weighted)* | 0.9250 | 0.2831 |
+| branch, E-P *(propensity)* | 0.9165 | 0.2000 |
+
+| arm, mean of logits | TESS AUC | recall @1% FPR | margin vs its dual-view member | floor | |
+|---|---:|---:|---:|---:|---|
+| **E-C** | 0.9549 | **0.4362** | **+0.1315** | 0.0340 | **3.9x** |
+| **E-P** | 0.9527 | **0.4223** | **+0.1177** | 0.0285 | **4.1x** |
+
+Every combiner beat the dual-view member on both arms; mean of probabilities and
+rank-average land below mean of logits, as the exploratory reading found.
+
+**Both arms clear their bar, which per 3.11b reads as: the complement finding is
+robust to the weighting, and E-P is the one to carry forward because it also
+carries stage 8's amplification fix.** This is the first positive result the
+branch line has produced. **It reopens nothing about stage 4** — those five
+rejections were about *replacement*, they were correct, and this is a claim about
+*complement*.
+
+**The floors are the ensembles' own**, formed draw by draw — ensemble draw `i` is
+dual-view member `i` combined with branch member `i` — not either member's floor
+borrowed. That is what `n_models_per_fold` on the dual-view trainer was built
+for; without it this table would have no bar to be read against.
+
+**Three of five predictions confirmed, one falsified, one confirmed in part.**
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | the confirmation lands **below** the exploratory 0.4746 | **confirmed** — 0.4362. The mismatched-split version did flatter it |
+| 2 | it still clears the incumbent's 0.307 by more than its floor | **confirmed** — +0.1293, 3.8x |
+| 3 | ensemble baseline sensitivity sits **between** its two members | **confirmed for E-C, FALSIFIED for E-P** — see below |
+| A1 | E-C and E-P land within each other's floor on recall | **confirmed** — 0.0139 apart against floors of ~0.03 |
+| A2 | E-P's sensitivity below E-C's, both above the dual-view member | **confirmed** |
+
+**Prediction 3 fails in the direction nobody proposed.** For E-C the ensemble sits
+between its members (dual-view **+0.3880**, ensemble **+0.4756**, branch
+**+0.4938**). For E-P the members are **+0.3880** and **+0.3956** — and the
+ensemble is **+0.4240, above both of them.** Two models each less
+baseline-dependent than E-C's branch, combined, produced something *more*
+baseline-dependent than either. The prediction's stated form — *between* — is
+falsified. Its reasoning, that averaging cannot remove a confound both models
+share, is vindicated harder than it was written: averaging did not merely fail to
+remove the confound, **it manufactured more of it.** Unexplained, and it is the
+first mechanism in this project seen to *create* baseline dependence rather than
+inherit or amplify it.
+
+**A diagnostic, not pre-registered.** E-P's branch member alone scores 0.2000
+recall against E-C's 0.2831, which invites the reading that propensity weighting
+costs shortlist recall — unlike stage 8, where it cost nothing. The drop is
+**0.77x E-P's own gate-recall floor**, so it is **level**, not a demonstrated
+cost. Recorded because the raw gap is the more quotable number and it is the
+wrong one.
+
+**Nothing promotes.** A favourable ensemble number is an argument for a serving
+change, which is stage 11 work and Ollie's call. `models/registry.json` untouched;
+`ca906040` stays served.
+
+**Cost, measured.** Dual-view **4 h 44** for 5 folds x 3 members; each branch arm
+**~2 h 02**. Nine hours for the three, against the 8 h estimated and the 12-14 h
+this session briefly projected off the dual-view's pace alone. **The two
+architectures differ by more than 2x per run and should be sized separately.**
+
+**The floors remain thin, and this stage leans on them.** E-C's
+`gate_recall_seed_sd` is **0.0677** and E-P's **0.0935**, against stage 6's
+0.0337 — the same doubling recorded in 3.9b, now carrying a headline result.
+Three draws is a thin sd. The margins here are 3.9x and 4.1x, so the conclusion
+survives a considerably wider floor, but the next stage to lean on this quantity
+should widen it first.
+
+## 4. The forward plan — what remains, in order
+
+Each item states **what**, **why**, **the deliverable**, and **what stops it**.
+Costs are working hours: `build` is hands-on, `compute` is unattended. Merged
+from `plan-2026-08-09.md` on 2026-08-14 and re-costed against what stage 8
+actually took.
+
+**Three rules it is built on**, unchanged from the plan:
+
+1. **Forward only.** No item depends on a later one.
+2. **Every item has a kill criterion.** This project's expensive failures were
+   runs that could not have changed a decision. An item that cannot state what
+   result would make it stop does not start.
+3. **The UI is last and is pure presentation.** If it needs a number the API
+   cannot produce, an earlier item was not finished.
+
+### 4.1 Stage 10.5 *(continued)* — the control-arm pass · ~1 h build · ~2.5 h compute
+
+**What is left of stage 10.5.** The recall result is in 3.11c. Outstanding is the
+measurement 3.11a pre-registered alongside it: **the control-arm split through
+the stage 7i harness**, plus the threshold-free host-AUC that 3.11b added beside
+it.
+
+**Why it is not free, which the pre-registration assumed.** The harness scores a
+*run directory*, and an ensemble is not one. Measuring E-C and E-P means running
+it three times on the identical draw — the dual-view lane and both branch lanes —
+and combining per-row scores, with the ensemble's own operating points derived
+rather than borrowed from a member.
+
+**Deliverable.** The control-arm split and host-AUC for both arms, on the same
+580 baseline-matched hosts stage 7i and prediction 4 used, so all three are
+directly comparable.
+
+**Stops if.** The draw does not reproduce the 580 hosts / 1,051 eligible of
+stage 7i — that would mean the fold pinning changed which hosts are routable, and
+the comparison is then across populations rather than models.
+
+**It tests A3**, the one amendment prediction still open: *neither arm moves the
+control-arm host-AUC off the ~0.60 stage 8 left it at.* Host-scoring has survived
+every intervention aimed at it so far.
 
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
@@ -3059,6 +3168,8 @@ prose in *How to read this file*, 1d, 4.8 and this section.
 | W1 status updated | the plan's "above every model" line no longer holds for arm P, which sits **below** its labels after propensity weighting |
 | W13 status updated | the `npm audit fix` blocker is gone — `frontend/` is clean and the lockfile committed |
 | totals re-costed | stage 10.5 added; the ~70 min per CV run figure replaced with the measured ~2 h |
+
+**Amended 2026-08-15.** Stage 10.5's pre-registration and its amendment moved from 4.1 into **3.11a/3.11b**, so they sit with the result they fixed the reading of, per section 3's own convention. 4.1 is now the *outstanding* part of that stage — the control-arm pass. Reproduction for 3.11c: `~/Downloads/.stage8-scratch/ensemble.py`, written before the runs finished.
 
 **Handovers dated before 2026-08-14 still reference the deleted plan** —
 `handover-2026-08-08.md`, `handover-stage-8.md` and `handover-stage-8-close.md`.
