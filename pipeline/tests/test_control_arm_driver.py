@@ -120,6 +120,56 @@ def test_a_run_carrying_neither_kind_raises(tmp_path):
         driver.run_kind(_fold_0(tmp_path, "cv_summary.json"))
 
 
+# A multi-member dual-view run numbers its checkpoints, so the bare name stops
+# existing. Until 2026-08-15 this lane matched the exact name only, and stage
+# 10.5's own dual-view run — the one its ensemble is measured against — could
+# not be scored at all. The branch lane globbed from the start and was fine,
+# which is why the asymmetry survived a whole stage.
+
+
+def test_a_multi_member_dualview_run_is_recognised(tmp_path):
+    run = _fold_0(
+        tmp_path,
+        "model_0_cnn_dualview.keras",
+        "model_1_cnn_dualview.keras",
+        "model_2_cnn_dualview.keras",
+    )
+    assert driver.run_kind(run) == "dualview"
+
+
+def test_every_member_is_returned_so_none_is_silently_dropped(tmp_path):
+    run = _fold_0(
+        tmp_path,
+        "model_0_cnn_dualview.keras",
+        "model_1_cnn_dualview.keras",
+        "model_2_cnn_dualview.keras",
+    )
+    members = driver.dualview_members(run / "fold_0")
+    assert [p.name for p in members] == [
+        "model_0_cnn_dualview.keras",
+        "model_1_cnn_dualview.keras",
+        "model_2_cnn_dualview.keras",
+    ]
+
+
+def test_a_single_member_run_still_resolves_by_its_historical_name(tmp_path):
+    members = driver.dualview_members(_fold_0(tmp_path, "cnn_dualview.keras") / "fold_0")
+    assert [p.name for p in members] == ["cnn_dualview.keras"]
+
+
+def test_the_numbered_layout_wins_when_both_are_present(tmp_path):
+    """Not a layout any trainer writes, but a stale bare checkpoint beside a
+    numbered set would otherwise score one member and call it the ensemble."""
+    run = _fold_0(tmp_path, "cnn_dualview.keras", "model_0_cnn_dualview.keras")
+    assert [p.name for p in driver.dualview_members(run / "fold_0")] == [
+        "model_0_cnn_dualview.keras"
+    ]
+
+
+def test_a_fold_with_no_dualview_checkpoint_returns_nothing(tmp_path):
+    assert driver.dualview_members(_fold_0(tmp_path, "cv_summary.json") / "fold_0") == []
+
+
 # --------------------------------------------------------------------------
 # The scalar frame. A column short here still passes every downstream gate.
 # --------------------------------------------------------------------------

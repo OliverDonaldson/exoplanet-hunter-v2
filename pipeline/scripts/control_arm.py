@@ -242,13 +242,31 @@ def score_through_run(
 #: with a shape error at best and a wrong number at worst.
 BRANCH_CHECKPOINT = "model_*_cnn_branches.keras"
 DUALVIEW_CHECKPOINT = "cnn_dualview.keras"
+#: A multi-member run numbers its checkpoints and the bare name stops existing;
+#: the branch lane has always globbed, the dual-view lane matched an exact name
+#: and so became unscoreable the moment `n_models_per_fold > 1` landed on it.
+DUALVIEW_CHECKPOINT_GLOB = "model_*_cnn_dualview.keras"
+
+
+def dualview_members(fold_dir: Path) -> list[Path]:
+    """Every dual-view checkpoint in one fold, numbered form preferred.
+
+    Runs made before multi-member training existed still carry the bare
+    `cnn_dualview.keras` and are still found and served by path, so both
+    layouts are accepted rather than migrating the old ones.
+    """
+    numbered = sorted(fold_dir.glob(DUALVIEW_CHECKPOINT_GLOB))
+    if numbered:
+        return numbered
+    legacy = fold_dir / DUALVIEW_CHECKPOINT
+    return [legacy] if legacy.exists() else []
 
 
 def run_kind(run_dir: Path) -> str:
     """`"branch"` or `"dualview"`, from the checkpoints actually on disk."""
     fold_0 = run_dir / "fold_0"
     has_branch = bool(list(fold_0.glob(BRANCH_CHECKPOINT)))
-    has_dualview = (fold_0 / DUALVIEW_CHECKPOINT).exists()
+    has_dualview = bool(dualview_members(fold_0))
     if has_branch and has_dualview:
         raise ValueError(f"{fold_0} carries both checkpoint kinds; cannot choose a lane")
     if has_branch:
@@ -256,7 +274,8 @@ def run_kind(run_dir: Path) -> str:
     if has_dualview:
         return "dualview"
     raise FileNotFoundError(
-        f"{fold_0} carries neither {BRANCH_CHECKPOINT} nor {DUALVIEW_CHECKPOINT}"
+        f"{fold_0} carries neither {BRANCH_CHECKPOINT} nor "
+        f"{DUALVIEW_CHECKPOINT_GLOB} / {DUALVIEW_CHECKPOINT}"
     )
 
 
@@ -338,7 +357,9 @@ def score_through_dualview(run_dir: Path, rows: list[dict], folds: dict) -> np.n
     for fold in sorted(set(folds.values())):
         fold_dir = run_dir / f"fold_{fold}"
         bundle = joblib.load(fold_dir / "cnn_calibrator.joblib")
-        model = tf.keras.models.load_model(str(fold_dir / DUALVIEW_CHECKPOINT), compile=False)
+        members = dualview_members(fold_dir)
+        if not members:
+            raise FileNotFoundError(f"{fold_dir} carries no dual-view checkpoint")
         pipeline = bundle.get("aux_pipeline")
 
         owned = [i for i, r in enumerate(rows) if folds.get(int(r["tic_id"])) == fold]
@@ -353,12 +374,28 @@ def score_through_dualview(run_dir: Path, rows: list[dict], folds: dict) -> np.n
             inputs["aux_features"] = pipeline.transform(
                 np.stack([rows[i]["aux"] for i in owned]).astype(np.float32)
             ).astype(np.float32)
+        # Average the members' RAW scores, then calibrate once — the order the
+        # trainer used (`val_score = val_members.mean(axis=0)` before the Platt
+        # fit), so the calibrator is applied to the quantity it was fitted on.
+        # Calibrating per member and averaging afterwards would push a fitted
+        # sigmoid through an average it never saw.
+        #
         # Deterministic pass, as the live path does for the headline: the
         # calibrators were fitted on deterministic scores, and feeding them MC
         # means costs ~0.08 ECE.
-        raw = np.asarray(model(inputs, training=False)).ravel()
-        scores[owned] = bundle["calibrator"].predict(raw)
-        log.info("[control-arm] fold %d scored %d control-arm row(s)", fold, len(owned))
+        per_member = [
+            np.asarray(
+                tf.keras.models.load_model(str(path), compile=False)(inputs, training=False)
+            ).ravel()
+            for path in members
+        ]
+        scores[owned] = bundle["calibrator"].predict(np.mean(per_member, axis=0))
+        log.info(
+            "[control-arm] fold %d scored %d control-arm row(s) through %d member(s)",
+            fold,
+            len(owned),
+            len(members),
+        )
     return scores
 
 
