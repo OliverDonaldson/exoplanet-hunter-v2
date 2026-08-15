@@ -307,11 +307,12 @@ def main(cfg: DictConfig) -> None:
 
     # ----- downloaders ------------------------------------------------------
     # TESS PCs cache to data/raw/ (alongside training cache, distinct IDs).
-    # Kepler PCs cache to data/raw_kepler/ (or whatever KEPLER_RAW_DIR resolved to).
+    # Kepler PCs cache to data/raw/kepler/lightcurves/ (or whatever KEPLER_RAW_DIR resolved to).
     tess_dl = LightCurveDownloader(paths.data_raw, author="SPOC", cadence=120)
     kepler_dl = LightCurveDownloader(
         paths.data_raw,
         kepler_cache_dir=paths.data_raw_kepler,
+        k2_cache_dir=paths.data_raw_k2,
         author="Kepler",
         cadence=None,
     )

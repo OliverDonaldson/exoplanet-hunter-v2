@@ -60,7 +60,7 @@ def main() -> None:
         "--candidates", type=Path, default=Path("data/catalogue/candidates.parquet")
     )
     parser.add_argument("--views", type=Path, default=Path("data/processed/views.npz"))
-    parser.add_argument("--dv", type=Path, default=Path("data/raw_dv"))
+    parser.add_argument("--dv", type=Path, default=Path("data/raw/tess/dv"))
     parser.add_argument("--viewset", type=Path, default=Path("data/processed"))
     parser.add_argument(
         "--previous-labels",

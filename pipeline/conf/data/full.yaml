@@ -1,6 +1,6 @@
 # Full-scale dataset: every labelled TESS target plus the balanced Kepler
 # block (content-keyed selection — stable across refreshes). Kepler raw
-# cache: data/raw_kepler (override: KEPLER_RAW_DIR).
+# cache: data/raw/kepler/lightcurves (override: KEPLER_RAW_DIR).
 #
 # Usage:
 #   python pipeline/scripts/build_dataset.py data=full

@@ -8,7 +8,7 @@ Four artefacts get validated before anything trains or serves:
     the API serves — the browse-table contract;
   * the **processed views** (views.npz / shard sets) — no all-NaN folds,
     label domain, shape consistency;
-  * the **DV archive** (`data/raw_dv/`) — presence-mask integrity, so that
+  * the **DV archive** (`data/raw/tess/dv/`) — presence-mask integrity, so that
     "never queried" can never be read as "this target has no DV products".
 
 Schemas are deliberately strict on domains and lenient on physical values

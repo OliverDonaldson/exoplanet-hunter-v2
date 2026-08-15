@@ -90,7 +90,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    dv_dir = args.dv or (args.root / "data" / "raw_dv")
+    dv_dir = args.dv or (args.root / "data" / "raw" / "tess" / "dv")
     out = args.out or (args.root / "data" / "processed" / "dv_scalars.parquet")
     out.parent.mkdir(parents=True, exist_ok=True)
 

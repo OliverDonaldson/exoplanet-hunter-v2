@@ -61,18 +61,21 @@ def _assert_missions_resolve(df: pd.DataFrame, catalogue: Path) -> None:
 def _lightcurve_path(root: Path, tic: int, mission: str) -> tuple[Path | None, str]:
     """Where this target's FITS lives, and which source it came from."""
     if mission == "Kepler":
-        for base in (root / "data" / "raw_kepler", root / "data" / "raw"):
+        for base in (
+            root / "data" / "raw" / "kepler" / "lightcurves",
+            root / "data" / "raw" / "tess" / "lightcurves",
+        ):
             path = base / f"kic_{tic}.fits"
             if path.exists():
                 return path, "kepler"
         return None, "missing"
     if mission == "K2":
-        path = root / "data" / "raw" / f"epic_{tic}.fits"
+        path = root / "data" / "raw" / "k2" / "lightcurves" / f"epic_{tic}.fits"
         return (path, "k2") if path.exists() else (None, "missing")
-    spoc = root / "data" / "raw" / f"tic_{tic}.fits"
+    spoc = root / "data" / "raw" / "tess" / "lightcurves" / f"tic_{tic}.fits"
     if spoc.exists():
         return spoc, "spoc-2min"
-    ffi = root / "data" / "raw_ffi" / f"tic_{tic}.fits"
+    ffi = root / "data" / "raw" / "tess" / "ffi" / f"tic_{tic}.fits"
     if ffi.exists():
         return ffi, "ffi"
     return None, "missing"

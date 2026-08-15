@@ -36,7 +36,7 @@ Raw light curves come from the mission archives, not either catalogue:
   archive** (`archive.stsci.edu/pub/kepler/lightcurves`), with a MAST search
   fallback (`data/download.py`).
 - **K2** — EPIC-indexed campaign light curves from **MAST** (via `lightkurve`,
-  author `K2`), cached alongside TESS in `data/raw` as `epic_*.fits`.
+  author `K2`), cached alongside TESS in `data/raw/tess/lightcurves` as `epic_*.fits`.
 
 So the common shorthand "we only look at ExoFOP" is inverted: the labels are
 already anchored to the NASA Exoplanet Archive; ExoFOP only adds CTOIs and
@@ -77,7 +77,7 @@ are baked in.
 
 Counts (this build): 5,686 labelled targets — **2,656 TESS + 2,500 Kepler +
 530 K2**. On disk the raw FITS cache is 2,391 TESS + 529 K2 files in
-`data/raw`, plus 4,705 Kepler files in `data/raw_kepler`.
+`data/raw/tess/lightcurves`, plus 4,705 Kepler files in `data/raw/kepler/lightcurves`.
 
 The grey pool is TESS-only (TOIs/CTOIs from ExoFOP), so the Kepler and K2
 points sit outside it by construction — their held-out candidate pools live in

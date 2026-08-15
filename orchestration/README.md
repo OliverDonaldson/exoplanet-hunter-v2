@@ -14,7 +14,7 @@ make refresh                                            # full refresh, trains i
 python orchestration/flows/refresh_pipeline.py --no-train      # refresh + gates only
 
 # Expansion run: full TESS pool + Kepler + K2, 13-dim aux. The Kepler FITS
-# cache lives in data/raw_kepler; KEPLER_RAW_DIR only overrides that location.
+# cache lives in data/raw/kepler/lightcurves; KEPLER_RAW_DIR only overrides that location.
 python orchestration/flows/refresh_pipeline.py --force-train --data-config full
 ```
 

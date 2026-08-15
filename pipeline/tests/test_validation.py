@@ -393,7 +393,7 @@ def run_validate_data(tmp_path, *extra: str) -> tuple[int, str]:
     Every non-label path must be named explicitly. A gate left on its default
     resolves against the subprocess's cwd — the repo root under pytest — so it
     would silently start validating the real artefact the moment one exists,
-    which is how the DV gate broke four shrink tests the day `data/raw_dv` was
+    which is how the DV gate broke four shrink tests the day `data/raw/tess/dv` was
     first fetched.
 
     Returns the exit code and the whitespace-normalised gate report (rich wraps

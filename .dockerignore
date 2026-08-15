@@ -3,7 +3,6 @@
 # from R2 at boot. Cloud checkouts are already clean (data/ is gitignored);
 # this guards local `docker build` against the 64 GB FITS cache.
 data/raw/
-data/raw_kepler/
 data/interim/
 data/labels/
 data/processed/

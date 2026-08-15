@@ -21,9 +21,6 @@ frontend/dist/
 # are DVC-tracked — git carries the .dvc pointers (and DVC's per-directory
 # .gitignore files), R2 carries the bytes.
 data/raw/
-data/raw_kepler/
-data/raw_dv/
-data/raw_ffi/
 data/interim/
 models/cv/*
 !models/cv/*.dvc

@@ -96,7 +96,9 @@ def get_scorer():
 
             _scorer = TargetScorer(
                 models_dir=Path(os.environ.get("MODEL_DIR", _ROOT / "models")),
-                data_raw=Path(os.environ.get("DATA_RAW_DIR", _ROOT / "data" / "raw")),
+                data_raw=Path(
+                    os.environ.get("DATA_RAW_DIR", _ROOT / "data" / "raw" / "tess" / "lightcurves")
+                ),
                 candidates_path=Path(
                     os.environ.get(
                         "CATALOGUE_PATH", _ROOT / "data" / "catalogue" / "candidates.parquet"

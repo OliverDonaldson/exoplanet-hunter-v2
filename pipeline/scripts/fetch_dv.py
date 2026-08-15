@@ -43,7 +43,7 @@ def main() -> None:
         "--root", type=Path, default=Path.cwd(), help="Repository root (for default TIC sources)"
     )
     parser.add_argument(
-        "--out", type=Path, default=None, help="Cache dir (default <root>/data/raw_dv)"
+        "--out", type=Path, default=None, help="Cache dir (default <root>/data/raw/tess/dv)"
     )
     parser.add_argument(
         "--tics", type=Path, default=None, help="CSV or parquet with a tic_id column"
@@ -57,7 +57,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    out = args.out or (args.root / "data" / "raw_dv")
+    out = args.out or (args.root / "data" / "raw" / "tess" / "dv")
     if args.tics is not None:
         df = (
             pd.read_parquet(args.tics) if args.tics.suffix == ".parquet" else pd.read_csv(args.tics)

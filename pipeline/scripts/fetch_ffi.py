@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
-    out = args.out or (args.root / "data" / "raw_ffi")
+    out = args.out or (args.root / "data" / "raw" / "tess" / "ffi")
     tics = _default_tics(args.root)
     if args.limit:
         tics = tics[: args.limit]

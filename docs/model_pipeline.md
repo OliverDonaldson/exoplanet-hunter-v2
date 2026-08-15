@@ -36,7 +36,7 @@ flowchart TB
     direction LR
     LABELS[("labels.parquet")]
     CANDS[("candidates.parquet")]
-    RAW[("data/raw* + manifest.json<br/>FITS cache")]
+    RAW[("data/raw/&lt;mission&gt;/<br/>FITS cache")]
     DVC[("DVC → Cloudflare R2")]
     MLF[("MLflow · sqlite")]
   end

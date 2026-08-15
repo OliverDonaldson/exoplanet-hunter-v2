@@ -38,7 +38,7 @@ RUN chmod +x /usr/local/bin/api-entrypoint.sh
 # is tuned for the 1-2 vCPU serving box (oversubscribed pools thrash), and
 # its startup log spam is silenced.
 ENV MODEL_DIR=/srv/models \
-    DATA_RAW_DIR=/srv/data/raw \
+    DATA_RAW_DIR=/srv/data/raw/tess/lightcurves \
     CATALOGUE_PATH=/srv/data/catalogue/candidates.parquet \
     OMP_NUM_THREADS=2 \
     TF_CPP_MIN_LOG_LEVEL=2 \

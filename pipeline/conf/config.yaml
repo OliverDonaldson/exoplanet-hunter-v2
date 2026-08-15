@@ -34,8 +34,11 @@ centroid_max: null      # render_vetting.py: max centroid_snr
 
 paths:
   root:           ${oc.env:PROJECT_ROOT,${hydra:runtime.cwd}}
-  data_raw:       ${paths.root}/data/raw
-  data_raw_kepler: ${oc.env:KEPLER_RAW_DIR,${paths.root}/data/raw_kepler}
+  # One cache per mission under data/raw/. `data_raw` is TESS for historical
+  # reasons — it is the name every caller already passes.
+  data_raw:       ${paths.root}/data/raw/tess/lightcurves
+  data_raw_kepler: ${oc.env:KEPLER_RAW_DIR,${paths.root}/data/raw/kepler/lightcurves}
+  data_raw_k2:    ${paths.root}/data/raw/k2/lightcurves
   data_interim:   ${paths.root}/data/interim
   data_processed: ${paths.root}/data/processed
   data_labels:    ${paths.root}/data/labels

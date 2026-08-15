@@ -25,9 +25,9 @@ FIG_DIR = REPO_ROOT / "docs" / "figures"
 
 # mission -> (cache dir, filename prefix, colour, marker size)
 MISSIONS = {
-    "TESS": ("data/raw", "tic", "royalblue", 2.0),
-    "Kepler": ("data/raw_kepler", "kic", "crimson", 2.0),
-    "K2": ("data/raw", "epic", "darkorange", 3.0),
+    "TESS": ("data/raw/tess/lightcurves", "tic", "royalblue", 2.0),
+    "Kepler": ("data/raw/kepler/lightcurves", "kic", "crimson", 2.0),
+    "K2": ("data/raw/tess/lightcurves", "epic", "darkorange", 3.0),
 }
 
 

@@ -10,7 +10,7 @@ Tries TESS-SPOC first (same pipeline lineage as our 2-minute data) then QLP,
 and records which author supplied each target: two detrendings mixed is a
 systematic worth being able to mask on later.
 
-Cached in `data/raw_ffi/`, never `data/raw/`, because FFI cadence is 200 s to
+Cached in `data/raw/tess/ffi/`, never beside the 2-min light curves, because FFI cadence is 200 s to
 30 min against SPOC's 120 s and the two must not be confused downstream.
 """
 

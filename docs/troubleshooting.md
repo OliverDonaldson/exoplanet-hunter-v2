@@ -62,7 +62,8 @@ transfer to the other.
 
 ### 3.1 Safe to delete
 
-`data/raw*` (re-downloads on demand), `mlruns/`, `outputs/`, `results/`, and
+`data/raw/` (every mission cache, re-downloads on demand), `mlruns/`, `outputs/`,
+`results/`, and
 anything `dvc pull` can restore. Build caches such as `.mypy_cache` are always
 safe.
 

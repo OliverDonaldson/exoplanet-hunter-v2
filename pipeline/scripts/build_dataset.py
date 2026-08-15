@@ -78,6 +78,7 @@ def main(cfg: DictConfig) -> None:
     downloader = LightCurveDownloader(
         cache_dir=paths.data_raw,
         kepler_cache_dir=kepler_dir,
+        k2_cache_dir=paths.data_raw_k2,
         author=str(cfg.data.author),
         cadence=int(cfg.data.cadence) if cfg.data.cadence else None,
     )
@@ -130,7 +131,7 @@ def main(cfg: DictConfig) -> None:
         if mission == "Kepler":
             path = (kepler_dir or paths.data_raw) / f"kic_{tic}.fits"
         elif mission == "K2":
-            path = paths.data_raw / f"epic_{tic}.fits"
+            path = paths.data_raw_k2 / f"epic_{tic}.fits"
         else:
             path = paths.data_raw / f"tic_{tic}.fits"
         if not path.exists():

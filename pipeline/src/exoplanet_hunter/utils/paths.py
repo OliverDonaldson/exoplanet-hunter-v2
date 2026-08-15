@@ -14,8 +14,12 @@ from typing import Any
 @dataclass(frozen=True)
 class ProjectPaths:
     root: Path
+    #: TESS light curves. The raw cache is one directory per mission under
+    #: `data/raw/`, because a single flat directory made the three missions
+    #: indistinguishable except by filename prefix.
     data_raw: Path
     data_raw_kepler: Path
+    data_raw_k2: Path
     data_interim: Path
     data_processed: Path
     data_labels: Path
@@ -26,10 +30,21 @@ class ProjectPaths:
     def from_cfg(cls, cfg: Any) -> ProjectPaths:
         """Build from a Hydra/OmegaConf `paths` group."""
         p = cfg.paths
+        # Siblings of the TESS directory, never string-concatenated onto it. The
+        # old fallback was `p.data_raw + "_kepler"`, which produced
+        # `data/raw/tess/lightcurves_kepler` the moment the caches were split by
+        # mission — a path that exists nowhere and fails by re-downloading 43 GB
+        # rather than by raising.
+        raw = Path(p.data_raw)
         paths = cls(
             root=Path(p.root),
-            data_raw=Path(p.data_raw),
-            data_raw_kepler=Path(getattr(p, "data_raw_kepler", p.data_raw + "_kepler")),
+            data_raw=raw,
+            data_raw_kepler=Path(
+                getattr(p, "data_raw_kepler", None) or raw.parent.parent / "kepler" / raw.name
+            ),
+            data_raw_k2=Path(
+                getattr(p, "data_raw_k2", None) or raw.parent.parent / "k2" / raw.name
+            ),
             data_interim=Path(p.data_interim),
             data_processed=Path(p.data_processed),
             data_labels=Path(p.data_labels),
@@ -44,6 +59,7 @@ class ProjectPaths:
         for path in (
             self.data_raw,
             self.data_raw_kepler,
+            self.data_raw_k2,
             self.data_interim,
             self.data_processed,
             self.data_labels,

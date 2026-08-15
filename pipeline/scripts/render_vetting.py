@@ -104,6 +104,7 @@ def main(cfg: DictConfig) -> None:
     kepler_dl = LightCurveDownloader(
         paths.data_raw,
         kepler_cache_dir=paths.data_raw_kepler,
+        k2_cache_dir=paths.data_raw_k2,
         author="Kepler",
         cadence=None,
     )

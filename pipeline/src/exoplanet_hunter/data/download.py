@@ -192,12 +192,19 @@ class LightCurveDownloader:
         kepler_cache_dir: Path | None = None,
         author: str = "SPOC",
         cadence: int | None = 120,
+        k2_cache_dir: Path | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.kepler_cache_dir = Path(kepler_cache_dir) if kepler_cache_dir else None
         if self.kepler_cache_dir:
             self.kepler_cache_dir.mkdir(parents=True, exist_ok=True)
+        # K2 used to share the TESS directory, distinguished only by the `epic_`
+        # filename prefix. It now has its own, so the caches divide by mission
+        # rather than by prefix; unset keeps the historical shared behaviour.
+        self.k2_cache_dir = Path(k2_cache_dir) if k2_cache_dir else None
+        if self.k2_cache_dir:
+            self.k2_cache_dir.mkdir(parents=True, exist_ok=True)
         self.author = author
         self.cadence = cadence
         self._manifest_path = self.cache_dir / "manifest.json"
@@ -233,6 +240,8 @@ class LightCurveDownloader:
         prefix = mcfg["prefix"]
         if mission == "Kepler" and self.kepler_cache_dir:
             return self.kepler_cache_dir / f"{prefix}_{target_id}.fits"
+        if mission == "K2" and self.k2_cache_dir:
+            return self.k2_cache_dir / f"{prefix}_{target_id}.fits"
         return self.cache_dir / f"{prefix}_{target_id}.fits"
 
     # ------------------------------------------------------------------ core

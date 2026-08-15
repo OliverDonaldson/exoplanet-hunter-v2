@@ -67,7 +67,7 @@ def main() -> None:
 
     scorer = TargetScorer(
         models_dir=Path("models"),
-        data_raw=Path("data/raw"),
+        data_raw=Path("data/raw/tess/lightcurves"),
         candidates_path=args.catalogue,
     )
 

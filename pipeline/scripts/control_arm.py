@@ -436,7 +436,7 @@ def main() -> None:
     parser.add_argument(
         "--viewset-index", type=Path, default=Path("data/processed/viewset_tfrecords/index.parquet")
     )
-    parser.add_argument("--raw", type=Path, default=Path("data/raw"))
+    parser.add_argument("--raw", type=Path, default=Path("data/raw/tess/lightcurves"))
     parser.add_argument("--out", type=Path, default=Path("results/control_arm"))
     parser.add_argument(
         "--hosts",
