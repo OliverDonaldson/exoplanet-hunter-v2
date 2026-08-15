@@ -162,10 +162,28 @@ def roll_fold_assignment() -> Path:
         write_fold_assignment,
     )
 
-    index = pd.read_parquet(REPO_ROOT / "data/processed/viewset_tfrecords/index.parquet")
-    frame = index.drop_duplicates("tic_id")
-    groups = frame["tic_id"].to_numpy(int)
-    y = frame["label"].to_numpy(int)
+    # The INTERSECTION of both shard sets, not either one alone. A group only
+    # one trainer can see has no out-of-fold score from the other, so the two
+    # cannot be compared or ensembled on it — the same reason
+    # build_fold_assignment.py takes a shared population. Reading the branch
+    # index alone would cover 5,426 groups against the dual-view trainer's
+    # 5,380 and quietly drop the difference at training time.
+    frames = []
+    for rel in ("data/processed/tfrecords", "data/processed/viewset_tfrecords"):
+        path = REPO_ROOT / rel / "index.parquet"
+        if not path.exists():
+            raise FileNotFoundError(f"no shard index at {path} — build the shard set first")
+        frames.append(pd.read_parquet(path)[["tic_id", "label"]].drop_duplicates("tic_id"))
+    shared = frames[0]
+    for frame in frames[1:]:
+        shared = shared.merge(frame, on=["tic_id", "label"], how="inner")
+    groups = shared["tic_id"].to_numpy(int)
+    y = shared["label"].to_numpy(int)
+    get_run_logger().info(
+        "[folds] shared population: %d groups (%s)",
+        len(groups),
+        " ∩ ".join(str(len(f)) for f in frames),
+    )
 
     ROLLING_FOLDS.parent.mkdir(parents=True, exist_ok=True)
     if ROLLING_FOLDS.exists():
