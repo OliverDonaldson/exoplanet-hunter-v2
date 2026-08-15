@@ -47,6 +47,17 @@ EXOFOP_URLS = {
     "ctois.csv": "https://exofop.ipac.caltech.edu/tess/download_ctoi.php?sort=ctoi&output=csv",
 }
 
+#: The rolling outer split. Every refresh extends it rather than rebuilding it,
+#: so a candidate and the incumbent it is gated against partition their shared
+#: population identically. See `roll_fold_assignment`.
+ROLLING_FOLDS = REPO_ROOT / "models" / "fold_assignments" / "rolling.json"
+N_SPLITS = 5
+SEED = 42
+#: Members per fold on the refresh path. More than one is what gives the
+#: candidate a measured noise floor of its own; at one the promotion gate has
+#: no floor to read and falls back to a constant already measured as too tight.
+N_MODELS_PER_FOLD = int(os.environ.get("REFRESH_N_MODELS_PER_FOLD", "3"))
+
 
 def _run(cmd: list[str]) -> None:
     """Stream a subprocess from the repo root; non-zero exit fails the task."""
@@ -132,20 +143,82 @@ def preprocess_and_shard(data_config: str) -> None:
 
 
 @task
-def train(data_config: str) -> None:
+def roll_fold_assignment() -> Path:
+    """Extend the rolling fold map to cover whatever the catalogue now holds.
+
+    Without this the weekly gate compares across two partitions of two
+    populations, and part of every margin is only which rows landed where.
+    Rebuilding the map each refresh re-partitions everything; pinning a fixed
+    one silently drops each week's new targets, because an uncovered group is
+    dropped rather than placed somewhere convenient. Extending keeps every
+    target in the fold that has always held it out and still lets new ones in.
+    """
+    import numpy as np
+    import pandas as pd
+    from exoplanet_hunter.training.splits import (
+        build_fold_assignment,
+        extend_fold_assignment,
+        load_fold_assignment,
+        write_fold_assignment,
+    )
+
+    index = pd.read_parquet(REPO_ROOT / "data/processed/viewset_tfrecords/index.parquet")
+    frame = index.drop_duplicates("tic_id")
+    groups = frame["tic_id"].to_numpy(int)
+    y = frame["label"].to_numpy(int)
+
+    ROLLING_FOLDS.parent.mkdir(parents=True, exist_ok=True)
+    if ROLLING_FOLDS.exists():
+        existing, _ = load_fold_assignment(ROLLING_FOLDS)
+        assignment, added = extend_fold_assignment(
+            existing, groups, y, n_splits=N_SPLITS, seed=SEED
+        )
+        get_run_logger().info(
+            "[folds] rolling map extended: %d carried over, %d added", len(existing), added
+        )
+    else:
+        assignment = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+        get_run_logger().info("[folds] no rolling map — built one over %d groups", len(assignment))
+
+    sizes = np.bincount(list(assignment.values()), minlength=N_SPLITS).tolist()
+    write_fold_assignment(
+        ROLLING_FOLDS,
+        assignment,
+        n_groups=len(assignment),
+        n_folds=N_SPLITS,
+        seed=SEED,
+        rolling=True,
+        fold_sizes=sizes,
+    )
+    return ROLLING_FOLDS
+
+
+@task
+def train(data_config: str, fold_assignment: Path | None = None) -> None:
     """Local training, or the GPU burst when $BURST_CMD is set.
 
     The trainer reads shards already on disk, so the data group changes
     nothing about *what* trains — but the MLflow run is named
     cnn-cv-<data.name>, and without the override a full build was recorded
     as "cnn-cv-default".
+
+    Two overrides make the weekly decision readable. `n_models_per_fold` gives
+    the candidate its **own** measured noise floor: at one member per fold the
+    variance block carries no reseeding spread, `decision_floor` returns None,
+    and the gate falls back to `LEGACY_RECALL_TOLERANCE = 0.02` — a bar measured
+    at 0.68 sigma, which rejects a candidate whose true recall equals the
+    incumbent's about 31% of the time. The fold assignment is what makes two
+    successive candidates comparable at all.
     """
     burst = os.environ.get("BURST_CMD")
+    overrides = [f"data={data_config}", f"train.n_models_per_fold={N_MODELS_PER_FOLD}"]
+    if fold_assignment is not None:
+        overrides.append(f"model.cross_validation.fold_assignment={fold_assignment}")
     if burst:
         get_run_logger().info("dispatching to GPU burst: %s", burst)
-        _run(shlex.split(burst))
+        _run(shlex.split(burst) + overrides)
     else:
-        _run([PYTHON, "-m", "exoplanet_hunter.training.train", f"data={data_config}"])
+        _run([PYTHON, "-m", "exoplanet_hunter.training.train", *overrides])
 
 
 @task
@@ -212,7 +285,8 @@ def refresh_pipeline(
 
     if decide_training(previous, min_new_labelled, force_train):
         preprocess_and_shard(data_config)
-        train(data_config)
+        folds = roll_fold_assignment()
+        train(data_config, fold_assignment=folds)
         promoted = promotion_gate()
         registry = json.loads((REPO_ROOT / "models" / "registry.json").read_text())
         _notify(

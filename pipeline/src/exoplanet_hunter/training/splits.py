@@ -150,6 +150,74 @@ def build_fold_assignment(
     return assignment
 
 
+def extend_fold_assignment(
+    existing: dict[int, int],
+    groups: np.ndarray,
+    y: np.ndarray,
+    *,
+    n_splits: int,
+    seed: int,
+) -> tuple[dict[int, int], int]:
+    """Keep every already-assigned group where it is; place only the new ones.
+
+    This is what lets a *self-refreshing* model be compared to itself. Pinning a
+    fixed map across refreshes would silently drop every target the catalogue
+    gained since it was written, because uncovered groups are dropped rather
+    than placed somewhere convenient. Rebuilding the map each refresh instead
+    re-partitions the whole population, so a candidate and the incumbent it is
+    gated against are scored on different splits, and part of any margin is only
+    which rows landed where.
+
+    Extending gives both: a target keeps the fold that has always held it out,
+    so the shared population is compared like for like, and new targets still
+    enter training.
+
+    New groups go to the fold currently holding the fewest of their own class,
+    ties broken on the lowest fold index, after a seeded shuffle. That keeps
+    fold sizes and class balance even without ever moving a group — moving one
+    would place a target in a fold that had already trained on it.
+
+    Returns the extended map and the number of groups added.
+    """
+    if n_splits < MIN_INNER_SPLITS:
+        raise ValueError(f"n_splits must be at least {MIN_INNER_SPLITS}, got {n_splits}")
+    if len(groups) != len(y):
+        raise ValueError(f"groups and y disagree on length: {len(groups)} vs {len(y)}")
+
+    assignment = dict(existing)
+    folds = list(range(n_splits))
+    label_of = {int(g): int(label) for g, label in zip(groups, y, strict=True)}
+
+    # Per-class occupancy of the map as it stands, so a new row lands where its
+    # own class is thinnest rather than where the fold is merely smallest.
+    counts: dict[int, dict[int, int]] = {}
+    for group, fold in assignment.items():
+        label = label_of.get(int(group))
+        if label is None:
+            continue
+        per_fold = counts.setdefault(label, dict.fromkeys(folds, 0))
+        per_fold[fold] = per_fold.get(fold, 0) + 1
+
+    new_groups = sorted({int(g) for g in np.unique(groups)} - set(assignment))
+    rng = np.random.default_rng(seed)
+    rng.shuffle(new_groups)
+
+    for group in new_groups:
+        label = label_of[group]
+        per_fold = counts.setdefault(label, dict.fromkeys(folds, 0))
+        fold = min(folds, key=lambda f: (per_fold.get(f, 0), f))
+        assignment[group] = fold
+        per_fold[fold] = per_fold.get(fold, 0) + 1
+
+    moved = [g for g, fold in existing.items() if assignment[g] != fold]
+    if moved:
+        raise ValueError(
+            f"{len(moved)} group(s) changed fold while extending, e.g. {moved[:5]}; "
+            "a group that moves is then scored by a fold that trained on it"
+        )
+    return assignment, len(new_groups)
+
+
 def write_fold_assignment(path: Path, assignment: dict[int, int], **provenance: Any) -> None:
     """Persist a group→fold map with the provenance needed to trust it.
 

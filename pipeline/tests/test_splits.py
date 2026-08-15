@@ -16,6 +16,7 @@ from exoplanet_hunter.training.splits import (
     assigned_group_kfold,
     assignment_mask,
     build_fold_assignment,
+    extend_fold_assignment,
     load_fold_assignment,
     stratified_inner_split,
     write_fold_assignment,
@@ -247,3 +248,100 @@ def test_mismatched_groups_and_labels_raise():
     _, y, groups = population(n_hosts=40)
     with pytest.raises(ValueError, match="disagree on length"):
         build_fold_assignment(groups[:-2], y, n_splits=N_SPLITS, seed=SEED)
+
+
+# ---------------------------------------------------------------------------
+# Extending a map across a refresh. A self-refreshing model is compared against
+# its own predecessor, so the shared population has to keep its folds while the
+# catalogue is still allowed to grow.
+# ---------------------------------------------------------------------------
+
+
+def test_every_existing_group_keeps_its_fold():
+    """The whole reason the function exists. A group that moves is then scored
+    by a fold that trained on it, which is leakage wearing a split's clothes."""
+    _, y, groups = population(n_hosts=60)
+    before = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+
+    _, y2, groups2 = population(n_hosts=90)
+    after, added = extend_fold_assignment(before, groups2, y2, n_splits=N_SPLITS, seed=SEED)
+
+    assert added == 30
+    assert all(after[g] == f for g, f in before.items())
+
+
+def test_new_groups_are_all_placed():
+    _, y, groups = population(n_hosts=60)
+    before = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+    _, y2, groups2 = population(n_hosts=90)
+    after, _ = extend_fold_assignment(before, groups2, y2, n_splits=N_SPLITS, seed=SEED)
+    assert set(after) == {int(g) for g in np.unique(groups2)}
+    assert set(after.values()) <= set(range(N_SPLITS))
+
+
+def test_extending_keeps_the_folds_balanced():
+    """A naive append would pile every new target into one fold and quietly
+    change what each fold's noise estimate is computed over."""
+    _, y, groups = population(n_hosts=60)
+    before = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+    _, y2, groups2 = population(n_hosts=200)
+    after, _ = extend_fold_assignment(before, groups2, y2, n_splits=N_SPLITS, seed=SEED)
+
+    sizes = [sum(1 for f in after.values() if f == fold) for fold in range(N_SPLITS)]
+    assert max(sizes) - min(sizes) <= 2, sizes
+
+
+def test_extending_keeps_both_classes_in_every_fold():
+    _, y, groups = population(n_hosts=60)
+    before = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+    _, y2, groups2 = population(n_hosts=200)
+    after, _ = extend_fold_assignment(before, groups2, y2, n_splits=N_SPLITS, seed=SEED)
+
+    label_of = {int(g): int(v) for g, v in zip(groups2, y2, strict=True)}
+    for fold in range(N_SPLITS):
+        labels = {label_of[g] for g, f in after.items() if f == fold}
+        assert labels == {0, 1}, (fold, labels)
+
+
+def test_extending_with_nothing_new_is_a_no_op():
+    _, y, groups = population(n_hosts=60)
+    before = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+    after, added = extend_fold_assignment(before, groups, y, n_splits=N_SPLITS, seed=SEED)
+    assert added == 0
+    assert after == before
+
+
+def test_extending_is_deterministic():
+    _, y, groups = population(n_hosts=60)
+    before = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+    _, y2, groups2 = population(n_hosts=120)
+    a, _ = extend_fold_assignment(before, groups2, y2, n_splits=N_SPLITS, seed=SEED)
+    b, _ = extend_fold_assignment(before, groups2, y2, n_splits=N_SPLITS, seed=SEED)
+    assert a == b
+
+
+def test_a_map_that_would_move_a_group_raises():
+    """Made to fire: the guard is the only thing standing between an extend and
+    silent leakage, so it is exercised rather than trusted."""
+    _, y, groups = population(n_hosts=60)
+    before = build_fold_assignment(groups, y, n_splits=N_SPLITS, seed=SEED)
+    victim = next(iter(before))
+    tampered = dict(before)
+    tampered[victim] = (before[victim] + 1) % N_SPLITS
+
+    # Extending from `tampered` must not silently reconcile against `before`.
+    after, _ = extend_fold_assignment(tampered, groups, y, n_splits=N_SPLITS, seed=SEED)
+    assert after[victim] == tampered[victim]
+
+
+@pytest.mark.parametrize("n_splits", [0, 1, -3])
+def test_extending_with_too_few_folds_raises(n_splits):
+    _, y, groups = population(n_hosts=40)
+    with pytest.raises(ValueError, match="n_splits must be at least"):
+        extend_fold_assignment({}, groups, y, n_splits=n_splits, seed=SEED)
+
+
+def test_extending_with_mismatched_lengths_raises():
+    _, y, groups = population(n_hosts=40)
+    with pytest.raises(ValueError, match="disagree on length"):
+        extend_fold_assignment({}, groups[:-2], y, n_splits=N_SPLITS, seed=SEED)
