@@ -27,7 +27,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # pandas is imported lazily below; this is for the annotation only
+    import pandas as pd
 
 import hydra
 import joblib
@@ -58,6 +61,11 @@ from exoplanet_hunter.datasets import (
     load_views,
     make_dataset,
     make_split_table,
+)
+from exoplanet_hunter.eval.comparison import (
+    MISSION_COLUMN,
+    per_mission_summary,
+    pooled_member_draws,
 )
 from exoplanet_hunter.models import (
     binary_focal_loss,
@@ -564,6 +572,37 @@ def _run_cnn_fold(
     }
 
 
+def _labelled_predictions(cv_root: Path) -> pd.DataFrame | None:
+    """The pooled out-of-fold set, with the columns the summary pieces expect.
+
+    The trainer writes `y_true`/`prob_calibrated` and no mission, because it
+    never needed them. Both shared summary functions read `label`, `score` and
+    `mission`, so the join happens here rather than in either of them.
+    """
+    import pandas as pd
+
+    path = cv_root / "predictions.parquet"
+    if not path.exists():
+        return None
+    frame = pd.read_parquet(path)
+    frame = frame.rename(columns={"y_true": "label", "prob_calibrated": "score"})
+    if MISSION_COLUMN not in frame.columns:
+        # models/cv/<run> -> repo root. Derived rather than configured because
+        # _aggregate_cv is called without cfg, and a summary that silently
+        # drops its mission block is the defect this function exists to fix.
+        labels = cv_root.parents[2] / "data" / "tables" / "labels" / "labels.parquet"
+        if not labels.exists():
+            log.warning(
+                "[train-cnn-cv] no labels at %s — writing no per_mission block, "
+                "which the promotion gate cannot slice",
+                labels,
+            )
+            return None
+        missions = pd.read_parquet(labels)[["tic_id", MISSION_COLUMN]].drop_duplicates("tic_id")
+        frame = frame.merge(missions, on="tic_id", how="left", validate="many_to_one")
+    return frame
+
+
 def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
     """Log mean/std across folds and write the summary table artifact."""
     keys = (
@@ -599,9 +638,20 @@ def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
         "fold_sd": float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else None,
     }
 
+    # The gate reads a per-mission slice and a recall floor. This trainer wrote
+    # neither, so a dual-view candidate was refused on "populations differ"
+    # before any metric was compared, and `decision_floor` fell back to a
+    # constant measured at 0.68 sigma. Both come from the shared definitions in
+    # eval/comparison.py, so the two trainers cannot drift on what a floor means.
+    payload: dict[str, Any] = {"folds": fold_rows, "summary": summary}
+    predictions = _labelled_predictions(cv_root)
+    if predictions is not None:
+        summary["variance"].update(pooled_member_draws(predictions))
+        payload["per_mission"] = per_mission_summary(predictions)
+
     cv_root.mkdir(parents=True, exist_ok=True)
     summary_path = cv_root / "cv_summary.json"
-    summary_path.write_text(json.dumps({"folds": fold_rows, "summary": summary}, indent=2))
+    summary_path.write_text(json.dumps(payload, indent=2))
     mlflow.log_artifact(str(summary_path))
     log.info(
         "[train-cnn-cv] ROC-AUC %.4f ± %.4f  Brier %.4f ± %.4f  ECE %.4f ± %.4f",

@@ -244,15 +244,28 @@ def promotion_gate() -> bool:
     """Gate the newest CV run; promote (update registry) if it wins."""
     cv_root = REPO_ROOT / "models" / "cv"
     newest = max(cv_root.glob("*/cv_summary.json"), key=lambda p: p.stat().st_mtime)
-    result = subprocess.run(
-        [
-            PYTHON,
-            "pipeline/scripts/promotion_gate.py",
-            str(newest.relative_to(REPO_ROOT)),
-            "--promote",
-        ],
-        cwd=REPO_ROOT,
-    )
+    # The incumbent is gated against its RE-BASELINED summary, not the one
+    # registry.json names. `ca906040`'s own summary predates the per_mission
+    # block, so without this the gate cannot slice its population and refuses to
+    # compare at all — REJECT before a metric is read, whatever the candidate
+    # scored. 3.7 found that and closed it with this flag; the flow never passed
+    # it, so the weekly loop kept hitting the defect 3.7 had already fixed.
+    cmd = [
+        PYTHON,
+        "pipeline/scripts/promotion_gate.py",
+        str(newest.relative_to(REPO_ROOT)),
+        "--promote",
+    ]
+    rebaselined = REPO_ROOT / "models" / "cv" / "incumbent-rebaselined" / "cv_summary.json"
+    if rebaselined.exists():
+        cmd += ["--incumbent-summary", str(rebaselined.relative_to(REPO_ROOT))]
+    else:
+        get_run_logger().warning(
+            "[gate] no re-baselined incumbent summary at %s — the gate will compare "
+            "pooled means and may refuse on population mismatch",
+            rebaselined,
+        )
+    result = subprocess.run(cmd, cwd=REPO_ROOT)
     promoted = result.returncode == 0
     get_run_logger().info("promotion gate: %s", "PROMOTED" if promoted else "rejected")
     return promoted

@@ -295,6 +295,13 @@ def test_the_pooled_gate_statistic_is_drawn_once_per_member(ensemble_run):
         assert variance["pooled_gate_recall"][member] == pytest.approx(expected, abs=1e-9)
 
 
+# `pooled_member_draws` and `per_mission_summary` moved to eval/comparison.py on
+# 2026-08-16 so the dual-view trainer could write the same summary schema. These
+# two stay here rather than moving with them: they exercise the guards against a
+# real branch CV run from the `ensemble_run` fixture, and that fixture is what
+# makes them worth having. `train_branches` re-exports the name it delegates to.
+
+
 def test_a_member_column_with_a_hole_in_it_raises(ensemble_run):
     """A NaN score does not error — it sinks those rows to the bottom of the
     ranking and returns a plausible recall over a population that is not the one
@@ -303,7 +310,7 @@ def test_a_member_column_with_a_hole_in_it_raises(ensemble_run):
     predictions = pd.read_parquet(out / "predictions.parquet")
     predictions.loc[predictions.index[0], "member_score_1"] = np.nan
     with pytest.raises(ValueError, match="member_score_1 is not finite"):
-        train_branches._pooled_member_draws(predictions)
+        train_branches.pooled_member_draws(predictions)
 
 
 def test_a_single_class_gate_slice_raises_rather_than_returning_a_nan_sd(ensemble_run):
@@ -315,11 +322,11 @@ def test_a_single_class_gate_slice_raises_rather_than_returning_a_nan_sd(ensembl
     predictions = pd.read_parquet(out / "predictions.parquet")
 
     with pytest.raises(ValueError, match="single-class"):
-        train_branches._pooled_member_draws(predictions.assign(label=1))
+        train_branches.pooled_member_draws(predictions.assign(label=1))
 
     # A run holding no gate-mission rows at all measured nothing; that is a null,
     # not a failure, and the schema is the same either way.
-    drawn = train_branches._pooled_member_draws(predictions.assign(mission="Kepler"))
+    drawn = train_branches.pooled_member_draws(predictions.assign(mission="Kepler"))
     assert drawn["pooled_gate_recall_seed_sd"] is None
     assert drawn["pooled_gate_recall_n_draws"] == 0
 

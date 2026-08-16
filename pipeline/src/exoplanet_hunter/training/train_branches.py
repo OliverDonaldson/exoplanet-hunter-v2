@@ -39,7 +39,12 @@ from exoplanet_hunter.datasets.viewset_pipeline import (
     parse_viewset_shards,
 )
 from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_index, load_metadata
-from exoplanet_hunter.eval.comparison import MISSION_COLUMN, SliceMetrics, recall_at_fpr
+from exoplanet_hunter.eval.comparison import (
+    MISSION_COLUMN,
+    per_mission_summary,
+    pooled_member_draws,
+    recall_at_fpr,
+)
 from exoplanet_hunter.eval.metrics import classification_metrics
 from exoplanet_hunter.eval.observation_bias import measure_observation_bias
 from exoplanet_hunter.models.cnn_branches import build_cnn_branches
@@ -144,75 +149,6 @@ def _component_sds(rows: list[dict], key: str) -> tuple[float | None, float | No
     )
 
 
-def _pooled_member_draws(predictions: pd.DataFrame) -> dict[str, Any]:
-    """Independent draws of the *pooled* gate statistic, one per ensemble member.
-
-    `gate_recall_seed_sd` is measured on a fold's TESS slice — ~215 negatives, so
-    a 1% FPR cut of two rows, and a statistic set by where the third-highest
-    negative lands. The gate reads the pooled out-of-fold set instead: ~1,074
-    negatives, a cut of ten rows, and a materially better-conditioned number.
-    Bounding the second with the first only ever overstates the noise.
-
-    Member `i`'s score column is filled by whichever fold held each row, so
-    stacking them re-forms a complete out-of-fold prediction set for member `i`
-    alone — the same protocol as the ensemble, one seed instead of three. Their
-    spread is the run-level reseeding sd directly, with no `sqrt(n)` argument in
-    the way. Three draws is a thin sd and it is reported with its `n`.
-    """
-    # Sorted on the integer, not the string: `member_score_10` sorts before
-    # `member_score_2` lexicographically, which would reorder the draws. The
-    # order does not change their sd, but it changes which draw is which in the
-    # recorded list, and that list is read against the folds' own members.
-    columns = sorted(
-        (c for c in predictions.columns if c.startswith(MEMBER_SCORE_PREFIX)),
-        key=lambda c: int(c.removeprefix(MEMBER_SCORE_PREFIX)),
-    )
-    gate = (
-        predictions[predictions[MISSION_COLUMN] == GATE_MISSION]
-        if (MISSION_COLUMN in predictions.columns)
-        else predictions.iloc[:0]
-    )
-    if not columns or gate.empty:
-        # The same keys either way. A summary whose schema depends on whether a
-        # measurement succeeded is one where a missing key and a null mean the
-        # same thing to a reader and different things to a program.
-        return {
-            "pooled_gate_recall": [],
-            "pooled_gate_recall_seed_sd": None,
-            "pooled_gate_recall_n_draws": 0,
-            "pooled_gate_n": len(gate),
-        }
-    labels = gate["label"].to_numpy()
-    draws = []
-    for column in columns:
-        scores = gate[column].to_numpy(dtype=float)
-        if not np.all(np.isfinite(scores)):
-            # A fold that trained fewer members leaves NaN here rather than a
-            # short column, and a NaN score silently sinks those rows to the
-            # bottom of the ranking — a plausible number over a population that
-            # is not the one named.
-            raise ValueError(
-                f"{column} is not finite on every gate-mission row; the folds did "
-                f"not all train the same number of members"
-            )
-        draws.append(float(recall_at_fpr(labels, scores, GATE_FPR)))
-    if not np.all(np.isfinite(draws)):
-        # `recall_at_fpr` returns NaN on a single-class slice rather than
-        # raising, and an sd over NaN is NaN — which loses every inequality it
-        # would later be compared with. Empty was handled above; this is the
-        # other way the statistic can fail to exist.
-        raise ValueError(
-            f"the pooled {GATE_MISSION} slice yielded non-finite recall {draws} over "
-            f"{len(labels)} rows with {int(labels.sum())} positives; it is single-class"
-        )
-    return {
-        "pooled_gate_recall": draws,
-        "pooled_gate_recall_seed_sd": float(np.std(draws, ddof=1)) if len(draws) > 1 else None,
-        "pooled_gate_recall_n_draws": len(draws),
-        "pooled_gate_n": len(labels),
-    }
-
-
 def _variance_decomposition(rows: list[dict]) -> dict[str, float | None]:
     """Split the run's spread into seed variance and fold difficulty.
 
@@ -297,26 +233,6 @@ def _resolved_model_config(model_cfg: object) -> dict[str, Any] | None:
     if not data:
         return None
     return {key: value for key, value in data.items() if not key.startswith("_")}
-
-
-def per_mission_summary(predictions: pd.DataFrame) -> dict[str, dict[str, float]]:
-    """Pooled out-of-fold metrics per mission, plus the pooled aggregate.
-
-    The gate reads TESS from here; Kepler and K2 are reported diagnostics with
-    an alarm threshold, and `all` never gates. See `evaluate_promotion` and the
-    roadmap's gate-population pre-commitment for why the aggregate is unfit to
-    decide anything: its mission weights are a sampling decision.
-    """
-    slices = {
-        str(mission): asdict(
-            SliceMetrics.measure(group["label"].to_numpy(), group["score"].to_numpy())
-        )
-        for mission, group in predictions.groupby("mission")
-    }
-    slices["all"] = asdict(
-        SliceMetrics.measure(predictions["label"].to_numpy(), predictions["score"].to_numpy())
-    )
-    return slices
 
 
 def _split_codes(n: int, train: np.ndarray, val: np.ndarray, test: np.ndarray) -> np.ndarray:
@@ -778,7 +694,7 @@ def run_cv(
     }
     summary["variance"] = {
         **_variance_decomposition(rows),
-        **_pooled_member_draws(all_predictions),
+        **pooled_member_draws(all_predictions),
     }
 
     per_mission = per_mission_summary(all_predictions)
