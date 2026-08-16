@@ -3359,6 +3359,173 @@ ever wanted for a decision.
 **Nothing promotes on any of this.** `models/registry.json` is untouched and
 `ca906040` stays served.
 
+### 4.1c Pre-registered — the control lane, and what a weekly delta is allowed to mean (2026-08-17, nothing built)
+
+Written before the lane exists, because it decides **what the one automated
+number in this project refers to**, and a rule chosen after seeing which way the
+first delta falls is not a rule.
+
+**The defect it closes** is 4.1a's first, the only one still open. The candidate
+is scored on the current population; the champion's stored summary was measured
+on the population it was trained against. Every weekly ΔAUC and Δrecall is
+therefore a model effect and a data effect added together, and the gate reports
+the sum as if it were the first.
+
+#### 1. What the lane does
+
+Each refresh, before the gate runs, the **served champion is re-scored on the
+current shard set** and summarised. The gate compares the candidate against that
+fresh summary instead of a stored one. Nothing about the candidate changes.
+
+#### 2. Which rows decide, and why not all of them
+
+**The gating comparison is the shared out-of-fold population**: rows in both the
+champion's training set and the current shard set, each scored by the fold that
+held it out.
+
+Measured today, before anything is built:
+
+| population | rows | TESS | Kepler | K2 |
+|---|---:|---:|---:|---:|
+| champion `ca906040` trained on | 4,818 | | | |
+| current shard set | 5,380 | | | |
+| **shared — this is what gates** | **4,610** | **2,367** | 2,238 | 0 |
+| added since the champion | 770 | 0 | 243 | 527 |
+| dropped since the champion | 208 | | | |
+
+**The 770 new rows are excluded from the gating comparison, and that is a
+decision rather than an oversight.** The champion never trained on them, so
+scoring them means averaging all five folds — an ensemble — while the candidate
+scores each row with the single fold that held it out. That hands the champion a
+five-model advantage on exactly the rows the refresh added. They are measured
+and reported as a diagnostic slice, and they never gate.
+
+**A consequence worth stating before it is observed:** the shared population is
+fixed at the champion's training set and the current set grows, so the gating
+subset ages. It does not shrink from below — it can only lose rows the catalogue
+drops — but it covers a falling *fraction* of what the model serves. That is a
+real cost of not re-baselining, and it is reported every run rather than
+discovered later.
+
+#### 3. The two deltas, and only one of them is the model
+
+```
+model effect  =  candidate(shared)  -  champion(shared)      same rows, two models
+data effect   =  champion(shared)   -  champion(previous)    same model, two populations
+```
+
+The gate decides on the **model effect alone**. The data effect is reported
+beside it and gates nothing — it is the quantity that has been silently inside
+every weekly margin until now.
+
+#### 4. How the result will be read — fixed before the lane runs
+
+1. **The gate reads the model effect**, against the candidate's own measured
+   floor by the rule already adopted in 4.1b. No new threshold is introduced
+   here; this changes *what is compared*, not *how tightly*.
+2. **A data effect larger than the model effect is reported in words** on every
+   run, promoted or not. It does not block — a population that genuinely
+   improved is not a fault — but a promotion taken while the data moved further
+   than the model did is a promotion that has to say so.
+3. **The lane refuses rather than narrows.** If the shared TESS slice falls below
+   **1,000 rows**, the 1% FPR cut lands on fewer than ten negatives and the
+   recall statistic is not worth reading. At that point the run reports
+   UNRESOLVED and asks for a champion re-baseline. It does not quietly decide on
+   the remainder.
+4. **The champion's re-score must reproduce its own stored numbers on rows that
+   have not changed.** If re-scoring the champion on the shared population
+   disagrees with `incumbent-rebaselined` on the TESS slice by more than
+   `1e-6`, the lane is measuring something other than what it claims and the
+   result is void. This is the lane's own correctness check and it runs first.
+
+*Predictions, recorded so they can be wrong.*
+
+1. The champion's re-scored TESS slice reproduces `incumbent-rebaselined`'s
+   exactly — same 2,367 rows, same fold assignment, same weights — because that
+   artefact was produced this way. **If it does not, the lane is wrong, not the
+   artefact.**
+2. The model effect against `fc4f3515` is **smaller in magnitude** than the
+   −0.0500 recall margin currently read against the stored summary, because that
+   margin contains a data effect that this removes. Direction is not predicted.
+3. The verdict on `fc4f3515` stays **UNRESOLVED**. Its margin is 0.7x its floor,
+   and removing a component of the margin moves it further inside the band, not
+   out of it.
+
+**Stops if.** The re-score costs more than the refresh window allows. The
+champion's five folds each score roughly 920 rows, so this is inference over
+4,610 rows and not a retrain; if that estimate is wrong by an order of magnitude
+the lane runs on a schedule of its own rather than every refresh, and the gate
+falls back to the stored summary with the staleness reported.
+
+**Nothing promotes on any of this.** `models/registry.json` is untouched.
+
+#### Result — the lane is built, and its own correctness check is FALSIFIED (2026-08-17)
+
+**Prediction 1 is falsified and rule 4 has fired, so by its own terms the
+result is void. The criterion is not adjusted, and the lane is not wired into
+the refresh flow. This is a stop-and-ask.**
+
+**What was built.** `eval/control_lane.py` and `scripts/control_lane.py`. The
+lane resolves the served run from the registry, re-scores it out-of-fold over
+the current shard set, and summarises it. The shared population falls out of the
+existing code rather than being computed separately: `score_run` under
+`OUT_OF_FOLD` keeps only rows it has a held-out fold for, which is exactly the
+incumbent's own training set intersected with today's shards.
+
+**The compute estimate was wrong by three orders of magnitude.** 4.8 costed this
+at 5–9 h. Measured: **10.6 seconds**, five folds over 4,610 rows, because it is
+inference and not a retrain. The lane is cheap enough to run every refresh with
+no scheduling argument at all — which is the one part of this that came out
+better than pre-registered.
+
+| measured, `ca906040` re-scored on the current shard set | |
+|---|---:|
+| shared population | 4,610 of 5,380 current rows (85.7%) |
+| added since it trained | 770 — all K2 and Kepler, no TESS |
+| dropped since | 208 |
+| TESS gate slice | 2,367 rows, 1,300 positive |
+| wall clock | 10.6 s |
+
+**What falsified it.** Rule 4 required the re-score to reproduce
+`incumbent-rebaselined`'s TESS slice to `1e-6`. It does not:
+
+| metric | re-scored | stored | difference |
+|---|---:|---:|---:|
+| `roc_auc` | 0.910005 | 0.910004 | 7.2e-07 |
+| `brier` | 0.121129 | 0.121128 | 7.6e-07 |
+| `pr_auc` | 0.920337 | 0.920330 | **6.9e-06** |
+| `ece` | 0.043828 | 0.043850 | **2.2e-05** |
+| `recall_at_1pct_fpr` | 0.306923 | 0.306923 | 0 |
+
+**The cause is identified and it is not floating point.** Two runs of the lane
+are **bit-identical** to each other on every metric, so inference here is
+deterministic. Against the stored artefact, **4,595 of 4,610 rows agree
+exactly** and **15 differ**, one by 0.072. All 15 are TESS — 12 confirmed
+planets and 3 false positives — and their `period`, `duration` and `depth` come
+from the label catalogue, which has been refreshed since the stored artefact was
+produced on 2026-08-07. Changed parameters change the aux features, which change
+the score. `data/processed/tfrecords` itself is clean against its DVC pointer;
+the three artefacts `dvc status` does report as drifted are the *viewset* ones,
+already carried as Ollie's open decision in 4.8.
+
+**So the check demanded something the lane exists to make false.** The lane
+measures the incumbent on *today's* inputs; the stored artefact measured it on
+7 August's. Requiring equality between them assumes the population never moves,
+which is the assumption the control lane was built to stop making. The check is
+mis-specified against its own subject.
+
+**That is recorded, not repaired.** A pre-registered criterion is not adjusted
+because executing it was inconvenient — that is the move this project's rules
+exist to prevent, and the fact that the specification error is mine does not
+create an exception. Predictions 2 and 3 are **not evaluated**: both are read
+from a control summary that rule 4 declares void.
+
+**What is Ollie's call.** The lane is committed and inert — nothing in
+`refresh_pipeline.py` calls it, so Saturday's run is unaffected. Resolving it
+means choosing what the correctness check should have been, and that is a
+decision about what "the same measurement" means when the inputs are allowed to
+move. It is not a decision to take by editing a tolerance until the run passes.
+
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
 **Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
