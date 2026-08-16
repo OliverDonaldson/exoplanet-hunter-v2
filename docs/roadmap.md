@@ -3075,9 +3075,72 @@ new population — which is compute, and is the open remainder of this item.
 Until it lands, a weekly promotion is attributable to "the model or the data",
 not to the model.
 
-**Also outstanding: the calibration run.** Nothing has yet been trained at
-`n_models_per_fold=3` on the refresh path, so the wider floor is wired but not
-measured. ~4–5 h of compute, and it is the first thing that should run.
+#### Calibration run — 2026-08-16. It did not measure a floor; it found why there isn't one
+
+`fc4f3515`, 5 h 28 for 5 folds x 3 members on the rolling map, trainer only so
+nothing could reach the registry (`registry.json` verified byte-identical after,
+`ca906040` still served).
+
+**The run produced no recall floor, because the dual-view trainer does not write
+one.** Raising `n_models_per_fold` was necessary and not sufficient:
+
+| field | branch trainer | dual-view trainer |
+|---|---|---|
+| `seed_sd`, `fold_sd` | yes | yes |
+| `recall_seed_sd`, `gate_recall_seed_sd` | yes | **no** |
+| `pooled_gate_recall_seed_sd` | yes — 0.0310 on E-C | **absent** |
+| `per_mission` block | yes | **absent** |
+
+So `decision_floor(candidate).recall` is still `None` on the refresh path and the
+gate still falls back to `LEGACY_RECALL_TOLERANCE = 0.02`. **Defect 1 of this
+item is not fixed by the wiring.**
+
+**And the gate cannot promote at all.** Run against this candidate, without
+`--promote`:
+
+> REJECT: gated on pooled CV means — a summary here predates the per_mission
+> block; ROC-AUC 0.9633 vs incumbent 0.9581; Brier 0.0718 vs incumbent 0.0791;
+> **populations differ: one summary carries no per_mission block, so the rows
+> behind each mean are unknown; refusing to promote on a pooled comparison whose
+> rows cannot be matched**
+
+Exit code 1. The candidate is **better on every metric the gate could compare**:
+
+| metric | candidate | incumbent | |
+|---|---:|---:|---|
+| CV ROC-AUC | **0.9633** | 0.9581 | better |
+| Brier | **0.0718** | 0.0791 | better |
+| ECE | **0.0240** | 0.0276 | better |
+
+**This is 3.7's first defect, still live.** 3.7 found the gate could not promote
+because the *incumbent's* stored summary has no `per_mission` block, and closed
+it with `--incumbent-summary`. What was not noticed is that the **dual-view
+trainer never writes one either**, so every refresh candidate has the same hole,
+and `refresh_pipeline.py`'s `promotion_gate` task passes no such flag.
+
+**Stated plainly: the weekly loop has never been able to promote, and still
+cannot.** Its two outcomes are "rejected" and "rejected". A retrain that
+genuinely beats the incumbent is refused on a provenance technicality, and the
+refusal text is indistinguishable from a real quality rejection in the
+notification. Every "promotion rejected" ping this project has sent may have
+meant this instead.
+
+**What closes it, and it is a build not a run.** The dual-view trainer needs the
+branch trainer's summary schema: a `per_mission` block, and the recall variance
+fields including `pooled_gate_recall_seed_sd`. Both already exist in
+`train_branches.py::_aggregate_cv`; this is bringing one trainer up to the
+other's contract, not inventing anything. Until then the calibration figure
+below is all this run yields.
+
+| measured, dual-view at n=3 on the rolling map | |
+|---|---:|
+| CV ROC-AUC | 0.9633 ± 0.0020 |
+| AUC `seed_sd` (reseeding) | **0.0034** |
+| AUC `fold_sd` (fold difficulty) | 0.0018 |
+| AUC floor by stage 6's rule, `2 x sd / sqrt(3)` | **0.0040** |
+
+The AUC floor is real and usable. The recall floor — the one the gate actually
+reads, and the criterion that has rejected every arm — is still unmeasured.
 
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
