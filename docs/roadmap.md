@@ -3142,6 +3142,111 @@ below is all this run yields.
 The AUC floor is real and usable. The recall floor — the one the gate actually
 reads, and the criterion that has rejected every arm — is still unmeasured.
 
+### 4.1b Pre-registered — the gate's third verdict and what its floor is made of (2026-08-16, nothing implemented)
+
+Written before any of `adf4a71`'s follow-up is built, because two of the five
+items change **what a verdict means** rather than adding a feature, and a
+decision taken after seeing which runs flip is not a decision.
+
+**Why this exists.** `adf4a71` let the gate read a dual-view candidate at all.
+It did not make the gate safe to leave unattended: the verdict is a `bool`, the
+tolerance scales with the candidate's own noise, and alarms are advisory in a
+loop with nobody to advise.
+
+#### 1. A third verdict — UNRESOLVED
+
+Stage 6's **caveat 2** is binding and the gate cannot currently express it:
+
+> *Three draws is a thin sd. The sampling spread of an sd from three draws is
+> roughly 40% of its own value. If the result lands within a factor of ~1.5 of a
+> threshold, the honest reading is **unresolved** — that is a stop-and-ask, not
+> a re-specification.*
+
+`PromotionDecision.promoted: bool` has two states for a rule with three. So a
+margin at 0.8x the floor reads PROMOTE with the same confidence as one at 0.1x,
+and a margin at 1.2x reads REJECT with the same confidence as one at 5x.
+
+**Fixed now:** a criterion whose `|margin|` falls within **1.5x** of its floor —
+i.e. `floor / 1.5 <= |margin| <= floor * 1.5` — is UNRESOLVED. Any criterion
+UNRESOLVED makes the decision UNRESOLVED unless some other criterion already
+REJECTs; **REJECT dominates UNRESOLVED dominates PROMOTE.** Unattended runs
+treat UNRESOLVED as *do not promote, and say why it is not a rejection*.
+
+*How it reads — fixed before re-gating anything.* `fc4f3515` currently reads
+PROMOTE with recall margin **−0.0500** against floor **0.0610**, a ratio of
+0.82. `0.0610 / 1.5 = 0.0407 <= 0.0500 <= 0.0915`, so it must become
+**UNRESOLVED**. If it does not, this rule is not doing what caveat 2 says and the
+implementation is wrong — not the caveat.
+
+#### 2. What the floor is made of
+
+**The defect.** `decision_floor` reads `pooled_gate_recall_seed_sd` from the
+**candidate alone**. Across the 11 runs on disk that quantity spans
+**0.0029 to 0.0632, a 22.1x range** (median 0.0353, mean 0.0381), so a noisier
+candidate earns itself a wider band to clear. It also ignores the incumbent's
+noise entirely, which stage 6's **caveat 1** already says is wrong: *"the
+incumbent carries its own noise and a different architecture and protocol."*
+
+**Three options were on the table. The choice is recorded before it is built.**
+
+| option | why not |
+|---|---|
+| a floor pooled across runs | assumes the noise scale is a property of the statistic, not the architecture — which **caveat 4** flags as an assumption, not a finding. The 22x spread mixes architectures and interventions, so pooling would import branch-model noise into a dual-view decision |
+| a fixed floor on a recalibration schedule | this is what the gate already had. `LEGACY_RECALL_TOLERANCE = 0.02` was fixed, went stale, and was measured at 0.68 sigma |
+| **se of a difference** | **adopted** |
+
+**Adopted: the tolerance is `2 x se(delta)`, where**
+
+```
+se(delta) = sqrt( sd_cand^2 / n_cand  +  sd_inc^2 / n_inc )
+```
+
+because the quantity under test **is a difference of two run means**, not one
+run's mean. This is the only option of the three that is correct for what is
+actually being compared, and it implements caveat 1 rather than restating it.
+
+**The honest gap, recorded now rather than discovered later.** No incumbent
+summary on disk carries a variance block — not `ca906040`'s, not
+`incumbent-rebaselined`'s. So `sd_inc` is **unavailable today**. Until an
+incumbent is re-baselined with one, the incumbent term uses the **pooled median
+across the 11 measured runs, 0.0353**, and the decision text must say so in
+words. A tolerance that silently substitutes a prior for a measurement is the
+project's own recurring defect class.
+
+**This does not remove the perverse incentive, and pretending otherwise would be
+the error.** Under `se(delta)` a noisier candidate still earns a wider band —
+correctly, because its mean is genuinely less well known. What stops that being
+exploitable is **item 1**: a candidate noisy enough to make its margin
+comparable to its own floor lands in UNRESOLVED, which does not promote. The two
+items only work together.
+
+*Predictions, recorded so they can be wrong.*
+
+1. The recall tolerance on `fc4f3515` **widens** from 0.0610, because a second
+   variance term is being added under a square root and nothing is removed.
+2. It widens by less than `sqrt(2)`, since the pooled incumbent term (0.0353) is
+   smaller than the candidate's own (0.0528).
+3. The verdict is **UNRESOLVED either way** — a wider floor moves the ratio
+   further below 1, deeper into the band, not out of it.
+
+#### 3. The K2 alarm is permanent, and that is a decision not a bug
+
+`incumbent-rebaselined` carries `['Kepler', 'TESS', 'all']` and **no K2**, so
+"populations differ: only the candidate scored K2" fires on **every** future
+candidate. An alarm that always fires is noise, and under item 3's strict mode it
+would block every promotion forever.
+
+**Recorded as permanently acknowledged, with the reason:** K2 entered training
+after the incumbent was baselined, the gate decides on **TESS** alone, and K2's
+absence from the incumbent cannot be fixed by anything the candidate does. The
+alternative — re-baselining the incumbent on the K2-bearing population — is a
+real option and is **not** taken here, because it changes the reference every
+past result was read against. It is recorded as available if the pooled slice is
+ever wanted for a decision.
+
+**Nothing promotes on any of this.** `models/registry.json` is untouched and
+`ca906040` stays served.
+
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
 **Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
