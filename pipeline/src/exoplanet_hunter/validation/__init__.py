@@ -15,6 +15,8 @@ from exoplanet_hunter.validation.leakage import (
     record_quarantine,
 )
 from exoplanet_hunter.validation.promotion import (
+    VERDICT_BY_EXIT_CODE,
+    VERDICT_EXIT_CODES,
     PairedFolds,
     PromotionDecision,
     Verdict,
@@ -25,6 +27,8 @@ from exoplanet_hunter.validation.promotion import (
     paired_folds,
     promote,
     publishable_cv_dirs,
+    read_decision,
+    write_decision,
 )
 from exoplanet_hunter.validation.schemas import (
     candidate_catalogue_schema,
@@ -37,6 +41,8 @@ from exoplanet_hunter.validation.shrink import check_catalogue_shrink
 from exoplanet_hunter.validation.trigger import RefreshDecision, evaluate_refresh
 
 __all__ = [
+    "VERDICT_BY_EXIT_CODE",
+    "VERDICT_EXIT_CODES",
     "PairedFolds",
     "PromotionDecision",
     "RefreshDecision",
@@ -60,5 +66,7 @@ __all__ = [
     "promote",
     "publishable_cv_dirs",
     "quarantine_tics",
+    "read_decision",
     "record_quarantine",
+    "write_decision",
 ]

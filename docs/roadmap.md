@@ -3178,6 +3178,52 @@ PROMOTE with recall margin **−0.0500** against floor **0.0610**, a ratio of
 **UNRESOLVED**. If it does not, this rule is not doing what caveat 2 says and the
 implementation is wrong — not the caveat.
 
+> **CORRECTION 2026-08-17 — the paragraph above describes a run state that has
+> never existed on disk, and its falsification test is UNEXECUTED.**
+>
+> The pre-registration is left verbatim, as every pre-registration in this
+> document is. What follows is the correction, not a re-specification.
+>
+> **What is actually true of `fc4f3515`.** Its summary carries no `per_mission`
+> block, so `_gate_slice` returns None, `cand_recall` is None, and **the recall
+> guard is skipped entirely — there is no margin and no floor to compare**. The
+> gate REJECTs on population mismatch before reaching the criterion this
+> paragraph is about. Re-gated read-only on 2026-08-17, the full verdict is:
+>
+> > REJECT: gated on pooled CV means — a summary here predates the per_mission
+> > block; ROC-AUC 0.9633 vs incumbent 0.9558; Brier 0.0718 vs incumbent 0.0798;
+> > populations differ: one summary carries no per_mission block, so the rows
+> > behind each mean are unknown; refusing to promote on a pooled comparison
+> > whose rows cannot be matched
+>
+> **Where the figures came from.** No summary on disk carries
+> `pooled_gate_recall_seed_sd = 0.0528` or a TESS recall of 0.257; the 11 runs
+> that measured the field span 0.0029–0.0632. The numbers are internally
+> consistent with one specific artefact: a summary with
+> `pooled_gate_recall_seed_sd = 0.0528` at `n = 3`, whose TESS recall of 0.2569
+> sits 0.0500 below `incumbent-rebaselined`'s 0.3069. `2 x 0.0528 / sqrt(3)` is
+> 0.0610 under the superseded rule and
+> `2 x sqrt(0.0528^2/3 + 0.0353^2/3)` is 0.0733 under the adopted one, which is
+> the pair of floors quoted here and in the handover. That artefact was
+> `fc4f3515`'s summary **regenerated in memory** during the 2026-08-16 session
+> and never written to disk — the handover records doing exactly that, and
+> records that no dual-view summary on disk carries `per_mission`. So the
+> figures are not fabricated; they were measured against a file that was not
+> kept, which is why no reader can re-execute the test.
+>
+> **The defect, stated plainly.** A binding pre-registration was written in the
+> present tense ("currently reads") about a state no one can reproduce. The
+> three predictions under *What the floor is made of* below inherit this: they
+> are read against the same absent artefact and are **equally unexecuted**. The
+> handover's claim that "all three of 4.1b's predictions confirmed" is therefore
+> not supported by anything on disk.
+>
+> **Status: unexecuted, and not re-pointed at a different run.** Substituting a
+> run that happens to be sliceable would be re-specifying a pre-registration to
+> fit what is available. The test is executed when `fc4f3515` has a `per_mission`
+> summary on disk — regenerated from its existing predictions, not retrained —
+> and the result is recorded below at that point, whatever it says.
+
 #### 2. What the floor is made of
 
 **The defect.** `decision_floor` reads `pooled_gate_recall_seed_sd` from the

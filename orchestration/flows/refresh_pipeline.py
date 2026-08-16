@@ -30,7 +30,15 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    # Imported for typing only: pulling the validation package in at module
+    # scope costs seconds of pandera import on every flow load, which is why
+    # every use below is inside the task that needs it.
+    from exoplanet_hunter.validation import PromotionDecision
 
 import pandas as pd
 import requests
@@ -74,6 +82,34 @@ def _notify(message: str) -> None:
         requests.post(url, json={"content": message, "text": message}, timeout=10)
     except Exception as exc:
         get_run_logger().warning("notify failed: %s", exc)
+
+
+def _fail(message: str) -> NoReturn:
+    """Raise, but not before the one channel an unattended run is heard on.
+
+    launchd runs this weekly with nobody watching Prefect, so a task that simply
+    raises is a week that produced no result and gave no notice. The webhook is
+    the only place a failure surfaces at all.
+    """
+    _notify(f"exoplanet-hunter refresh: {message}")
+    raise RuntimeError(message)
+
+
+def _gate_headline(verdict: str) -> str:
+    """How each verdict reads in the notification.
+
+    UNRESOLVED has to say in words that it is not a rejection. The loop cannot
+    promote on it, but reporting it as a quality failure asserts a measurement
+    the run did not make — which is the whole reason the third verdict exists.
+    """
+    return {
+        "PROMOTE": "PROMOTED",
+        "REJECT": "rejected on quality",
+        "UNRESOLVED": (
+            "UNRESOLVED — the margin is inside its own noise floor, so this is NOT a "
+            "quality rejection. Nothing was promoted; this one needs a human read"
+        ),
+    }[verdict]
 
 
 # ------------------------------------------------------------------ tasks --
@@ -258,8 +294,16 @@ def _incumbent_is_sliceable() -> bool:
 
 
 @task
-def promotion_gate() -> bool:
-    """Gate the newest CV run; promote (update registry) if it wins."""
+def promotion_gate() -> PromotionDecision:
+    """Gate the newest CV run; promote (update registry) if it wins.
+
+    Returns the gate's own verdict with its reasons and alarms, not a bool. A
+    bool has two states for a rule with three, and collapsing UNRESOLVED into
+    either neighbour is what made every non-promotion read as a quality
+    rejection in the one message anybody sees.
+    """
+    from exoplanet_hunter.validation import VERDICT_EXIT_CODES, read_decision
+
     cv_root = REPO_ROOT / "models" / "cv"
     newest = max(cv_root.glob("*/cv_summary.json"), key=lambda p: p.stat().st_mtime)
     # The incumbent is whatever the REGISTRY names — resolved by
@@ -291,16 +335,35 @@ def promotion_gate() -> bool:
                 "summary exists — the gate will refuse on population mismatch"
             )
 
-    result = subprocess.run(cmd, cwd=REPO_ROOT)
-    # 0 promote, 1 reject, 2 unresolved. UNRESOLVED must not collapse into either
-    # neighbour: as 0 the loop would promote on a margin it cannot resolve, as 1
-    # it would report a quality rejection that did not happen.
-    verdict = {0: "PROMOTED", 1: "rejected", 2: "UNRESOLVED — stop and ask"}.get(
-        result.returncode, f"gate failed (exit {result.returncode})"
-    )
-    promoted = result.returncode == 0
-    get_run_logger().info("promotion gate: %s", verdict)
-    return promoted
+    # The exit code alone cannot be trusted to name the verdict: an uncaught
+    # exception also exits 1, which is REJECT's code, so a gate that died on a
+    # malformed summary is indistinguishable from one that judged the candidate
+    # worse. --verdict-out is written only once a verdict exists, so its absence
+    # is the crash and its contents are the decision.
+    with tempfile.TemporaryDirectory() as tmp:
+        verdict_out = Path(tmp) / "decision.json"
+        result = subprocess.run([*cmd, "--verdict-out", str(verdict_out)], cwd=REPO_ROOT)
+        if not verdict_out.exists():
+            _fail(
+                f"the promotion gate exited {result.returncode} without reaching a verdict "
+                "— it crashed before deciding, so nothing was compared and nothing was "
+                "promoted. This is NOT a quality rejection"
+            )
+        decision = read_decision(verdict_out)
+
+    expected = VERDICT_EXIT_CODES[decision.verdict]
+    if result.returncode != expected:
+        # The gate decided, then something after the decision failed — applying
+        # a promotion to the registry is the only step there. Reporting the
+        # verdict alone here would claim an outcome that was never applied.
+        _fail(
+            f"the promotion gate decided {decision.verdict.value} but exited "
+            f"{result.returncode} rather than {expected} — the decision was reached and "
+            "then failed to apply. The registry may not reflect it"
+        )
+
+    get_run_logger().info("promotion gate: %s", decision)
+    return decision
 
 
 @task
@@ -350,13 +413,21 @@ def refresh_pipeline(
         preprocess_and_shard(data_config)
         folds = roll_fold_assignment()
         train(data_config, fold_assignment=folds)
-        promoted = promotion_gate()
+        decision = promotion_gate()
         registry = json.loads((REPO_ROOT / "models" / "registry.json").read_text())
-        _notify(
-            f"exoplanet-hunter refresh: trained; promotion "
-            f"{'PROMOTED' if promoted else 'rejected'} — serving run "
+        message = (
+            f"exoplanet-hunter refresh: trained; gate "
+            f"{_gate_headline(decision.verdict.value)} — serving run "
             f"{registry['run_id'][:8]} (AUC {registry['test_roc_auc_mean']:.4f})"
         )
+        # Anything that did not promote has to carry its own explanation. The
+        # verdict alone cannot distinguish a candidate that lost on recall from
+        # one nobody could measure, and this message is the whole report.
+        if not decision.promoted:
+            message += "\n" + "; ".join(decision.reasons)
+        if decision.alarms:
+            message += "\nALARM: " + "; ".join(decision.alarms)
+        _notify(message)
     else:
         _notify("exoplanet-hunter refresh: catalogue updated, no retrain warranted")
     publish()

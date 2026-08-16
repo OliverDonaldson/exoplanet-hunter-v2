@@ -275,6 +275,20 @@ class Verdict(StrEnum):
     REJECT = "REJECT"
 
 
+#: One exit code per verdict, so a process caller reads the same three states
+#: the library does. Defined here because two callers need it — the gate script
+#: to exit with, the refresh flow to read back — and a mapping written twice is
+#: a mapping that drifts.
+VERDICT_EXIT_CODES: dict[Verdict, int] = {
+    Verdict.PROMOTE: 0,
+    Verdict.REJECT: 1,
+    Verdict.UNRESOLVED: 2,
+}
+VERDICT_BY_EXIT_CODE: dict[int, Verdict] = {
+    code: verdict for verdict, code in VERDICT_EXIT_CODES.items()
+}
+
+
 #: A margin between `floor / 1.5` and `floor * 1.5` is not resolvable against a
 #: floor estimated from three draws, whose own sampling spread is ~40% of its
 #: value (stage 6, caveat 2).
@@ -306,6 +320,40 @@ class PromotionDecision:
     def __str__(self) -> str:
         out = f"{self.verdict.value}: " + "; ".join(self.reasons)
         return out + ("\nALARM: " + "; ".join(self.alarms) if self.alarms else "")
+
+
+def write_decision(path: Path, decision: PromotionDecision) -> None:
+    """Record a decision where a process caller can read it back.
+
+    An exit code cannot carry this on its own. An uncaught exception also exits
+    non-zero, so a caller reading only the code cannot tell a gate that decided
+    REJECT from one that died before deciding anything — and reporting the
+    second as the first is a quality rejection that never happened. This file
+    exists only once a verdict was actually reached, which is what separates
+    the two. It also carries the reasons, so an unattended caller can say why a
+    decision went the way it did instead of naming the verdict alone.
+    """
+    path.write_text(
+        json.dumps(
+            {
+                "verdict": decision.verdict.value,
+                "reasons": decision.reasons,
+                "alarms": decision.alarms,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+
+def read_decision(path: Path) -> PromotionDecision:
+    """The inverse of `write_decision`, for a caller that ran the gate."""
+    payload = json.loads(path.read_text())
+    return PromotionDecision(
+        Verdict(payload["verdict"]),
+        list(payload.get("reasons", [])),
+        list(payload.get("alarms", [])),
+    )
 
 
 def _mean(summary: dict[str, Any], metric: str) -> float:

@@ -18,10 +18,11 @@ from pathlib import Path
 
 from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation import (
-    Verdict,
+    VERDICT_EXIT_CODES,
     evaluate_promotion,
     load_incumbent_summary,
     promote,
+    write_decision,
 )
 
 log = get_logger(__name__)
@@ -56,6 +57,17 @@ def main() -> None:
         ),
     )
     parser.add_argument("--promote", action="store_true", help="Update the registry on success")
+    parser.add_argument(
+        "--verdict-out",
+        type=Path,
+        default=None,
+        help=(
+            "write the decision here as JSON. A caller that reads only the exit code cannot "
+            "tell REJECT from a gate that crashed before deciding — both leave a non-zero "
+            "status. This file is written only once a verdict exists, so its absence is the "
+            "crash. The unattended refresh flow passes it and reports what it finds"
+        ),
+    )
     args = parser.parse_args()
 
     candidate = json.loads(args.cv_summary.read_text())
@@ -70,6 +82,12 @@ def main() -> None:
     )
     log.info("[promotion] %s", decision)
 
+    # Recorded the moment it exists, before the registry is touched. A promotion
+    # that is decided and then fails to apply is a different event from a
+    # rejection, and writing this afterwards would lose exactly that case.
+    if args.verdict_out is not None:
+        write_decision(args.verdict_out, decision)
+
     if decision.promoted and args.promote:
         run_id = args.cv_summary.parent.name
         registry = promote(args.models_dir, run_id, args.cv_summary)
@@ -79,7 +97,7 @@ def main() -> None:
     # either neighbour: read as 0 an unattended loop would promote on a margin
     # it cannot resolve, and read as 1 it would report a quality rejection that
     # did not happen.
-    sys.exit({Verdict.PROMOTE: 0, Verdict.REJECT: 1, Verdict.UNRESOLVED: 2}[decision.verdict])
+    sys.exit(VERDICT_EXIT_CODES[decision.verdict])
 
 
 if __name__ == "__main__":

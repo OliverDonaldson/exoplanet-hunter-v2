@@ -596,24 +596,30 @@ def _labels_path(cv_root: Path) -> Path:
     return root / LABELS_RELATIVE
 
 
-def _labelled_predictions(cv_root: Path) -> pd.DataFrame | None:
+def _labelled_predictions(cv_root: Path) -> pd.DataFrame:
     """The pooled out-of-fold set, with the columns the summary pieces expect.
 
     The trainer writes `y_true`/`prob_calibrated` and no mission, because it
     never needed them. Both shared summary functions read `label`, `score` and
     `mission`, so the join happens here rather than in either of them.
 
-    Raises rather than returning None when the labels are absent. Returning None
-    writes a summary the gate cannot slice, and the gate then REJECTs on
+    Every absence here raises. A summary written without these rows carries no
+    mission block and no recall floor, and the gate then REJECTs it on
     "populations differ" — a message indistinguishable from a real quality
-    rejection, which is precisely the defect class the 2026-08-07 audit was
-    written about: *a check that returns a plausible answer instead of failing*.
+    rejection, which is the defect class this project keeps rediscovering: *a
+    check that returns a plausible answer instead of failing*.
     """
     import pandas as pd
 
     path = cv_root / "predictions.parquet"
     if not path.exists():
-        return None
+        raise FileNotFoundError(
+            f"no pooled out-of-fold predictions at {path}. The cross-validation loop "
+            "writes this file immediately before aggregating, so its absence means the "
+            "run did not finish rather than that it legitimately has none. Refusing to "
+            "write a summary the promotion gate would REJECT for a reason "
+            "indistinguishable from a quality rejection"
+        )
     frame = pd.read_parquet(path)
     frame = frame.rename(columns={"y_true": "label", "prob_calibrated": "score"})
     if MISSION_COLUMN not in frame.columns:
@@ -665,16 +671,14 @@ def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
         "fold_sd": float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else None,
     }
 
-    # The gate reads a per-mission slice and a recall floor. This trainer wrote
-    # neither, so a dual-view candidate was refused on "populations differ"
-    # before any metric was compared, and `decision_floor` fell back to a
-    # constant measured at 0.68 sigma. Both come from the shared definitions in
-    # eval/comparison.py, so the two trainers cannot drift on what a floor means.
+    # The gate reads a per-mission slice and a recall floor, and refuses a
+    # summary missing either on provenance before it compares a single metric.
+    # Both come from the shared definitions in eval/comparison.py, so the two
+    # trainers cannot drift on what a floor means.
     payload: dict[str, Any] = {"folds": fold_rows, "summary": summary}
     predictions = _labelled_predictions(cv_root)
-    if predictions is not None:
-        summary["variance"].update(pooled_member_draws(predictions))
-        payload["per_mission"] = per_mission_summary(predictions)
+    summary["variance"].update(pooled_member_draws(predictions))
+    payload["per_mission"] = per_mission_summary(predictions)
 
     cv_root.mkdir(parents=True, exist_ok=True)
     summary_path = cv_root / "cv_summary.json"

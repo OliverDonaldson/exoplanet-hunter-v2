@@ -898,17 +898,18 @@ def test_a_uniform_shift_across_every_fold_is_infinitely_consistent():
 
 # ------------------------------ promotion: the gate reads its own noise floor --
 #
-# Every guard below is made to fire. Stage 6 measured the floors and fixed the
-# rule (`2 x seed_sd / sqrt(n_models_per_fold)`); the gate ignored all of it and
-# went on comparing AUC with a bare `>` and rejecting recall at a constant that
-# was *tighter* than the floor the same project had measured.
+# Every guard below is made to fire. A tolerance that is not derived from a run's
+# own measured spread is either too tight — rejecting candidates that match the
+# champion, on noise alone — or too loose to mean anything, and nothing in the
+# decision text would say which.
 
 
 def measured(seed_sd: float = 0.0060, recall_sd: float = 0.0292, n_models: int = 3) -> dict:
     """A summary carrying the variance block `--n-models-per-fold` writes.
 
-    Defaults are `branches-20260808-rebaseline`'s own, so the floors these tests
-    assert against are the ones stage 6 actually recorded: 0.0069 and 0.0337.
+    The defaults are a real run's own measured spreads rather than round
+    numbers, so a floor computed from them is the size the gate actually deals
+    with instead of one chosen to make the arithmetic tidy.
     """
     return {
         "summary": {
@@ -923,26 +924,23 @@ def measured(seed_sd: float = 0.0060, recall_sd: float = 0.0292, n_models: int =
     }
 
 
-def test_the_floor_is_two_sigma_over_root_n_models():
+def test_the_floor_is_two_se_of_the_difference():
+    """The tolerance is `2 x se(candidate - incumbent)`, not the se of either
+    mean on its own. The quantity under test is a difference of two run means,
+    and comparing a candidate against a reference treated as noiseless is not
+    what the gate is doing.
+
+    No incumbent is passed here, so the incumbent's term is the named pooled
+    prior — asserted through the constant rather than its value, so the two
+    cannot drift apart.
+    """
+    from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD, POOLED_SEED_SD
+
     floor = decision_floor(measured())
-    # Updated for roadmap 4.1b: the floor is now 2 x se(candidate - incumbent).
-    # With no incumbent variance the second term is the pooled prior, so the
-    # value is sqrt(sd^2/n + prior^2/n) rather than sd/sqrt(n).
-    from exoplanet_hunter.validation.promotion import POOLED_SEED_SD
-
-    expected = 2 * math.sqrt(0.0060**2 / 3 + POOLED_SEED_SD**2 / 3)
-    assert floor.auc == pytest.approx(expected)
-    from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD
-
+    assert floor.auc == pytest.approx(2 * math.sqrt(0.0060**2 / 3 + POOLED_SEED_SD**2 / 3))
     assert floor.recall == pytest.approx(
         2 * math.sqrt(0.0292**2 / 3 + POOLED_RECALL_SEED_SD**2 / 3)
     )
-    # Stage 6's recorded conclusion was 0.0337, from `2 x sd / sqrt(n)` on the
-    # candidate alone. Roadmap 4.1b supersedes that formula, so the number moves;
-    # the OLD value is asserted here too, as the thing 4.1b changed away from,
-    # so this test fails loudly if either definition drifts unnoticed.
-    assert 2 * 0.0292 / math.sqrt(3) == pytest.approx(0.0337, abs=5e-5)
-    assert floor.recall > 0.0337
 
 
 def test_a_summary_with_no_variance_block_reports_no_floor_rather_than_guessing():
@@ -952,26 +950,22 @@ def test_a_summary_with_no_variance_block_reports_no_floor_rather_than_guessing(
 
 
 def test_a_recall_drop_inside_the_measured_floor_no_longer_rejects():
-    """The behaviour change, and the reason this module was touched at all.
-
-    A 0.025 drop is inside the 0.0337 floor this run measured, so it is not a
-    difference. The gate rejected it anyway, because `recall_tolerance` was a
-    0.02 constant written before the floor existed — a candidate whose true
-    recall equalled the incumbent's was failed by reseeding noise about a third
-    of the time, on the one criterion that has rejected every branch arm.
+    """A drop smaller than the run's own measured floor is not a difference, so
+    it cannot be a quality rejection. It is not a promotion either — inside the
+    floor the gate cannot resolve the sign — and refusing to reject is the whole
+    claim being pinned here.
     """
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
     incumbent = gated(0.91, 0.10)  # recall 0.30 from the slice defaults
-    # 4.1b: inside the floor is UNRESOLVED, not PROMOTE. The test's point --
-    # that it must not REJECT -- is unchanged and is what is asserted.
     from exoplanet_hunter.validation.promotion import Verdict
 
     assert evaluate_promotion(candidate, incumbent).verdict is not Verdict.REJECT
 
 
-def test_that_same_drop_still_rejects_under_the_old_constant():
-    """Pins the change to the tolerance and nothing else: identical inputs,
-    identical verdict as before, once the caller asks for the old number."""
+def test_that_same_drop_still_rejects_under_an_explicit_tolerance():
+    """The caller can still impose a tolerance of its own, and when it does the
+    measured floor gets out of the way entirely. Identical inputs to the test
+    above, opposite outcome, and the tolerance is the only thing that differs."""
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
     decision = evaluate_promotion(candidate, gated(0.91, 0.10), recall_tolerance=0.02)
     assert not decision.promoted
@@ -981,8 +975,9 @@ def test_that_same_drop_still_rejects_under_the_old_constant():
 
 
 def test_a_recall_drop_beyond_the_measured_floor_still_rejects():
-    """The floor widens the band; it does not remove the guard. 0.145 vs 0.307
-    is run 3's real rejection at 4.8x the floor, and it must survive."""
+    """The floor widens the band; it does not remove the guard. A drop of 0.145
+    against 0.307 is several times any floor these runs measure, and a gate that
+    let that through would have no shortlist guard at all."""
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.145})
     decision = evaluate_promotion(
         candidate, gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91, "recall_at_1pct_fpr": 0.307})
@@ -992,11 +987,12 @@ def test_a_recall_drop_beyond_the_measured_floor_still_rejects():
 
 
 def test_the_recall_reason_states_the_margin_against_its_floor():
-    """A margin quoted without its floor is how 0.02 survived stage 6."""
+    """A margin quoted without its floor cannot be read: 0.02 is a defeat
+    against one run's noise and indistinguishable from zero against another's."""
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
     decision = evaluate_promotion(candidate, gated(0.91, 0.10))
-    # The floor value moved with the formula; the SHAPE of the sentence is what
-    # this test is for -- a margin always reported as a multiple of its floor.
+    # The shape of the sentence is the contract, not the value in it — a margin
+    # is always reported as a multiple of the floor it was read against.
     assert any("x the " in r and " floor" in r for r in decision.reasons)
 
 
@@ -1008,9 +1004,10 @@ def test_a_legacy_summary_says_its_tolerance_is_a_constant_not_a_measurement():
 
 def test_an_auc_tie_inside_the_floor_is_recorded_as_level_not_as_a_defeat():
     """The incumbent still keeps serving — a tie is not a reason to churn a
-    deployed model. What changes is the record: every other criterion grants the
-    candidate a tolerance band, so without this the incumbent silently won every
-    tie it was handed and the roadmap read it as a loss.
+    deployed model. What the wording protects is the record: every other
+    criterion grants the candidate a tolerance band, so without this the
+    incumbent wins every tie it is handed and a level result reads ever after
+    as a defeat.
     """
     candidate = measured() | slices(TESS={"roc_auc": 0.9098})
     decision = evaluate_promotion(candidate, gated(0.9100, 0.10))
@@ -1040,9 +1037,10 @@ def test_an_explicit_incumbent_summary_bypasses_the_registry(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The third verdict. Stage 6 caveat 2 describes three states and
-# PromotionDecision carried two, so a margin at 0.8x its floor read PROMOTE with
-# the same confidence as one at 0.1x. Pre-registered in roadmap 4.1b.
+# The third verdict. A floor estimated from three draws carries a sampling
+# spread of roughly 40% of its own value, so a margin the same size as its floor
+# does not establish a direction. Two verdicts cannot express that: a margin at
+# 0.8x its floor would read PROMOTE as confidently as one at 0.1x.
 # ---------------------------------------------------------------------------
 
 
@@ -1075,9 +1073,9 @@ def _summary(auc, brier, ece, recall, *, seed_sd=0.003, recall_sd=0.03, n=3, n_r
 
 
 def test_a_margin_inside_the_band_reads_unresolved_not_promote():
-    """The pre-registered case: a recall margin at ~0.7x its floor is not a
-    promotion and not a rejection. It is the gate saying the margin and the floor
-    are the same size, and the floor is three draws wide."""
+    """A recall margin about the size of its own floor is neither a promotion
+    nor a rejection. It is the gate reporting that the difference it was asked
+    to read is no larger than the noise it was measured against."""
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
 
     incumbent = _summary(0.910, 0.121, 0.044, 0.307)
@@ -1123,8 +1121,9 @@ def test_the_band_is_symmetric_about_the_floor():
 
 
 # ---------------------------------------------------------------------------
-# The floor is the se of a DIFFERENCE. Reading the candidate alone ignored the
-# incumbent's noise (caveat 1) and let a noisier candidate earn a wider band.
+# The floor is the se of a DIFFERENCE. Both runs carry noise, so a tolerance
+# built from the candidate's spread alone treats the reference as exact and
+# hands the noisier candidate the wider band to clear.
 # ---------------------------------------------------------------------------
 
 
@@ -1160,3 +1159,83 @@ def test_a_noisier_candidate_no_longer_quietly_earns_a_wider_pass():
     incumbent = _summary(0.910, 0.121, 0.044, 0.307)
     noisy = _summary(0.917, 0.113, 0.033, 0.270, recall_sd=0.05)
     assert evaluate_promotion(noisy, incumbent).verdict is Verdict.UNRESOLVED
+
+
+# ---------------------------------------------------------------------------
+# The decision crosses a process boundary. An exit code cannot carry it alone:
+# an uncaught exception exits 1, which is also REJECT's code, so a caller
+# reading the status has no way to tell a rejection from a gate that died.
+# ---------------------------------------------------------------------------
+
+
+def test_a_decision_survives_the_round_trip(tmp_path):
+    from exoplanet_hunter.validation import (
+        PromotionDecision,
+        Verdict,
+        read_decision,
+        write_decision,
+    )
+
+    original = PromotionDecision(Verdict.UNRESOLVED, ["margin is inside its floor"], ["K2 absent"])
+    path = tmp_path / "decision.json"
+    write_decision(path, original)
+    restored = read_decision(path)
+    assert restored.verdict is Verdict.UNRESOLVED
+    assert restored.reasons == original.reasons
+    assert restored.alarms == original.alarms
+    assert restored.promoted is False
+
+
+def test_every_verdict_has_exactly_one_exit_code():
+    """Two verdicts sharing a code would collapse into one for every process
+    caller, which is the failure the third verdict was added to prevent."""
+    from exoplanet_hunter.validation import VERDICT_BY_EXIT_CODE, VERDICT_EXIT_CODES, Verdict
+
+    assert set(VERDICT_EXIT_CODES) == set(Verdict)
+    assert len(set(VERDICT_EXIT_CODES.values())) == len(Verdict)
+    inverted = {code: verdict for verdict, code in VERDICT_EXIT_CODES.items()}
+    assert inverted == VERDICT_BY_EXIT_CODE
+
+
+def test_only_promote_exits_zero():
+    """Every shell caller in the project treats zero as "it promoted", and
+    UNRESOLVED reaching that branch would promote on an unresolvable margin."""
+    from exoplanet_hunter.validation import VERDICT_EXIT_CODES, Verdict
+
+    assert VERDICT_EXIT_CODES[Verdict.PROMOTE] == 0
+    assert all(code != 0 for v, code in VERDICT_EXIT_CODES.items() if v is not Verdict.PROMOTE)
+
+
+def test_the_gate_script_writes_the_verdict_it_exits_with(tmp_path):
+    """End to end through the real script: the file and the status agree, so a
+    caller can cross-check them and refuse when they do not."""
+    from exoplanet_hunter.validation import VERDICT_EXIT_CODES, Verdict, read_decision
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fixtures = tmp_path / "fx"
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / ".github" / "scripts" / "make_gate_fixtures.py"),
+            str(fixtures),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    for name, expected in (("better", Verdict.PROMOTE), ("worse", Verdict.REJECT)):
+        out = tmp_path / f"{name}.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(repo_root / "pipeline" / "scripts" / "promotion_gate.py"),
+                str(fixtures / f"candidate_{name}.json"),
+                "--models-dir",
+                str(fixtures / "models"),
+                "--verdict-out",
+                str(out),
+            ],
+            capture_output=True,
+        )
+        decision = read_decision(out)
+        assert decision.verdict is expected
+        assert result.returncode == VERDICT_EXIT_CODES[decision.verdict]
