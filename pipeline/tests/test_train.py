@@ -98,8 +98,12 @@ def write_predictions(cv_root: Path, n_members: int, n_folds: int, *, mission: b
     )
     if mission:
         frame["mission"] = MISSIONS
-    for member in range(n_members):
-        frame[f"{MEMBER_SCORE_PREFIX}{member}"] = np.clip(score + rng.normal(0, 0.06, n), 0, 1)
+    # Only above one member, because that is what the trainer does: a single
+    # model has no second draw to disagree with, and a lone member column would
+    # let a fixture report a draw count the real run never writes.
+    if n_members > 1:
+        for member in range(n_members):
+            frame[f"{MEMBER_SCORE_PREFIX}{member}"] = np.clip(score + rng.normal(0, 0.06, n), 0, 1)
     cv_root.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(cv_root / "predictions.parquet", index=False)
 
@@ -182,3 +186,74 @@ def test_a_run_with_no_pooled_predictions_raises_rather_than_writing_a_thin_summ
     with mlflow.start_run(), pytest.raises(FileNotFoundError, match="pooled out-of-fold"):
         _aggregate_cv(_rows([[0.90, 0.92, 0.94]]), cv_root)
     assert not (cv_root / "cv_summary.json").exists()
+
+
+# --------------------------------------------------------------------------
+# What the promotion gate actually reads. The trainer wrote fold means and a
+# variance block and neither of the two fields the gate decides on, so every
+# candidate it produced was refused on provenance before a metric was compared.
+# These assertions live here, on the trainer that had the hole, not only on the
+# one that never did.
+# --------------------------------------------------------------------------
+
+
+def test_the_summary_carries_the_slice_the_gate_decides_on(aggregate):
+    payload = aggregate([[0.90, 0.92, 0.94], [0.80, 0.82, 0.84]])
+    assert "per_mission" in payload
+    tess = payload["per_mission"]["TESS"]
+    assert tess["n"] == MISSIONS.count("TESS")
+    assert 0.0 < tess["recall_at_1pct_fpr"] < 1.0
+    # The diagnostics and the pooled slice are reported beside it, never instead.
+    assert {"Kepler", "K2", "all"} <= set(payload["per_mission"])
+
+
+def test_the_summary_carries_a_recall_floor_the_gate_can_size_its_tolerance_from(aggregate):
+    """Without this the gate falls back to a constant nobody measured against
+    this run, on the one criterion that has rejected every arm."""
+    variance = aggregate([[0.90, 0.92, 0.94], [0.80, 0.82, 0.84]])["summary"]["variance"]
+    assert variance["pooled_gate_recall_seed_sd"] is not None
+    assert variance["pooled_gate_recall_n_draws"] == 3
+    assert len(variance["pooled_gate_recall"]) == 3
+    assert variance["pooled_gate_n"] == MISSIONS.count("TESS")
+
+
+def test_one_member_reports_no_recall_floor_rather_than_a_zero_one(aggregate):
+    """A single member has nothing to disagree with. Zero would read as "this run
+    is noiseless" in the comparison the number exists to arbitrate."""
+    variance = aggregate([[0.91], [0.89]])["summary"]["variance"]
+    assert variance["pooled_gate_recall_seed_sd"] is None
+    assert variance["pooled_gate_recall_n_draws"] == 0
+
+
+def test_the_gate_reaches_its_criteria_on_this_summary_instead_of_refusing(aggregate):
+    """The end of the path: a summary this trainer wrote, read by the real gate.
+    Compared against itself it is a tie and does not promote — what is pinned is
+    that it gets as far as the recall criterion rather than being refused on
+    paperwork, which is what happened to every candidate before."""
+    from exoplanet_hunter.validation import decision_floor, evaluate_promotion
+
+    payload = aggregate([[0.90, 0.92, 0.94], [0.80, 0.82, 0.84]])
+    assert decision_floor(payload).recall is not None
+
+    decision = evaluate_promotion(payload, payload)
+    assert not any("predates the per_mission block" in r for r in decision.reasons)
+    assert not any("populations differ" in r for r in decision.reasons)
+    assert any("gated on TESS" in r for r in decision.reasons)
+
+
+def test_the_mission_is_joined_from_the_catalogue_when_predictions_omit_it(aggregate):
+    """The trainer's own prediction set carries no mission column, so the join is
+    the live path — not the shortcut of a fixture that writes one."""
+    payload = aggregate([[0.90, 0.92, 0.94], [0.80, 0.82, 0.84]], mission=False)
+    assert payload["per_mission"]["TESS"]["n"] == MISSIONS.count("TESS")
+
+
+def test_the_repository_root_is_asserted_rather_than_assumed(tmp_path):
+    """The label catalogue is resolved by counting parents up from the run
+    directory. That derivation is an assumption about layout, and layout has
+    moved before; a silently wrong root writes a summary with no mission block."""
+    from exoplanet_hunter.training.train import LABELS_RELATIVE, _labels_path
+
+    assert _labels_path(tmp_path / "models" / "cv" / "run") == tmp_path / LABELS_RELATIVE
+    with pytest.raises(ValueError, match="models/cv"):
+        _labels_path(tmp_path / "somewhere" / "else" / "run")

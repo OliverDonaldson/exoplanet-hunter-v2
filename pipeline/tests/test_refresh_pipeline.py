@@ -14,7 +14,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -67,10 +69,32 @@ def gate(tmp_path: Path, monkeypatch):
                 )
             return subprocess.CompletedProcess(cmd, code)
 
+        # The task gates whichever summary is newest, and a test that writes a
+        # champion after the candidate would silently gate the champion instead.
+        summary = cv_root / "cv_summary.json"
+        os.utime(summary, (summary.stat().st_atime, time.time() + 10))
         monkeypatch.setattr(flow.subprocess, "run", fake_run)
         return flow.promotion_gate.fn(), recorded
 
     return run
+
+
+def champion(root: Path, run_id: str, *, sliceable: bool) -> None:
+    """Point the registry at a served run, with or without a per_mission block."""
+    summary: dict = {"summary": {}}
+    if sliceable:
+        summary["per_mission"] = {"TESS": {"roc_auc": 0.91}}
+    cv = root / "models" / "cv" / run_id
+    cv.mkdir(parents=True, exist_ok=True)
+    (cv / "cv_summary.json").write_text(json.dumps(summary))
+    (root / "models" / "registry.json").write_text(json.dumps({"run_id": run_id}))
+
+
+def rebaselined(root: Path) -> None:
+    """The standing fallback summary, measured on the current view set."""
+    path = root / "models" / "cv" / "incumbent-rebaselined" / "cv_summary.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"summary": {}, "per_mission": {"TESS": {"roc_auc": 0.91}}}))
 
 
 # --------------------------------------------------------------------------
@@ -162,3 +186,66 @@ def test_every_verdict_the_library_defines_has_a_headline():
 
     for verdict in Verdict:
         assert flow._gate_headline(verdict.value)
+
+
+# --------------------------------------------------------------------------
+# The champion follows the registry. This is the property that keeps the weekly
+# comparison moving: --incumbent-summary is a FALLBACK for a served model whose
+# summary cannot be sliced, not a fixed reference. Passed unconditionally it
+# would freeze the comparison — promote a new model and the next candidate would
+# still be gated against the old baseline for ever.
+# --------------------------------------------------------------------------
+
+
+def test_a_sliceable_champion_is_gated_against_directly(gate, tmp_path):
+    """Once anything with a per_mission block is served, the override disengages
+    permanently and the comparison tracks whatever the registry names."""
+    champion(tmp_path, "served", sliceable=True)
+    rebaselined(tmp_path)
+    _, recorded = gate("REJECT")
+    assert "--incumbent-summary" not in recorded["cmd"]
+
+
+def test_a_champion_that_cannot_be_sliced_falls_back(gate, tmp_path):
+    """The served model's summary predates the block, so gating against it
+    directly would refuse every candidate on provenance before comparing one
+    metric. The re-baselined measurement of that same model stands in."""
+    champion(tmp_path, "served", sliceable=False)
+    rebaselined(tmp_path)
+    _, recorded = gate("REJECT")
+    assert "--incumbent-summary" in recorded["cmd"]
+    fallback = recorded["cmd"][recorded["cmd"].index("--incumbent-summary") + 1]
+    assert fallback.endswith("incumbent-rebaselined/cv_summary.json")
+
+
+def test_no_registry_at_all_still_falls_back(gate, tmp_path):
+    rebaselined(tmp_path)
+    _, recorded = gate("REJECT")
+    assert "--incumbent-summary" in recorded["cmd"]
+
+
+def test_nothing_to_fall_back_to_does_not_silently_pin_a_reference(gate, tmp_path):
+    """No registry and no re-baseline. The gate will refuse on population
+    mismatch, which is correct — what must not happen is a reference being
+    invented to get a decision out of it."""
+    _, recorded = gate("REJECT")
+    assert "--incumbent-summary" not in recorded["cmd"]
+
+
+# --------------------------------------------------------------------------
+# What the unattended run is invoked with.
+# --------------------------------------------------------------------------
+
+
+def test_the_flow_still_promotes_autonomously(gate):
+    """The loop deciding for itself is the point of the project. If this ever
+    fails because --promote was removed, the weekly run has become a report."""
+    _, recorded = gate("PROMOTE")
+    assert "--promote" in recorded["cmd"]
+
+
+def test_the_flow_gates_strictly(gate):
+    """An alarm owes a written explanation before promotion and nobody is here
+    to give one, so advisory alarms would be promoted straight past."""
+    _, recorded = gate("PROMOTE")
+    assert "--strict" in recorded["cmd"]

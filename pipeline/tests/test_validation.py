@@ -1239,3 +1239,87 @@ def test_the_gate_script_writes_the_verdict_it_exits_with(tmp_path):
         decision = read_decision(out)
         assert decision.verdict is expected
         assert result.returncode == VERDICT_EXIT_CODES[decision.verdict]
+
+
+# ---------------------------------------------------------------------------
+# Strict alarms. An alarm is documented as owing a written explanation before
+# promotion — a condition nobody is present to satisfy on the weekly run, so
+# left advisory the loop promotes straight past every one of them.
+# ---------------------------------------------------------------------------
+
+
+def _alarming_candidate():
+    """Beats the incumbent everywhere, and drops a diagnostic mission far enough
+    to alarm. Without an alarm there is nothing for strict mode to act on."""
+    candidate = _summary(0.930, 0.100, 0.030, 0.320, recall_sd=0.001, seed_sd=0.0005)
+    candidate["per_mission"]["Kepler"] = {"roc_auc": 0.80, "n": 500}
+    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    incumbent["per_mission"]["Kepler"] = {"roc_auc": 0.95, "n": 500}
+    return candidate, incumbent
+
+
+def test_an_alarm_is_advisory_by_default():
+    from exoplanet_hunter.validation import Verdict, evaluate_promotion
+
+    candidate, incumbent = _alarming_candidate()
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.alarms
+    assert decision.verdict is Verdict.PROMOTE
+
+
+def test_the_same_alarm_blocks_under_strict():
+    from exoplanet_hunter.validation import Verdict, evaluate_promotion
+
+    candidate, incumbent = _alarming_candidate()
+    decision = evaluate_promotion(candidate, incumbent, strict=True)
+    assert decision.verdict is Verdict.UNRESOLVED
+    assert decision.promoted is False
+    assert any("held under strict alarms" in r for r in decision.reasons)
+
+
+def test_a_blocked_run_is_not_reported_as_a_quality_rejection():
+    """An alarm asks for a human. It does not assert the candidate is worse, and
+    UNRESOLVED is the verdict that says so."""
+    from exoplanet_hunter.validation import Verdict, evaluate_promotion
+
+    candidate, incumbent = _alarming_candidate()
+    decision = evaluate_promotion(candidate, incumbent, strict=True)
+    assert decision.verdict is not Verdict.REJECT
+    assert any("not a quality rejection" in r for r in decision.reasons)
+
+
+def test_strict_does_not_rescue_a_rejection():
+    """REJECT still dominates. Strict withholds promotion; it never softens a
+    candidate that lost on a criterion."""
+    from exoplanet_hunter.validation import Verdict, evaluate_promotion
+
+    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    loser = _summary(0.850, 0.113, 0.033, 0.100, recall_sd=0.01)
+    assert evaluate_promotion(loser, incumbent, strict=True).verdict is Verdict.REJECT
+
+
+def test_the_k2_alarm_carries_a_standing_decision_and_does_not_block():
+    """It fires on every candidate: the served model was baselined before K2
+    entered training and no candidate can give it a K2 slice. An alarm that
+    always fires would block every promotion for ever under strict."""
+    from exoplanet_hunter.validation import unacknowledged_alarms
+
+    k2 = "populations differ (only the candidate scored K2) — the pooled slice is not like-for-like"
+    assert unacknowledged_alarms([k2]) == []
+
+
+def test_acknowledgement_matches_a_substring_not_the_whole_message():
+    """The surrounding sentence carries run-specific detail. Keyed on whole
+    messages the list would stop matching the first time one was reworded —
+    silently, and in the direction that blocks every promotion."""
+    from exoplanet_hunter.validation import ACKNOWLEDGED_ALARMS, unacknowledged_alarms
+
+    for known in ACKNOWLEDGED_ALARMS:
+        assert unacknowledged_alarms([f"a totally reworded prefix {known} and a suffix"]) == []
+
+
+def test_an_unrelated_alarm_is_not_acknowledged_by_accident():
+    from exoplanet_hunter.validation import unacknowledged_alarms
+
+    alarms = ["Kepler AUC fell -0.0300", "trained from a dirty working tree at abc123"]
+    assert unacknowledged_alarms(alarms) == alarms

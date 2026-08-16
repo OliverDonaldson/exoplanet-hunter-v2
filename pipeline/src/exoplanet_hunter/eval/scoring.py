@@ -39,7 +39,7 @@ from exoplanet_hunter.datasets.tfrecords import (
     load_index,
     make_parse_fn,
 )
-from exoplanet_hunter.eval.comparison import SliceMetrics
+from exoplanet_hunter.eval.comparison import SliceMetrics, pooled_member_draws
 from exoplanet_hunter.utils.logging import get_logger
 from exoplanet_hunter.validation.promotion import AGGREGATE_SLICE, GATE_MISSION
 
@@ -321,14 +321,33 @@ def summarise_scored(
         for mission, group in scored[scored["protocol"] != GATE_PROTOCOL].groupby("mission")
     }
 
+    # The gate sizes its recall tolerance from the run's own reseeding spread,
+    # and the per-member scores that measure it are already in the prediction
+    # set — so a summary built here can carry the floor instead of leaving the
+    # gate to fall back to a constant that was never measured against this run.
+    #
+    # Emitted whether or not there are draws to measure. A block that appears
+    # only when the measurement succeeded makes a missing key and a null read the
+    # same to a person and differently to a program. With no member columns the
+    # draw count is zero, which `decision_floor` reads as no variance block at
+    # all — the same answer it gave before this existed.
+    #
+    # One draw per member, each formed over every fold, so the draw count IS the
+    # member count and the gate divides by the same `n` either trainer would.
+    draws = pooled_member_draws(held_out)
+    variance = {"n_models_per_fold": draws["pooled_gate_recall_n_draws"], **draws}
+
     return {
         # No `folds` block: this run's folds are a different split from any
         # candidate's, so pairing on fold index would compare fold *k* of one
         # partition against fold *k* of another. `paired_folds` returns None on a
         # missing block, which is the honest outcome rather than a fabricated one.
         "summary": {
-            key: {"mean": per_mission[AGGREGATE_SLICE][field], "std": None}
-            for field, key in _SUMMARY_METRICS.items()
+            **{
+                key: {"mean": per_mission[AGGREGATE_SLICE][field], "std": None}
+                for field, key in _SUMMARY_METRICS.items()
+            },
+            "variance": variance,
         },
         "per_mission": per_mission,
         "zero_shot": zero_shot,

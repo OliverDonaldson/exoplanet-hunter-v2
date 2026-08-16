@@ -56,6 +56,17 @@ def main() -> None:
             "block falls back to the pre-stage-6 constant of 0.02"
         ),
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "treat an unacknowledged alarm as blocking rather than advisory, giving "
+            "UNRESOLVED instead of PROMOTE. An alarm owes a written explanation before "
+            "promotion, which nobody is present to give on an unattended run — the "
+            "weekly flow passes this. Alarms carrying a standing decision are listed in "
+            "ACKNOWLEDGED_ALARMS and do not block"
+        ),
+    )
     parser.add_argument("--promote", action="store_true", help="Update the registry on success")
     parser.add_argument(
         "--verdict-out",
@@ -79,6 +90,7 @@ def main() -> None:
         brier_tolerance=args.brier_tolerance,
         ece_tolerance=args.ece_tolerance,
         recall_tolerance=args.recall_tolerance,
+        strict=args.strict,
     )
     log.info("[promotion] %s", decision)
 

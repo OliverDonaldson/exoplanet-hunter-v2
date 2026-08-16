@@ -108,8 +108,64 @@ def test_a_missing_column_names_itself():
 
 def test_the_summary_block_the_pooled_fallback_reads_is_present():
     result = summarise_scored(scored(), source="test")
-    assert set(result["summary"]) == {"test_roc_auc", "test_brier", "test_ece"}
+    assert set(result["summary"]) == {"test_roc_auc", "test_brier", "test_ece", "variance"}
     assert result["summary"]["test_roc_auc"]["mean"] == result["per_mission"]["all"]["roc_auc"]
+
+
+def ensembled(n_tess: int = 60, n_members: int = 3) -> pd.DataFrame:
+    """An out-of-fold TESS slice scored by several members that disagree.
+
+    Wide enough that a 1% FPR cut lands on more than one negative: on a handful
+    of rows every member returns the same recall, and a spread of exactly zero
+    is read as no measurement rather than as a noiseless run.
+    """
+    rng = np.random.default_rng(0)
+    label = np.tile([1, 0], n_tess // 2)
+    score = np.where(label == 1, rng.uniform(0.35, 0.95, n_tess), rng.uniform(0.05, 0.65, n_tess))
+    frame = pd.DataFrame(
+        {
+            "tic_id": np.arange(n_tess),
+            "label": label,
+            "score": score,
+            "mission": "TESS",
+            "protocol": Protocol.OUT_OF_FOLD,
+        }
+    )
+    for member in range(n_members):
+        frame[f"member_score_{member}"] = np.clip(score + rng.normal(0, 0.06, n_tess), 0, 1)
+    return frame
+
+
+def test_a_summary_rebuilt_from_member_scores_carries_the_recall_floor():
+    """The point of rebuilding a summary without retraining: the gate sizes its
+    recall tolerance from the run's own reseeding spread, and the per-member
+    scores that measure it are already in the prediction set."""
+    variance = summarise_scored(ensembled(), source="test")["summary"]["variance"]
+    assert variance["n_models_per_fold"] == 3
+    assert variance["pooled_gate_recall_n_draws"] == 3
+    assert variance["pooled_gate_recall_seed_sd"] > 0.0
+
+
+def test_the_floor_it_reports_is_one_the_gate_can_size_a_tolerance_from():
+    from exoplanet_hunter.validation import decision_floor
+
+    assert decision_floor(summarise_scored(ensembled(), source="test")).recall is not None
+
+
+def test_a_single_model_run_reports_the_block_and_measures_nothing_in_it():
+    """The block is emitted either way. One that appeared only when the
+    measurement succeeded would make a missing key and a null read the same to a
+    person and differently to a program — and a run with no member columns must
+    still leave the gate exactly where it was before this existed."""
+    from exoplanet_hunter.validation import decision_floor
+
+    result = summarise_scored(scored(), source="test")
+    variance = result["summary"]["variance"]
+    assert variance["n_models_per_fold"] == 0
+    assert variance["pooled_gate_recall_seed_sd"] is None
+    floor = decision_floor(result)
+    assert floor.recall is None and floor.auc is None
+    assert "no variance block" in floor.source
 
 
 def test_no_folds_block_so_pairing_reports_nothing_rather_than_something_wrong():

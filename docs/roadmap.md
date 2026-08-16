@@ -3142,6 +3142,49 @@ below is all this run yields.
 The AUC floor is real and usable. The recall floor — the one the gate actually
 reads, and the criterion that has rejected every arm — is still unmeasured.
 
+#### The recall floor, measured — 2026-08-17. No retraining
+
+**This closes 4.1a's calibration half.** `fc4f3515`'s member draws were on disk
+the whole time: its `predictions.parquet` carries `member_score_0..2` over 5,375
+rows. What was missing was a reader that turned them into the field the gate
+reads — the trainer gained one in `adf4a71`, and `evaluate.py summarise`, the
+tool for rebuilding a summary without retraining, still did not write a variance
+block at all.
+
+So `summarise_scored` now emits one, measured from the member columns already in
+the prediction set. It is emitted whether or not there are draws to measure: a
+block that appears only on success makes a missing key and a null read the same
+to a person and differently to a program. With no member columns the draw count
+is zero, which `decision_floor` reads exactly as it read a summary with no block
+— so no existing decision moves, and re-summarising a single-model run such as
+`incumbent-rebaselined` yields the same metrics it always did.
+
+| measured on `fc4f3515`, pooled out-of-fold, n=3 | |
+|---|---:|
+| gate slice | TESS, 2,367 rows, 1,300 positive |
+| TESS ROC-AUC | 0.9169 |
+| TESS recall @1% FPR | 0.2569 |
+| per-member pooled recall draws | 0.1885, 0.2623, 0.1600 |
+| **`pooled_gate_recall_seed_sd`** | **0.05280** |
+| recall floor, `2 x se(delta)` with the pooled prior | **0.0733** |
+
+**The floor is 0.0733, and that is a large number.** It is 3.7x the
+`LEGACY_RECALL_TOLERANCE = 0.02` the gate fell back to, and it means a shortlist
+recall margin smaller than about 0.07 is not a difference this protocol can
+resolve at three members. Read against it, the branch-arm rejections that were
+decided on recall margins of a few hundredths were decided inside their own
+noise — which is what 4.1a predicted would be found and is now measured rather
+than asserted.
+
+**Three draws remains a thin sd**, and its own sampling spread is roughly 40% of
+its value. The floor is quoted with its `n` everywhere it appears, and a margin
+comparable to it lands in UNRESOLVED rather than being read as either outcome.
+
+The artefact is `models/cv/fc4f3515-resummarised/`, a sibling of the run rather
+than a replacement for it — the same convention `incumbent-rebaselined` follows.
+The original summary keeps its `folds` block and its AUC variance, neither of
+which a pooled re-summary can reproduce.
+
 ### 4.1b Pre-registered — the gate's third verdict and what its floor is made of (2026-08-16, nothing implemented)
 
 Written before any of `adf4a71`'s follow-up is built, because two of the five
@@ -3218,11 +3261,34 @@ implementation is wrong — not the caveat.
 > handover's claim that "all three of 4.1b's predictions confirmed" is therefore
 > not supported by anything on disk.
 >
-> **Status: unexecuted, and not re-pointed at a different run.** Substituting a
-> run that happens to be sliceable would be re-specifying a pre-registration to
-> fit what is available. The test is executed when `fc4f3515` has a `per_mission`
-> summary on disk — regenerated from its existing predictions, not retrained —
-> and the result is recorded below at that point, whatever it says.
+> **Not re-pointed at a different run.** Substituting a run that happens to be
+> sliceable would be re-specifying a pre-registration to fit what is available.
+> The test is executed once `fc4f3515` has a `per_mission` summary on disk —
+> regenerated from its existing predictions, not retrained.
+>
+> **EXECUTED 2026-08-17.** `models/cv/fc4f3515-resummarised/` now holds that
+> summary, rebuilt by `evaluate.py summarise` from the run's own
+> `predictions.parquet`. Nothing was retrained. The reconstruction above is
+> confirmed to the digit:
+>
+> | quantity | reconstructed | measured |
+> |---|---:|---:|
+> | `pooled_gate_recall_seed_sd` | 0.0528 | **0.052805** |
+> | TESS `recall_at_1pct_fpr` | 0.2569 | **0.256923** |
+> | margin vs `incumbent-rebaselined` (0.3069) | −0.0500 | **−0.0500** |
+> | floor, superseded rule | 0.0610 | **0.0610** |
+> | floor, adopted rule | 0.0733 | **0.0733** |
+>
+> Re-gated read-only against `incumbent-rebaselined`, the verdict is
+> **UNRESOLVED** (exit 2), on the reason *"shortlist recall margin −0.0500 is
+> within 1.5x of its 0.0733 floor — too close to call from three draws"*.
+>
+> **So the pre-registration's three predictions are confirmed, and its "How it
+> reads" test passes — but only now, and against an artefact that had to be
+> rebuilt to make it checkable.** What was falsified was never the arithmetic; it
+> was the claim that the run *currently read* that way, when the file saying so
+> had not been kept. The figures were right and unverifiable, which is the worse
+> of the two failures because nothing looks wrong.
 
 #### 2. What the floor is made of
 

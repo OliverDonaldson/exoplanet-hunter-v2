@@ -289,6 +289,30 @@ VERDICT_BY_EXIT_CODE: dict[int, Verdict] = {
 }
 
 
+#: Alarms carrying a standing decision, so a run that fires only these can still
+#: promote unattended. Matched as a **substring** of the alarm text: the rest of
+#: the sentence carries run-specific detail, and a list keyed on whole messages
+#: would stop matching the first time one is reworded — silently, and in the
+#: direction that blocks every promotion.
+#:
+#: Nothing belongs here that a candidate could act on. An alarm that fires on
+#: every future run regardless of what is trained is not telling the operator
+#: anything a written explanation could resolve; one that fires on a particular
+#: run is, and stays blocking.
+ACKNOWLEDGED_ALARMS: tuple[str, ...] = (
+    # The served model was baselined before K2 entered training, so it carries no
+    # K2 slice and no candidate can give it one. The gate decides on TESS alone.
+    # Re-baselining the reference to clear this is a real option and is not taken,
+    # because it would move the comparison every past result was read against.
+    "only the candidate scored K2",
+)
+
+
+def unacknowledged_alarms(alarms: list[str]) -> list[str]:
+    """Alarms that no standing decision covers, and so still owe an explanation."""
+    return [a for a in alarms if not any(known in a for known in ACKNOWLEDGED_ALARMS)]
+
+
 #: A margin between `floor / 1.5` and `floor * 1.5` is not resolvable against a
 #: floor estimated from three draws, whose own sampling spread is ~40% of its
 #: value (stage 6, caveat 2).
@@ -501,6 +525,7 @@ def evaluate_promotion(
     recall_tolerance: float | None = None,
     mission_alarm: float = 0.02,
     allow_unmatched_populations: bool = False,
+    strict: bool = False,
 ) -> PromotionDecision:
     """Compare a candidate cv_summary against the incumbent's.
 
@@ -513,6 +538,13 @@ def evaluate_promotion(
     `recall_tolerance` defaults to **this run's own measured floor** rather than
     a constant — see `DecisionFloor`. Passing a number overrides it, which is
     what the pre-stage-6 tests do deliberately.
+
+    Under `strict` an alarm blocks instead of advising. Alarms are documented as
+    owing "a written explanation in the roadmap before promotion", which is a
+    condition no unattended run can satisfy — so left advisory, the weekly loop
+    promotes straight past every one of them. Blocked runs read UNRESOLVED, not
+    REJECT: an alarm asks for a human, it does not assert the candidate is worse.
+    `ACKNOWLEDGED_ALARMS` carries the standing exceptions.
     """
     if incumbent is None:
         return PromotionDecision(
@@ -695,6 +727,18 @@ def evaluate_promotion(
         return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms)
 
     reasons.append("beats incumbent with calibration and shortlist recall intact")
+
+    # Only PROMOTE is reachable here, and it is the only verdict `strict` can
+    # change — REJECT and UNRESOLVED already withhold promotion, so an alarm has
+    # nothing left to block.
+    if strict and (blocking := unacknowledged_alarms(alarms)):
+        reasons.append(
+            f"held under strict alarms: {'; '.join(blocking)}. Each owes a written "
+            "explanation before promotion and no unattended run can give one, so this "
+            "is a stop-and-ask rather than a promotion — and not a quality rejection"
+        )
+        return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms)
+
     return PromotionDecision(Verdict.PROMOTE, reasons, alarms)
 
 

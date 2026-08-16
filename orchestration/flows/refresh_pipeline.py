@@ -315,11 +315,16 @@ def promotion_gate() -> PromotionDecision:
     # true of ca906040 and of nothing trained since adf4a71. Passing it
     # unconditionally would freeze the reference: promote a new model and the
     # next candidate would still be gated against the old re-baselined one.
+    #
+    # --strict because nobody is here. An alarm owes a written explanation
+    # before promotion, and an unattended run cannot give one — left advisory it
+    # would promote straight past every alarm the gate raised.
     cmd = [
         PYTHON,
         "pipeline/scripts/promotion_gate.py",
         str(newest.relative_to(REPO_ROOT)),
         "--promote",
+        "--strict",
     ]
     if not _incumbent_is_sliceable():
         rebaselined = REPO_ROOT / "models" / "cv" / "incumbent-rebaselined" / "cv_summary.json"
