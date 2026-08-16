@@ -2,12 +2,12 @@
 
 One entry point for all three, because they are the same question asked at
 different stages and keeping them apart is how three different readings of the
-incumbent came to exist. `score` produces a `predictions.parquet`; `compare`
+champion came to exist. `score` produces a `predictions.parquet`; `compare`
 reads two of them; `summarise` turns one into the `cv_summary.json` the
 promotion gate reads.
 
 **`summarise` is what lets the gate engage at all.** `evaluate_promotion` gates
-on `per_mission[TESS]`, the live incumbent's summary has no such block, and the
+on `per_mission[TESS]`, the live champion's summary has no such block, and the
 re-baseline existed only as predictions — so every stage 4 decision was refused
 (and before 2026-08-07, silently taken on pooled means). Slices are out-of-fold
 only: the re-baselined set carries 243 zero-shot Kepler rows that are *all*
@@ -16,7 +16,7 @@ population no model was asked about.
 
 Coverage is reported before any metric. The stage 4 comparison matched 4,605
 rows and looked complete while dropping all 527 K2 examples, because the
-incumbent's run predates K2 entirely — so a mission the join loses is named
+champion's run predates K2 entirely — so a mission the join loses is named
 first, and `--strict` refuses the comparison outright.
 
 The stratified cuts exist because the aggregate hid the mechanism. Quartiles are
@@ -27,15 +27,15 @@ resolution deficit from a data deficit. All three are the same measurement over
 different binnings, so they share one primitive in `eval.comparison`.
 
     python pipeline/scripts/evaluate.py compare \
-        --left  models/cv/<incumbent>/predictions.parquet \
+        --left  models/cv/<champion>/predictions.parquet \
         --right models/cv/<candidate>/predictions.parquet
 
     python pipeline/scripts/evaluate.py score \
-        --run models/cv/<incumbent> --protocol zeroshot --mission K2 \
-        --out results/incumbent_k2.parquet
+        --run models/cv/<champion> --protocol zeroshot --mission K2 \
+        --out results/champion_k2.parquet
 
     python pipeline/scripts/evaluate.py summarise \
-        --predictions results/incumbent_rebaselined.parquet \
+        --predictions results/champion_rebaselined.parquet \
         --out models/cv/incumbent-rebaselined/cv_summary.json --exclude-unresolved
 """
 
@@ -59,7 +59,7 @@ from exoplanet_hunter.validation.promotion import GATE_MISSION
 
 log = get_logger(__name__)
 
-#: The incumbent's prediction set predates these names.
+#: The champion's prediction set predates these names.
 LEGACY_COLUMNS = {"y_true": "label", "prob_calibrated": "score"}
 QUARTILE_LABELS = ("Q1 fewest", "Q2", "Q3", "Q4 most")
 TRANSIT_BANDS = ((0, 10), (10, 30), (30, 100), (100, 300), (300, np.inf))
@@ -246,7 +246,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     compare = sub.add_parser("compare", help="two prediction sets, per mission and stratified")
-    compare.add_argument("--left", type=Path, required=True, help="usually the incumbent")
+    compare.add_argument("--left", type=Path, required=True, help="usually the champion")
     compare.add_argument("--right", type=Path, required=True, help="the candidate")
     compare.add_argument("--missions", nargs="*", default=["Kepler", "TESS"])
     compare.add_argument("--min-band-rows", type=int, default=60)

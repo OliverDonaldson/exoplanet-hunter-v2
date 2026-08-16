@@ -36,8 +36,8 @@ training:
   patience: 8
 
 # Identical magnitudes to conf/preprocess/default.yaml, which is what the
-# incumbent trained with. Run 1 of stage 2(a) had none at all, against an
-# incumbent that did — one of the ways that comparison was not like-for-like.
+# champion trained with. Run 1 of stage 2(a) had none at all, against an
+# champion that did — one of the ways that comparison was not like-for-like.
 # Applied per view; the presence channel is never touched (viewset_augment.py).
 augmentation:
   enabled: true

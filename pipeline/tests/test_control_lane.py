@@ -38,7 +38,7 @@ def test_the_overlap_splits_the_current_population_three_ways():
 
 
 def test_coverage_is_the_fraction_of_today_the_comparison_reaches():
-    """The shared set is pinned to what the incumbent trained on while the
+    """The shared set is pinned to what the champion trained on while the
     catalogue grows, so this falls over time. It is reported every run rather
     than discovered once a margin is being read against a quarter of the data."""
     assert population_overlap({1, 2, 3, 4}, {1, 2, 3, 4}).covered == 1.0
@@ -46,9 +46,9 @@ def test_coverage_is_the_fraction_of_today_the_comparison_reaches():
     assert population_overlap(set(), set()).covered == 0.0
 
 
-def test_rows_the_incumbent_never_saw_are_counted_as_added_not_shared():
+def test_rows_the_champion_never_saw_are_counted_as_added_not_shared():
     """They are excluded from the gating comparison on purpose: scoring them
-    would average every fold and hand the incumbent an ensemble the candidate
+    would average every fold and hand the champion an ensemble the candidate
     does not get, on exactly the rows a refresh adds."""
     overlap = population_overlap({1, 2}, {1, 2, 3, 4, 5})
     assert overlap.shared == 2
@@ -75,7 +75,7 @@ def test_the_refusal_names_the_size_it_found():
         assert_gateable(summary(n=MIN_GATE_ROWS - 1))
 
 
-def test_a_summary_with_no_gate_slice_cannot_stand_in_for_the_incumbent():
+def test_a_summary_with_no_gate_slice_cannot_stand_in_for_the_champion():
     with pytest.raises(ValueError, match="no TESS slice"):
         assert_gateable({"per_mission": {"Kepler": {"n": 5000}}})
 

@@ -2,7 +2,7 @@
 
 The roadmap's +0.211 / -0.003 was measured over the 3,919 scored candidates, not
 the labelled CV set, so it could not be compared with anything measured on
-labels. This recomputes the incumbent's candidate-population correlations from
+labels. This recomputes the champion's candidate-population correlations from
 scratch, reporting both covariates so that the original figures can be
 identified rather than assumed.
 
@@ -145,7 +145,7 @@ def main() -> None:
         "reference_labelled_set": {
             "label_baseline_days_all": 0.278,
             "label_baseline_days_tess": 0.387,
-            "incumbent_baseline_days_all": 0.238,
+            "champion_baseline_days_all": 0.238,
         },
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

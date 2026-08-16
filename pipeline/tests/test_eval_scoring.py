@@ -52,7 +52,7 @@ def test_slices_are_out_of_fold_only_and_zero_shot_is_reported_apart():
 
 
 def test_a_zero_shot_block_of_pure_negatives_cannot_reach_the_gate():
-    """The live case, measured 2026-08-08: the re-baselined incumbent carries
+    """The live case, measured 2026-08-08: the re-baselined champion carries
     243 zero-shot Kepler rows with no positives at all. Pooling them into the
     out-of-fold Kepler slice measures a population no model was asked about."""
     frame = scored()
@@ -169,7 +169,7 @@ def test_a_single_model_run_reports_the_block_and_measures_nothing_in_it():
 
 
 def test_no_folds_block_so_pairing_reports_nothing_rather_than_something_wrong():
-    """The incumbent's folds are a different partition from any candidate's, so
+    """The champion's folds are a different partition from any candidate's, so
     pairing on fold index would compare fold k of one split against fold k of
     another. `paired_folds` returns None on a missing block."""
     from exoplanet_hunter.validation.promotion import paired_folds

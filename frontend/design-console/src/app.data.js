@@ -58,13 +58,13 @@ const GATING = SERVED.missions.find(m => m.role === 'gating');
 
 const RUNS = [
   { runId:'ca906040', date:'2026-07-19', auc:0.9100, aucErr:0.0070, recall:0.6120, brier:0.0871, status:'active', verdict:'PROMOTE',
-    reason:'TESS AUC +0.0180 over incumbent — 2.6× the ±0.0070 noise floor. Brier and ECE not degraded.' },
+    reason:'TESS AUC +0.0180 over champion — 2.6× the ±0.0070 noise floor. Brier and ECE not degraded.' },
   { runId:'7b1e4c23', date:'2026-07-02', auc:0.8960, aucErr:0.0071, recall:0.5980, brier:0.0903, status:'archived', verdict:'REJECT',
-    reason:'ΔAUC +0.0040 falls inside the ±0.0070 noise floor — not distinguishable from the incumbent.' },
+    reason:'ΔAUC +0.0040 falls inside the ±0.0070 noise floor — not distinguishable from the champion.' },
   { runId:'a3f2d891', date:'2026-06-18', auc:0.8930, aucErr:0.0068, recall:0.5510, brier:0.0918, status:'archived', verdict:'REJECT',
-    reason:'Recall @1% FPR −0.0410 against incumbent, beyond the ±0.0337 shortlist floor. AUC gain does not compensate.' },
+    reason:'Recall @1% FPR −0.0410 against champion, beyond the ±0.0337 shortlist floor. AUC gain does not compensate.' },
   { runId:'2d9f7a55', date:'2026-06-04', auc:0.8920, aucErr:0.0074, recall:0.5920, brier:0.0921, status:'archived', verdict:'PROMOTE',
-    reason:'First run with an out-of-fold TESS evaluation; incumbent had none. Promoted as the new baseline.' },
+    reason:'First run with an out-of-fold TESS evaluation; champion had none. Promoted as the new baseline.' },
 ];
 
 /* ── data/candidates.ts ──────────────────────────────────── */

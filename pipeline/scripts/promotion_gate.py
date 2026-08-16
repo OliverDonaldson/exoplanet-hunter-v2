@@ -1,4 +1,4 @@
-"""Decide whether a fresh CV run replaces the incumbent model.
+"""Decide whether a fresh CV run replaces the champion model.
 
 Usage (from the repository root):
 
@@ -20,7 +20,7 @@ from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation import (
     VERDICT_EXIT_CODES,
     evaluate_promotion,
-    load_incumbent_summary,
+    load_champion_summary,
     promote,
     write_decision,
 )
@@ -35,15 +35,20 @@ def main() -> None:
     parser.add_argument("--brier-tolerance", type=float, default=0.005)
     parser.add_argument("--ece-tolerance", type=float, default=0.01)
     parser.add_argument(
+        "--champion-summary",
         "--incumbent-summary",
+        dest="champion_summary",
         type=Path,
         default=None,
         help=(
-            "read the incumbent's metrics from this cv_summary.json instead of the one "
+            "read the champion's metrics from this cv_summary.json instead of the one "
             "the registry names. Required whenever the served model's own summary predates "
             "the per_mission block — as ca906040's does, which makes the gate refuse every "
             "candidate on paperwork before comparing a single metric. Point it at "
-            "models/cv/incumbent-rebaselined/cv_summary.json. The registry is not modified"
+            "models/cv/incumbent-rebaselined/cv_summary.json — the directory keeps its "
+            "older name because renaming it would be a data-layout change, not a rename. "
+            "The registry is not modified. --incumbent-summary is the former spelling and "
+            "still works, so commands recorded before the rename keep running"
         ),
     )
     parser.add_argument(
@@ -82,11 +87,11 @@ def main() -> None:
     args = parser.parse_args()
 
     candidate = json.loads(args.cv_summary.read_text())
-    incumbent = load_incumbent_summary(args.models_dir, args.incumbent_summary)
+    champion = load_champion_summary(args.models_dir, args.champion_summary)
 
     decision = evaluate_promotion(
         candidate,
-        incumbent,
+        champion,
         brier_tolerance=args.brier_tolerance,
         ece_tolerance=args.ece_tolerance,
         recall_tolerance=args.recall_tolerance,

@@ -1,9 +1,9 @@
 """Re-score the served model on the current population, so a delta means the model.
 
 The gate compares a candidate scored on today's catalogue against the
-incumbent's summary from whenever it was trained. That difference is a model
+champion's summary from whenever it was trained. That difference is a model
 effect and a population effect added together. This produces the missing half:
-the same incumbent, measured now, on the rows the candidate is judged on.
+the same champion, measured now, on the rows the candidate is judged on.
 
 Run from the repository root:
 
@@ -87,7 +87,7 @@ def main() -> None:
 
     # The fold that held each row out. Scoring a row with a fold that trained on
     # it is not a held-out measurement, and the resulting number would flatter
-    # the incumbent in a comparison built to be fair to the candidate.
+    # the champion in a comparison built to be fair to the candidate.
     fold_of = pd.read_parquet(run / "predictions.parquet").set_index("tic_id")["fold"]
 
     index = pd.read_parquet(args.shard_dir / "index.parquet")
@@ -131,7 +131,7 @@ def main() -> None:
         stored = json.loads(args.reproduces.read_text())
         if drifted := reproduces(summary, stored):
             raise SystemExit(
-                "the re-scored incumbent does not reproduce its stored measurement on "
+                "the re-scored champion does not reproduce its stored measurement on "
                 f"{len(drifted)} metric(s): {'; '.join(drifted)}. Same weights and the same "
                 "rows should give the same numbers, so the lane is measuring something "
                 "other than the model the registry names and every delta from it is void"

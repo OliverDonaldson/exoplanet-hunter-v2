@@ -29,7 +29,7 @@ are recorded into the output JSON rather than left to a reader's memory:
    ephemeris, so `dv_usable` is False for every row. That is a real difference
    from how 56% of training rows were built.
 2. This does **not** restore comparability with the live path's 26.4%. The
-   incumbent must be re-measured through this same harness and the comparison
+   champion must be re-measured through this same harness and the comparison
    made within protocol.
 """
 
@@ -283,7 +283,7 @@ def run_kind(run_dir: Path) -> str:
 def dualview_aux_dim(run_dir: Path) -> int:
     """How many aux features this run's own fitted pipeline expects.
 
-    Not a constant. The incumbent serves the 9-dim legacy layout, but any
+    Not a constant. The champion serves the 9-dim legacy layout, but any
     dual-view run trained since the vetting features landed expects 13, and
     handing its imputer a 9-dim row raises inside sklearn after the whole view
     build has already been paid for. The run's calibration bundle is the
@@ -344,7 +344,7 @@ def build_host_dualview(
 
     views = build_views(flat, period, t0, duration_d)
     # Computed rather than left NaN: the live path computes it, and omitting it
-    # would hand the incumbent a thinner feature vector than it serves with.
+    # would hand the champion a thinner feature vector than it serves with.
     centroid_snr = float(extract_centroid_offset(raw, period, t0, duration_d))
     # Indices 9-12 of the 13-dim layout — the odd/even, secondary and duration
     # statistics — are left unset for the same reason as depth: a transit-free
@@ -370,7 +370,7 @@ def build_host_dualview(
 
 
 def score_through_dualview(run_dir: Path, rows: list[dict], folds: dict) -> np.ndarray:
-    """Calibrated score per row through the incumbent's own fold checkpoints.
+    """Calibrated score per row through the champion's own fold checkpoints.
 
     No shard round-trip here, and the asymmetry with the branch lane is
     deliberate rather than a corner cut. The branch model's scalar
@@ -475,7 +475,7 @@ def main() -> None:
         default=None,
         help=(
             "restrict hosts to those also routable out-of-fold in this run directory. "
-            "Required for a within-protocol comparison: the incumbent's fold membership "
+            "Required for a within-protocol comparison: the champion's fold membership "
             "predates K2 and the current catalogue, so the two runs cover different "
             "populations and an unrestricted pair would compare two of them again"
         ),
@@ -492,7 +492,7 @@ def main() -> None:
 
     labels_all = pd.read_parquet(args.labels)
     predictions = pd.read_parquet(args.run_dir / "predictions.parquet")
-    # The incumbent's predictions carry `fold` and `y_true` but no `mission`, so
+    # The champion's predictions carry `fold` and `y_true` but no `mission`, so
     # without this join the operating point would be fitted over Kepler+TESS
     # together — a threshold set partly by a mission with no serving stake.
     if "mission" not in predictions.columns:
@@ -658,7 +658,7 @@ def main() -> None:
         "limits": {
             "dv_masked": "detection/ghost run masked; no DV report at a synthetic ephemeris",
             "comparability": (
-                "not comparable with the live path's 26.4%; the incumbent must be "
+                "not comparable with the live path's 26.4%; the champion must be "
                 "re-measured through this harness and compared within protocol"
             ),
         },

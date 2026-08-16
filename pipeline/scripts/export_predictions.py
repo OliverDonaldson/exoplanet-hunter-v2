@@ -2,7 +2,7 @@
 
 Newer trainer runs write <cv_dir>/predictions.parquet themselves; this
 script regenerates it for runs trained before that existed (e.g. the first
-registered incumbent). Fold membership is reconstructed exactly as the
+registered champion). Fold membership is reconstructed exactly as the
 trainer computed it — same StratifiedGroupKFold parameters over the same
 shard index — and each fold's saved model + calibrator re-scores its own
 held-out test split.

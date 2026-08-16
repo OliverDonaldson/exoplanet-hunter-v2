@@ -1,6 +1,6 @@
 """Stochastic augmentation for the view set — `augment.py`'s semantics, per view.
 
-The incumbent augments two `(bins, 1)` tensors. The view set has eleven views of
+The champion augments two `(bins, 1)` tensors. The view set has eleven views of
 `(bins, channels)` plus a `(20, 31, 3)` unfolded stack, so an exact reuse is not
 possible. What is preserved is the operation set, their magnitudes and their
 order: coherent phase shift, independent Gaussian noise, coherent depth scale,
@@ -107,7 +107,7 @@ def _augment_view(view: tf.Tensor, kind: ViewKind, draw: _Draw, cfg: AugmentConf
         bins = tf.cast(tf.shape(view)[axis], tf.float32)
         # Truncation makes the shift a no-op below ~1/time_shift_frac bins: at
         # the default 0.005 it is +-10 bins on a 2001-bin view, +-1 on a 201-bin
-        # one, and exactly 0 on a 31-bin one. The incumbent's 2001/201 gets the
+        # one, and exactly 0 on a 31-bin one. The champion's 2001/201 gets the
         # augmentation it was tuned with; a coarser view set would silently lose
         # this op on its local views.
         shift = tf.cast(draw.shift_frac * bins, tf.int32)
@@ -126,7 +126,7 @@ def _augment_view(view: tf.Tensor, kind: ViewKind, draw: _Draw, cfg: AugmentConf
 
     if cfg.mask_prob > 0 and kind in _MASKABLE:
         # Masking drops a bin's measurement to the out-of-transit baseline,
-        # exactly as the incumbent does. `present` is untouched: the bin was
+        # exactly as the champion does. `present` is untouched: the bin was
         # measured, and claiming otherwise is the flip this module exists to
         # prevent. Gated on `_MASKABLE` because zero is only neutral on the flux
         # family — on a gap fraction or a periodogram it is a positive claim.
@@ -141,7 +141,7 @@ def augment_viewset(views: dict[str, tf.Tensor], cfg: AugmentConfig) -> dict[str
 
     The phase shift and the depth scale are drawn once and shared across views,
     because they are the same star at the same moment — the coherence the
-    incumbent's `augment_views` gets from applying one draw to both of its views.
+    champion's `augment_views` gets from applying one draw to both of its views.
     """
     draw = _Draw(
         shift_frac=tf.random.uniform([], -cfg.time_shift_frac, cfg.time_shift_frac),

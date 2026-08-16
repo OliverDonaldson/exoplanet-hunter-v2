@@ -423,7 +423,7 @@ def test_the_stratified_arm_shrinks_the_index_and_says_by_how_much():
 def test_the_arm_is_recorded_so_two_runs_are_distinguishable():
     """Without this in run_config, a control and an intervention run differ only
     in numbers nobody can attribute — the defect that made run 1's comparison
-    against the incumbent unreadable."""
+    against the champion unreadable."""
     _, _, report = train_branches._apply_baseline_intervention(
         _biased_index(), CVConfig(baseline_intervention="propensity", baseline_strata=8)
     )

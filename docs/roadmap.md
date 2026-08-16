@@ -107,7 +107,7 @@ for the stage 8 result and W13's for the frontend work having landed.
 |---|---|---|---|
 | **W1** | **Ranking is driven by observation baseline, and the signal is in the labels** | corr(baseline, label) **+0.278 all, +0.387 TESS**. TESS confirmed planets median 1,495 d vs 430 d for FPs | **stage 8 — done 2026-08-14, half delivered** |
 | **W2** | **The model scores the star, not the transit** | **26.4%** of hosts pass with no injection — 46.7% planet hosts vs 12.3% FP hosts | **stage 7i** measured, **stage 8 did not move it**, **stage 9** attacks |
-| **W3** | **No branch model has ever beaten the incumbent where it is used** — *as a replacement. As a complement it now does* | five arms rejected, all on shortlist recall: 0.238 / 0.126 / 0.145 / 0.236 / 0.220 against **0.307**. But the **ensemble** reaches **0.4362**, 3.9x its floor (3.11c) | **stage 10.5 answered it 2026-08-15**; stage 10, then a written decision |
+| **W3** | **No branch model has ever beaten the champion where it is used** — *as a replacement. As a complement it now does* | five arms rejected, all on shortlist recall: 0.238 / 0.126 / 0.145 / 0.236 / 0.220 against **0.307**. But the **ensemble** reaches **0.4362**, 3.9x its floor (3.11c) | **stage 10.5 answered it 2026-08-15**; stage 10, then a written decision |
 
 W1 is the worst thing in the project. For the deployment use it is actively
 counterproductive: it promotes targets that already received follow-up over
@@ -432,7 +432,7 @@ Not by build effort, and not by roadmap position.
 
 | rank | stage | answers | impact if done | cost / confidence |
 |---:|---|---|---|---|
-| **1** | **8** labels and negatives | defect 5 | **The largest measured defect, and the only stage that can reach it.** Baseline correlates +0.278 with the label itself and +0.387 on TESS — *above every model*, so no architecture can touch it. For the deployment use it is actively counterproductive: it promotes targets that already received attention over under-observed ones that may deserve it. It improves **any** model, including the served incumbent | 25–35 h, **low** — external catalogue ingestion, whose only precedent was 5× out |
+| **1** | **8** labels and negatives | defect 5 | **The largest measured defect, and the only stage that can reach it.** Baseline correlates +0.278 with the label itself and +0.387 on TESS — *above every model*, so no architecture can touch it. For the deployment use it is actively counterproductive: it promotes targets that already received attention over under-observed ones that may deserve it. It improves **any** model, including the served champion | 25–35 h, **low** — external catalogue ingestion, whose only precedent was 5× out |
 | **2** | **11** serving parity + explainability | delivery | **The only stage whose absence blocks shipping anything.** No branch model can be served at all until `TargetScorer` computes every branch live; `/score` returning per-branch contributions is what makes a shortlist justifiable per target rather than asserted; and stage 12 has nothing to display without it. Also carries `score_std`, provenance headers and precision@k | 10–15 h, medium. **No training compute** |
 | **3** | **9** difference-image branch | defect 2 | The direct test of *"is this even the star we think it is"* — a centroid shift under the transit is how a background eclipsing binary is caught, and that is the host-scoring pathology at its source rather than at its symptom. The last genuine build in the model | 10–14 h, medium. Blocked on re-gridding 11–17 px stamps |
 | **4** | **10** Optuna re-tune | defect 4 | Extracts what is left once architecture and distribution stop moving. Real but bounded — and it is the one stage that is almost entirely unattended, so it costs little attention | 12–15 h, medium-high, ~10–13 h of it unattended |
@@ -3010,7 +3010,7 @@ test each time?** The gate code is the same every run. The comparison is not.
 **Three defects, all verified in code rather than inferred.**
 
 1. **The evaluation population changes every refresh.** The candidate is scored
-   on the new catalogue; the incumbent's stored summary was computed on the old
+   on the new catalogue; the champion's stored summary was computed on the old
    one, so a ΔAUC blends the model effect with the population effect. The gate
    does detect this — `_population_mismatch` and `_gate_population_drift` raise —
    and 3.7 found it refusing to promote rather than compare mismatched rows.
@@ -3025,7 +3025,7 @@ test each time?** The gate code is the same every run. The comparison is not.
    measures no reseeding spread. `decision_floor` returns `recall=None` and the
    gate falls back to `LEGACY_RECALL_TOLERANCE = 0.02` — the constant 3.7
    measured at **0.68σ**, under which a candidate whose true recall *equals* the
-   incumbent's is rejected by noise about **31%** of the time, on the single
+   champion's is rejected by noise about **31%** of the time, on the single
    criterion that has rejected every branch arm.
 
 **What.** Raise `n_models_per_fold` on the refresh path so a candidate measures
@@ -3709,7 +3709,7 @@ finished states, not a failure. Stage 10.5 is the one live route to a different
 ending, and it is a **complement** ending rather than a replacement one. What
 the project delivers either way is a calibrated, explainable, reproducible
 vetting service, the label-bias work that improves any model including the
-incumbent, and an evaluation apparatus that can tell a real improvement from
+champion, and an evaluation apparatus that can tell a real improvement from
 noise. Only "we never found out" would be a failure.
 
 ## 5. Standing audits
@@ -3907,6 +3907,29 @@ narrating them with an LLM would add a layer that can be wrong about our own
 model, which is the opposite of the goal.
 
 ## 7. Change log
+
+### 7.0 Incumbent became Champion — 2026-08-17
+
+Ollie's wording: *"the best model will be known as the Champion model and weekly
+refresh challenges the champion."* Code, tests and forward-facing docs now say
+champion. **This document mostly does not, and that is the convention rather
+than an omission.**
+
+| surface | what happened |
+|---|---|
+| code, tests, `docs/index.md`, `model_pipeline.md`, `data_provenance.md`, `scripts/README.md` | renamed |
+| `load_incumbent_summary` | still exported, an alias for `load_champion_summary` — the same object, so the two cannot diverge |
+| `--incumbent-summary` | still accepted alongside `--champion-summary`, so commands recorded here keep running |
+| `models/cv/incumbent-rebaselined/` | **unchanged on disk.** Renaming a directory is a data-layout change: it moves a DVC-tracked artefact and breaks every recorded command naming it. The vocabulary moved; the path did not |
+| this document, sections 1–3 | **unchanged.** It is a record of what was measured and when, and rewriting the words a decision was taken in is not a rename |
+| every pre-registration block | **unchanged, and never rewritten.** New vocabulary appears inside one only in square brackets, the convention the stage renumber used |
+| `docs/handover-*.md` | unchanged; they are dated records of what a session believed |
+
+Five forward-facing lines were renamed: the `W3` weakness, stage 8's ranking in
+2g, 4.1a's statement of the defect, and 4.8's closing paragraph. Everything else
+saying "incumbent" here is either a recorded result or a pre-registration, and
+`incumbent` and `champion` refer to the same thing throughout: **whatever
+`models/registry.json` currently serves.**
 
 ### 7.1 The 2026-08-14 record restructure
 

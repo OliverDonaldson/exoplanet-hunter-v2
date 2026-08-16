@@ -24,7 +24,7 @@ from exoplanet_hunter.validation import (
     drop_quarantined,
     evaluate_promotion,
     label_catalogue_schema,
-    load_incumbent_summary,
+    load_champion_summary,
     load_quarantine,
     paired_folds,
     promote,
@@ -493,7 +493,7 @@ def summary(auc: float, brier: float, ece: float | None = None) -> dict:
     return result
 
 
-def pooled(candidate: dict, incumbent: dict):
+def pooled(candidate: dict, champion: dict):
     """A deliberately pooled comparison.
 
     Summaries built by `summary()` carry no per_mission block, so the gate now
@@ -501,7 +501,7 @@ def pooled(candidate: dict, incumbent: dict):
     tests exercise the calibration, reliability and shortlist guards that sit
     behind that check, so they opt in explicitly.
     """
-    return evaluate_promotion(candidate, incumbent, allow_unmatched_populations=True)
+    return evaluate_promotion(candidate, champion, allow_unmatched_populations=True)
 
 
 def test_first_model_promotes():
@@ -568,8 +568,8 @@ def test_a_tess_regression_rejects_however_good_the_aggregate_is():
     candidate = summary(0.99, 0.01, ece=0.01) | slices(
         TESS={"roc_auc": 0.90}, Kepler={"roc_auc": 0.999}
     )
-    incumbent = summary(0.80, 0.20, ece=0.20) | slices(TESS={"roc_auc": 0.91})
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = summary(0.80, 0.20, ece=0.20) | slices(TESS={"roc_auc": 0.91})
+    decision = evaluate_promotion(candidate, champion)
     assert not decision.promoted
     assert any("does not beat" in r for r in decision.reasons)
 
@@ -579,18 +579,18 @@ def test_a_per_mission_block_without_tess_refuses_rather_than_pooling():
     summary predating the block, and returning None for both is how the pooled
     fallback gets entered while reporting the summary is merely old."""
     candidate = summary(0.99, 0.01) | slices(Kepler={"roc_auc": 0.99})
-    incumbent = summary(0.80, 0.20) | slices(Kepler={"roc_auc": 0.80})
+    champion = summary(0.80, 0.20) | slices(Kepler={"roc_auc": 0.80})
     with pytest.raises(ValueError, match="no TESS"):
-        evaluate_promotion(candidate, incumbent)
+        evaluate_promotion(candidate, champion)
 
 
 def test_a_gate_slice_measured_over_different_row_counts_alarms():
     """Equal counts do not prove equal rows, but unequal counts disprove it.
-    Measured 2026-08-08: the re-baselined incumbent gates on 2,367 TESS rows
+    Measured 2026-08-08: the re-baselined champion gates on 2,367 TESS rows
     against run 2's 2,399."""
     candidate = gated(0.92, 0.10) | slices(TESS={"roc_auc": 0.92, "brier": 0.10, "n": 2399})
-    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91, "n": 2367})
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91, "n": 2367})
+    decision = evaluate_promotion(candidate, champion)
     assert decision.promoted
     assert any("not row-for-row" in a for a in decision.alarms)
 
@@ -623,8 +623,8 @@ def test_the_aggregate_is_reported_and_never_gates():
     candidate = gated(0.92, 0.10) | slices(
         TESS={"roc_auc": 0.92, "brier": 0.10}, all={"roc_auc": 0.80}
     )
-    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, all={"roc_auc": 0.95})
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, all={"roc_auc": 0.95})
+    decision = evaluate_promotion(candidate, champion)
     assert decision.promoted
     assert any("never gates" in r for r in decision.reasons)
 
@@ -633,8 +633,8 @@ def test_a_kepler_collapse_alarms_without_blocking():
     candidate = gated(0.92, 0.10) | slices(
         TESS={"roc_auc": 0.92, "brier": 0.10}, Kepler={"roc_auc": 0.90}
     )
-    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, Kepler={"roc_auc": 0.99})
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, Kepler={"roc_auc": 0.99})
+    decision = evaluate_promotion(candidate, champion)
     assert decision.promoted
     assert decision.alarms and "Kepler" in decision.alarms[0]
     assert "written explanation" in decision.alarms[0]
@@ -644,8 +644,8 @@ def test_a_k2_drop_inside_the_alarm_threshold_is_quiet():
     candidate = gated(0.92, 0.10) | slices(
         TESS={"roc_auc": 0.92, "brier": 0.10}, K2={"roc_auc": 0.90}
     )
-    incumbent = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, K2={"roc_auc": 0.915})
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = gated(0.91, 0.10) | slices(TESS={"roc_auc": 0.91}, K2={"roc_auc": 0.915})
+    decision = evaluate_promotion(candidate, champion)
     assert decision.promoted and not decision.alarms
 
 
@@ -656,8 +656,8 @@ def test_recall_at_1pct_fpr_can_reject_a_model_that_wins_on_auc():
     """The stage 4 case: TESS AUC within noise, recall @1% FPR 0.307 -> 0.238.
     AUC scores ranking everywhere; the shortlist lives at one threshold."""
     candidate = gated(0.9100, 0.1194, recall_at_1pct_fpr=0.238)
-    incumbent = gated(0.9079, 0.1211, recall_at_1pct_fpr=0.307)
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = gated(0.9079, 0.1211, recall_at_1pct_fpr=0.307)
+    decision = evaluate_promotion(candidate, champion)
     assert not decision.promoted
     assert any("shortlist recall" in r for r in decision.reasons)
 
@@ -672,17 +672,17 @@ def test_recall_within_tolerance_still_promotes():
 def test_a_nan_metric_rejects_instead_of_sailing_through_every_guard():
     """Every guard is an inequality and NaN loses all of them, so a degenerate
     run — a single-class fold, an empty slice, a blown-up loss — would promote
-    itself with `ROC-AUC nan vs incumbent 0.9581`."""
+    itself with `ROC-AUC nan vs champion 0.9581`."""
     decision = evaluate_promotion(summary(float("nan"), 0.0, ece=0.0), summary(0.9581, 0.079))
     assert not decision.promoted
     assert any("not measurable" in r for r in decision.reasons)
 
 
-def test_a_nan_on_the_incumbent_side_also_rejects():
+def test_a_nan_on_the_champion_side_also_rejects():
     """A corrupt registry entry must not be something a candidate slips past."""
     decision = evaluate_promotion(summary(0.95, 0.08), summary(float("nan"), 0.079))
     assert not decision.promoted
-    assert any("incumbent" in r for r in decision.reasons)
+    assert any("champion" in r for r in decision.reasons)
 
 
 @pytest.mark.parametrize("metric", ["roc_auc", "brier", "ece", "recall_at_1pct_fpr"])
@@ -696,7 +696,7 @@ def test_a_nan_in_any_gating_metric_rejects(metric):
 
 
 def test_a_pooled_comparison_over_unmatched_rows_refuses_rather_than_guessing():
-    """The live incumbent `ca906040` carries no per_mission block, so the TESS
+    """The live champion `ca906040` carries no per_mission block, so the TESS
     gate silently degraded to a pooled comparison — its 4,818 rows with zero K2
     against a current run's 5,426 including 527. That reads as a model
     difference and is partly a population difference."""
@@ -704,7 +704,7 @@ def test_a_pooled_comparison_over_unmatched_rows_refuses_rather_than_guessing():
     assert not decision.promoted
     assert any("predates the per_mission block" in r for r in decision.reasons)
     assert any("rows behind each mean are unknown" in r for r in decision.reasons)
-    assert any("re-baseline the incumbent" in r for r in decision.reasons)
+    assert any("re-baseline the champion" in r for r in decision.reasons)
 
 
 def test_the_unmatched_population_refusal_can_be_overridden_deliberately():
@@ -739,16 +739,16 @@ def test_a_candidate_that_wins_on_average_but_loses_most_folds_is_alarmed():
     """Winning the mean while losing fold by fold is what winning on training
     noise looks like — one lucky fold carries it."""
     candidate = gated(0.92, 0.10) | folds(0.99, 0.88, 0.88, 0.88, 0.88)
-    incumbent = gated(0.91, 0.10) | folds(0.90, 0.90, 0.90, 0.90, 0.90)
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = gated(0.91, 0.10) | folds(0.90, 0.90, 0.90, 0.90, 0.90)
+    decision = evaluate_promotion(candidate, champion)
     assert decision.promoted
     assert any("won only 1/5 folds" in a for a in decision.alarms)
 
 
 def test_a_consistent_fold_by_fold_win_is_reported_without_alarm():
     candidate = gated(0.92, 0.10) | folds(0.94, 0.96, 0.93, 0.97, 0.95)
-    incumbent = gated(0.91, 0.10) | folds(0.90, 0.91, 0.89, 0.92, 0.90)
-    decision = evaluate_promotion(candidate, incumbent)
+    champion = gated(0.91, 0.10) | folds(0.90, 0.91, 0.89, 0.92, 0.90)
+    decision = evaluate_promotion(candidate, champion)
     assert decision.promoted
     assert any("won 5/5" in r for r in decision.reasons)
     assert not decision.alarms
@@ -795,11 +795,11 @@ def test_registry_roundtrip(tmp_path):
     summary_path = cv_dir / "cv_summary.json"
     summary_path.write_text(json.dumps(summary(0.92, 0.10)))
 
-    assert load_incumbent_summary(tmp_path) is None
+    assert load_champion_summary(tmp_path) is None
     promote(tmp_path, "run123", summary_path)
-    incumbent = load_incumbent_summary(tmp_path)
-    assert incumbent is not None
-    assert incumbent["summary"]["test_roc_auc"]["mean"] == 0.92
+    champion = load_champion_summary(tmp_path)
+    assert champion is not None
+    assert champion["summary"]["test_roc_auc"]["mean"] == 0.92
 
 
 @pytest.mark.parametrize("missing", ["weights", "calibrator", "folds"])
@@ -815,7 +815,7 @@ def test_a_run_with_nothing_to_serve_cannot_be_promoted(tmp_path, missing):
 
     with pytest.raises(ValueError, match="serve"):
         promote(tmp_path, "run123", summary_path)
-    assert load_incumbent_summary(tmp_path) is None
+    assert load_champion_summary(tmp_path) is None
 
 
 # ------------------------------------------------------------------ publish --
@@ -859,7 +859,7 @@ def test_publishable_cv_dirs_empty_without_cv_root(tmp_path):
     assert publishable_cv_dirs(tmp_path) == []
 
 
-def test_incumbent_summary_resolves_registry_path_from_any_cwd(tmp_path, monkeypatch):
+def test_champion_summary_resolves_registry_path_from_any_cwd(tmp_path, monkeypatch):
     """Registry paths are repo-root-relative; the gate must not resolve them
     against the caller's cwd (`promotion_gate.py --models-dir` from elsewhere
     read the wrong file or crashed)."""
@@ -876,9 +876,9 @@ def test_incumbent_summary_resolves_registry_path_from_any_cwd(tmp_path, monkeyp
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
 
-    incumbent = load_incumbent_summary(models_dir)
-    assert incumbent is not None
-    assert incumbent["summary"]["test_roc_auc"]["mean"] == 0.93
+    champion = load_champion_summary(models_dir)
+    assert champion is not None
+    assert champion["summary"]["test_roc_auc"]["mean"] == 0.93
 
 
 def test_two_identical_runs_have_zero_effect_not_an_undefined_one():
@@ -925,12 +925,12 @@ def measured(seed_sd: float = 0.0060, recall_sd: float = 0.0292, n_models: int =
 
 
 def test_the_floor_is_two_se_of_the_difference():
-    """The tolerance is `2 x se(candidate - incumbent)`, not the se of either
+    """The tolerance is `2 x se(candidate - champion)`, not the se of either
     mean on its own. The quantity under test is a difference of two run means,
     and comparing a candidate against a reference treated as noiseless is not
     what the gate is doing.
 
-    No incumbent is passed here, so the incumbent's term is the named pooled
+    No champion is passed here, so the champion's term is the named pooled
     prior — asserted through the constant rather than its value, so the two
     cannot drift apart.
     """
@@ -956,10 +956,10 @@ def test_a_recall_drop_inside_the_measured_floor_no_longer_rejects():
     claim being pinned here.
     """
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
-    incumbent = gated(0.91, 0.10)  # recall 0.30 from the slice defaults
+    champion = gated(0.91, 0.10)  # recall 0.30 from the slice defaults
     from exoplanet_hunter.validation.promotion import Verdict
 
-    assert evaluate_promotion(candidate, incumbent).verdict is not Verdict.REJECT
+    assert evaluate_promotion(candidate, champion).verdict is not Verdict.REJECT
 
 
 def test_that_same_drop_still_rejects_under_an_explicit_tolerance():
@@ -1003,10 +1003,10 @@ def test_a_legacy_summary_says_its_tolerance_is_a_constant_not_a_measurement():
 
 
 def test_an_auc_tie_inside_the_floor_is_recorded_as_level_not_as_a_defeat():
-    """The incumbent still keeps serving — a tie is not a reason to churn a
+    """The champion still keeps serving — a tie is not a reason to churn a
     deployed model. What the wording protects is the record: every other
     criterion grants the candidate a tolerance band, so without this the
-    incumbent wins every tie it is handed and a level result reads ever after
+    champion wins every tie it is handed and a level result reads ever after
     as a defeat.
     """
     candidate = measured() | slices(TESS={"roc_auc": 0.9098})
@@ -1023,7 +1023,7 @@ def test_an_auc_loss_beyond_the_floor_is_still_a_defeat():
     assert any("does not beat" in r for r in decision.reasons)
 
 
-def test_an_explicit_incumbent_summary_bypasses_the_registry(tmp_path):
+def test_an_explicit_champion_summary_bypasses_the_registry(tmp_path):
     """The other half of stage 3. `ca906040`'s registry summary carries no
     per_mission block, so the gate refuses every candidate before comparing a
     metric; this is how it is pointed at the re-baseline instead. The registry
@@ -1031,7 +1031,7 @@ def test_an_explicit_incumbent_summary_bypasses_the_registry(tmp_path):
     """
     rebaseline = tmp_path / "cv_summary.json"
     rebaseline.write_text(json.dumps(gated(0.91, 0.10)))
-    loaded = load_incumbent_summary(tmp_path / "no-registry-here", rebaseline)
+    loaded = load_champion_summary(tmp_path / "no-registry-here", rebaseline)
     assert loaded is not None
     assert loaded["per_mission"]["TESS"]["roc_auc"] == 0.91
 
@@ -1078,9 +1078,9 @@ def test_a_margin_inside_the_band_reads_unresolved_not_promote():
     to read is no larger than the noise it was measured against."""
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
 
-    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    champion = _summary(0.910, 0.121, 0.044, 0.307)
     candidate = _summary(0.917, 0.113, 0.033, 0.257)
-    decision = evaluate_promotion(candidate, incumbent)
+    decision = evaluate_promotion(candidate, champion)
     assert decision.verdict is Verdict.UNRESOLVED
     assert decision.promoted is False
     assert any("too close to call" in r for r in decision.reasons)
@@ -1089,9 +1089,9 @@ def test_a_margin_inside_the_band_reads_unresolved_not_promote():
 def test_a_margin_well_clear_of_the_band_still_promotes():
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
 
-    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    champion = _summary(0.910, 0.121, 0.044, 0.307)
     candidate = _summary(0.917, 0.113, 0.033, 0.307, recall_sd=0.001, seed_sd=0.0005)
-    decision = evaluate_promotion(candidate, incumbent)
+    decision = evaluate_promotion(candidate, champion)
     assert decision.verdict is Verdict.PROMOTE
     assert decision.promoted is True
 
@@ -1101,9 +1101,9 @@ def test_reject_dominates_unresolved():
     rejection even if another is unresolvable."""
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
 
-    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    champion = _summary(0.910, 0.121, 0.044, 0.307)
     candidate = _summary(0.917, 0.113, 0.033, 0.100, recall_sd=0.01)
-    decision = evaluate_promotion(candidate, incumbent)
+    decision = evaluate_promotion(candidate, champion)
     assert decision.verdict is Verdict.REJECT
     assert decision.promoted is False
 
@@ -1127,21 +1127,21 @@ def test_the_band_is_symmetric_about_the_floor():
 # ---------------------------------------------------------------------------
 
 
-def test_the_floor_grows_when_the_incumbent_has_its_own_noise():
+def test_the_floor_grows_when_the_champion_has_its_own_noise():
     from exoplanet_hunter.validation.promotion import decision_floor
 
     candidate = _summary(0.92, 0.11, 0.03, 0.30, recall_sd=0.03)
     # The se of the candidate's MEAN — the old rule, 2 x sd / sqrt(n).
     candidate_only = 2 * 0.03 / 3**0.5
-    with_incumbent = decision_floor(
+    with_champion = decision_floor(
         candidate, _summary(0.91, 0.12, 0.04, 0.30, recall_sd=0.03)
     ).recall
-    assert with_incumbent > candidate_only
+    assert with_champion > candidate_only
     # Two equal variances under a square root: exactly sqrt(2) wider.
-    assert with_incumbent == pytest.approx(candidate_only * 2**0.5, rel=1e-9)
+    assert with_champion == pytest.approx(candidate_only * 2**0.5, rel=1e-9)
 
 
-def test_an_incumbent_without_a_variance_block_borrows_a_named_prior():
+def test_an_champion_without_a_variance_block_borrows_a_named_prior():
     """A prior standing in for a measurement has to say so — substituting one
     silently is this project's recurring defect class."""
     from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD, decision_floor
@@ -1156,9 +1156,9 @@ def test_a_noisier_candidate_no_longer_quietly_earns_a_wider_pass():
     but the band lands it in UNRESOLVED rather than PROMOTE."""
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
 
-    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    champion = _summary(0.910, 0.121, 0.044, 0.307)
     noisy = _summary(0.917, 0.113, 0.033, 0.270, recall_sd=0.05)
-    assert evaluate_promotion(noisy, incumbent).verdict is Verdict.UNRESOLVED
+    assert evaluate_promotion(noisy, champion).verdict is Verdict.UNRESOLVED
 
 
 # ---------------------------------------------------------------------------
@@ -1249,20 +1249,20 @@ def test_the_gate_script_writes_the_verdict_it_exits_with(tmp_path):
 
 
 def _alarming_candidate():
-    """Beats the incumbent everywhere, and drops a diagnostic mission far enough
+    """Beats the champion everywhere, and drops a diagnostic mission far enough
     to alarm. Without an alarm there is nothing for strict mode to act on."""
     candidate = _summary(0.930, 0.100, 0.030, 0.320, recall_sd=0.001, seed_sd=0.0005)
     candidate["per_mission"]["Kepler"] = {"roc_auc": 0.80, "n": 500}
-    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
-    incumbent["per_mission"]["Kepler"] = {"roc_auc": 0.95, "n": 500}
-    return candidate, incumbent
+    champion = _summary(0.910, 0.121, 0.044, 0.307)
+    champion["per_mission"]["Kepler"] = {"roc_auc": 0.95, "n": 500}
+    return candidate, champion
 
 
 def test_an_alarm_is_advisory_by_default():
     from exoplanet_hunter.validation import Verdict, evaluate_promotion
 
-    candidate, incumbent = _alarming_candidate()
-    decision = evaluate_promotion(candidate, incumbent)
+    candidate, champion = _alarming_candidate()
+    decision = evaluate_promotion(candidate, champion)
     assert decision.alarms
     assert decision.verdict is Verdict.PROMOTE
 
@@ -1270,8 +1270,8 @@ def test_an_alarm_is_advisory_by_default():
 def test_the_same_alarm_blocks_under_strict():
     from exoplanet_hunter.validation import Verdict, evaluate_promotion
 
-    candidate, incumbent = _alarming_candidate()
-    decision = evaluate_promotion(candidate, incumbent, strict=True)
+    candidate, champion = _alarming_candidate()
+    decision = evaluate_promotion(candidate, champion, strict=True)
     assert decision.verdict is Verdict.UNRESOLVED
     assert decision.promoted is False
     assert any("held under strict alarms" in r for r in decision.reasons)
@@ -1282,8 +1282,8 @@ def test_a_blocked_run_is_not_reported_as_a_quality_rejection():
     UNRESOLVED is the verdict that says so."""
     from exoplanet_hunter.validation import Verdict, evaluate_promotion
 
-    candidate, incumbent = _alarming_candidate()
-    decision = evaluate_promotion(candidate, incumbent, strict=True)
+    candidate, champion = _alarming_candidate()
+    decision = evaluate_promotion(candidate, champion, strict=True)
     assert decision.verdict is not Verdict.REJECT
     assert any("not a quality rejection" in r for r in decision.reasons)
 
@@ -1293,9 +1293,9 @@ def test_strict_does_not_rescue_a_rejection():
     candidate that lost on a criterion."""
     from exoplanet_hunter.validation import Verdict, evaluate_promotion
 
-    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    champion = _summary(0.910, 0.121, 0.044, 0.307)
     loser = _summary(0.850, 0.113, 0.033, 0.100, recall_sd=0.01)
-    assert evaluate_promotion(loser, incumbent, strict=True).verdict is Verdict.REJECT
+    assert evaluate_promotion(loser, champion, strict=True).verdict is Verdict.REJECT
 
 
 def test_the_k2_alarm_carries_a_standing_decision_and_does_not_block():
@@ -1323,3 +1323,48 @@ def test_an_unrelated_alarm_is_not_acknowledged_by_accident():
 
     alarms = ["Kepler AUC fell -0.0300", "trained from a dirty working tree at abc123"]
     assert unacknowledged_alarms(alarms) == alarms
+
+
+# ---------------------------------------------------------------------------
+# The rename kept its old spellings working. `load_incumbent_summary` is a
+# public function and `--incumbent-summary` is quoted in commands recorded in
+# the roadmap, so both survive the vocabulary change.
+# ---------------------------------------------------------------------------
+
+
+def test_the_former_function_name_is_the_same_object():
+    """An alias, not a shim. Two functions could drift apart; one cannot."""
+    from exoplanet_hunter.validation import load_champion_summary, load_incumbent_summary
+
+    assert load_incumbent_summary is load_champion_summary
+
+
+def test_the_former_flag_still_selects_the_champion_summary(tmp_path):
+    """A command recorded before the rename has to keep running, so both
+    spellings land on the same argparse destination."""
+    fixtures = tmp_path / "fx"
+    repo_root = Path(__file__).resolve().parents[2]
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / ".github" / "scripts" / "make_gate_fixtures.py"),
+            str(fixtures),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    champion = fixtures / "models" / "cv" / "champion" / "cv_summary.json"
+    for flag in ("--champion-summary", "--incumbent-summary"):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(repo_root / "pipeline" / "scripts" / "promotion_gate.py"),
+                str(fixtures / "candidate_better.json"),
+                "--models-dir",
+                str(fixtures / "models"),
+                flag,
+                str(champion),
+            ],
+            capture_output=True,
+        )
+        assert result.returncode == 0, f"{flag} failed: {result.stderr.decode()[-400:]}"

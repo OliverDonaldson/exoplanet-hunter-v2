@@ -1,6 +1,6 @@
 """Scoring a promoted run against a shard set, under a stated protocol.
 
-The incumbent's own training inputs no longer exist. The legacy shards were
+The champion's own training inputs no longer exist. The legacy shards were
 rebuilt on 2026-07-25, six days after run `ca906040` trained on 2026-07-19, and
 its 9-dim aux is not a slice of the 13-dim shard aux: index 7 is `pink_snr`
 there and the catalogue transit SNR in the model. Taking 13 -> 9 by slicing
@@ -46,7 +46,7 @@ from exoplanet_hunter.validation.promotion import AGGREGATE_SLICE, GATE_MISSION
 log = get_logger(__name__)
 
 #: The one aux lane whose meaning differs between the 13-dim shards and the
-#: 9-dim layout the incumbent learned.
+#: 9-dim layout the champion learned.
 CATALOGUE_SNR_COLUMN = 7
 
 
@@ -69,7 +69,7 @@ class Scored:
 
 
 def legacy_aux(index: pd.DataFrame, labels: pd.DataFrame, aux_dim: int) -> np.ndarray:
-    """The incumbent's 9-dim aux, rebuilt from the wider shard index.
+    """The champion's 9-dim aux, rebuilt from the wider shard index.
 
     Indices 0-6 and 8 mean the same thing in both layouts and are taken as they
     are. Index 7 comes from the catalogue; where the catalogue has no SNR it
@@ -243,16 +243,16 @@ def summarise_scored(
     `evaluate_promotion` gates on `per_mission[GATE_MISSION]`. A summary without
     that block makes it fall through to comparing pooled means over populations
     that may differ, which is how every stage 4 decision before 2026-08-07 was
-    silently taken. The live incumbent `ca906040` has no such block, and the
+    silently taken. The live champion `ca906040` has no such block, and the
     re-baseline exists only as predictions — so this is what lets the gate
     engage at all.
 
     **Slices are out-of-fold only, and that is the point.** A re-baselined
-    incumbent carries both protocols in one frame: measured 2026-08-08, the live
+    champion carries both protocols in one frame: measured 2026-08-08, the live
     set holds 2,238 out-of-fold Kepler rows plus 243 zero-shot ones that are
     **all negatives**. Pooling them moves the Kepler figure for reasons that have
     nothing to do with the model. It happens to be worth only +0.0001 there
-    (0.9915 pooled against 0.9914 out-of-fold, because the incumbent already
+    (0.9915 pooled against 0.9914 out-of-fold, because the champion already
     ranks those negatives low) — which makes it more dangerous rather than less,
     since a plausible right answer is one nobody re-checks. Zero-shot rows are
     kept, labelled, under `zero_shot`, and never reach the gate.
@@ -266,7 +266,7 @@ def summarise_scored(
     # saying so. Refuse the frame instead of measuring part of it.
     #
     # A row reaches here when it was scored against a shard set the mission
-    # source does not cover. On 2026-08-08 that was five rows: the incumbent was
+    # source does not cover. On 2026-08-08 that was five rows: the champion was
     # re-scored on the legacy 9-dim shards (5,380 rows, no mission column) while
     # missions resolve from the current view set (5,426), and five confirmed
     # planets present in the former dropped out of the stage 2 rebuild. They are

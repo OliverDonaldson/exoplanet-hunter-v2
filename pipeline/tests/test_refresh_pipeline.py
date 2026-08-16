@@ -190,7 +190,7 @@ def test_every_verdict_the_library_defines_has_a_headline():
 
 # --------------------------------------------------------------------------
 # The champion follows the registry. This is the property that keeps the weekly
-# comparison moving: --incumbent-summary is a FALLBACK for a served model whose
+# comparison moving: --champion-summary is a FALLBACK for a served model whose
 # summary cannot be sliced, not a fixed reference. Passed unconditionally it
 # would freeze the comparison — promote a new model and the next candidate would
 # still be gated against the old baseline for ever.
@@ -203,7 +203,7 @@ def test_a_sliceable_champion_is_gated_against_directly(gate, tmp_path):
     champion(tmp_path, "served", sliceable=True)
     rebaselined(tmp_path)
     _, recorded = gate("REJECT")
-    assert "--incumbent-summary" not in recorded["cmd"]
+    assert "--champion-summary" not in recorded["cmd"]
 
 
 def test_a_champion_that_cannot_be_sliced_falls_back(gate, tmp_path):
@@ -213,15 +213,15 @@ def test_a_champion_that_cannot_be_sliced_falls_back(gate, tmp_path):
     champion(tmp_path, "served", sliceable=False)
     rebaselined(tmp_path)
     _, recorded = gate("REJECT")
-    assert "--incumbent-summary" in recorded["cmd"]
-    fallback = recorded["cmd"][recorded["cmd"].index("--incumbent-summary") + 1]
+    assert "--champion-summary" in recorded["cmd"]
+    fallback = recorded["cmd"][recorded["cmd"].index("--champion-summary") + 1]
     assert fallback.endswith("incumbent-rebaselined/cv_summary.json")
 
 
 def test_no_registry_at_all_still_falls_back(gate, tmp_path):
     rebaselined(tmp_path)
     _, recorded = gate("REJECT")
-    assert "--incumbent-summary" in recorded["cmd"]
+    assert "--champion-summary" in recorded["cmd"]
 
 
 def test_nothing_to_fall_back_to_does_not_silently_pin_a_reference(gate, tmp_path):
@@ -229,7 +229,7 @@ def test_nothing_to_fall_back_to_does_not_silently_pin_a_reference(gate, tmp_pat
     mismatch, which is correct — what must not happen is a reference being
     invented to get a decision out of it."""
     _, recorded = gate("REJECT")
-    assert "--incumbent-summary" not in recorded["cmd"]
+    assert "--champion-summary" not in recorded["cmd"]
 
 
 # --------------------------------------------------------------------------

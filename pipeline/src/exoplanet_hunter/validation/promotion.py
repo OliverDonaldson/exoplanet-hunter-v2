@@ -1,11 +1,11 @@
 """Model promotion gate: beat the baseline before you cheer — machine-enforced.
 
 A freshly trained CV run produces `cv_summary.json` (written by the trainer).
-This module decides whether that run replaces the incumbent in
+This module decides whether that run replaces the champion in
 `models/registry.json`:
 
   * primary: mean CV test ROC-AUC must be strictly higher than the
-    incumbent's;
+    champion's;
   * calibration guard: mean CV Brier must not degrade by more than
     `brier_tolerance` — a model that ranks better but calibrates worse is
     not an upgrade for a system whose whole point is trustworthy
@@ -18,9 +18,9 @@ This module decides whether that run replaces the incumbent in
     `recall_tolerance`. AUC scores ranking at every threshold; the follow-up
     shortlist this system exists to produce lives at exactly one. The stage 4
     branch model is the case that motivated it — TESS AUC within 0.002
-    of the incumbent while recall at 1% FPR fell 0.307 -> 0.238;
+    of the champion while recall at 1% FPR fell 0.307 -> 0.238;
   * the first-ever run promotes automatically (there is no bar yet — the RF
-    baseline becomes the incumbent as soon as it's registered).
+    baseline becomes the champion as soon as it's registered).
 
 **Which population decides.** When both summaries carry a `per_mission` block
 the gate reads `GATE_MISSION`, not the aggregate. TESS is 100% of the
@@ -66,7 +66,7 @@ AGGREGATE_SLICE = "all"
 
 @dataclass(frozen=True)
 class PairedFolds:
-    """A candidate against an incumbent on the same folds, fold by fold.
+    """A candidate against a champion on the same folds, fold by fold.
 
     Comparing two run means asks whether one number exceeds another when each
     carries ~0.011 of training noise. Pairing on fold index removes fold
@@ -102,7 +102,7 @@ class PairedFolds:
 
 
 def paired_folds(
-    candidate: dict[str, Any], incumbent: dict[str, Any], metric: str = "test_roc_auc"
+    candidate: dict[str, Any], champion: dict[str, Any], metric: str = "test_roc_auc"
 ) -> PairedFolds | None:
     """Fold-by-fold deltas, or None when the two runs' folds are not comparable.
 
@@ -112,22 +112,24 @@ def paired_folds(
     """
     import numpy as np
 
-    cand_folds, inc_folds = candidate.get("folds") or [], incumbent.get("folds") or []
-    if not cand_folds or len(cand_folds) != len(inc_folds):
+    cand_folds, champ_folds = candidate.get("folds") or [], champion.get("folds") or []
+    if not cand_folds or len(cand_folds) != len(champ_folds):
         return None
-    cand_cfg, inc_cfg = candidate.get("run_config", {}), incumbent.get("run_config", {})
-    if cand_cfg and inc_cfg:
+    cand_cfg, champ_cfg = candidate.get("run_config", {}), champion.get("run_config", {})
+    if cand_cfg and champ_cfg:
         keys = ("seed", "n_splits")
-        if any(cand_cfg.get(k) != inc_cfg.get(k) for k in keys if k in cand_cfg or k in inc_cfg):
+        if any(
+            cand_cfg.get(k) != champ_cfg.get(k) for k in keys if k in cand_cfg or k in champ_cfg
+        ):
             return None
     # Fold sizes are the only per-fold membership evidence a summary carries.
     # Equal sizes do not prove the same rows, but unequal sizes disprove it —
     # run 1 and run 2 differ here because three FFI rows arrived between them.
-    sizes_match = [c.get("n_test") for c in cand_folds] == [i.get("n_test") for i in inc_folds]
-    exact = bool(cand_cfg and inc_cfg and sizes_match)
+    sizes_match = [c.get("n_test") for c in cand_folds] == [i.get("n_test") for i in champ_folds]
+    exact = bool(cand_cfg and champ_cfg and sizes_match)
 
     deltas = np.array(
-        [float(c[metric]) - float(i[metric]) for c, i in zip(cand_folds, inc_folds, strict=True)]
+        [float(c[metric]) - float(i[metric]) for c, i in zip(cand_folds, champ_folds, strict=True)]
     )
     if not np.isfinite(deltas).all():
         return None
@@ -165,11 +167,11 @@ class DecisionFloor:
     The gate did not read any of it. It compared AUC with a strict `>` and no
     band at all, and rejected on recall at a hardcoded 0.02 — **tighter than the
     0.034 floor the same project had measured**, so a candidate whose true recall
-    equalled the incumbent's was rejected by reseeding noise about a third of the
+    equalled the champion's was rejected by reseeding noise about a third of the
     time. Both numbers predate stage 6 and neither was revisited when it landed.
 
     A floor is not a licence to promote a worse model: the gate stays
-    conservative and a tie still leaves the incumbent served. What the floor
+    conservative and a tie still leaves the champion served. What the floor
     changes is what the decision is allowed to *claim* — a margin inside it is
     reported as level, not as having been beaten.
     """
@@ -191,9 +193,9 @@ LEGACY_RECALL_TOLERANCE = 0.02
 
 
 #: Pooled median `pooled_gate_recall_seed_sd` over the 11 runs on disk that
-#: measured one (0.0029-0.0632, a 22.1x spread). Used ONLY for the incumbent
-#: term, and only until an incumbent is re-baselined carrying its own variance
-#: block — no incumbent summary on disk has one. Pre-registered in roadmap 4.1b.
+#: measured one (0.0029-0.0632, a 22.1x spread). Used ONLY for the champion
+#: term, and only until a champion is re-baselined carrying its own variance
+#: block — no champion summary on disk has one. Pre-registered in roadmap 4.1b.
 POOLED_RECALL_SEED_SD = 0.0353
 #: The same, for AUC. Both are priors standing in for a measurement, and every
 #: decision text that leans on one has to say so.
@@ -207,7 +209,7 @@ def _variance(summary: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
 
 
 def decision_floor(
-    summary: dict[str, Any], incumbent: dict[str, Any] | None = None
+    summary: dict[str, Any], champion: dict[str, Any] | None = None
 ) -> DecisionFloor:
     """Resolvable margins, by stage 6's rule applied to what is being compared.
 
@@ -217,7 +219,7 @@ def decision_floor(
         se(delta) = sqrt( sd_cand^2 / n_cand + sd_inc^2 / n_inc )
 
     not `2 x sd_cand / sqrt(n_cand)`, which is the se of the candidate's mean
-    alone. Reading only the candidate ignored the incumbent's noise entirely —
+    alone. Reading only the candidate ignored the champion's noise entirely —
     stage 6's caveat 1 says plainly that it should not — and let a noisier
     candidate earn itself a wider band to clear. Across the 11 runs on disk that
     quantity spans 22.1x.
@@ -231,7 +233,7 @@ def decision_floor(
     if n_models is None:
         return DecisionFloor(None, None, "no variance block — run with --n-models-per-fold")
 
-    inc_variance, inc_n = _variance(incumbent or {})
+    champ_variance, champ_n = _variance(champion or {})
     borrowed: list[str] = []
 
     def floor(key: str, pooled: float) -> float | None:
@@ -239,11 +241,11 @@ def decision_floor(
         if not sd:
             return None
         term = float(sd) ** 2 / n_models
-        inc_sd = inc_variance.get(key)
-        if inc_sd and inc_n:
-            term += float(inc_sd) ** 2 / inc_n
+        champ_sd = champ_variance.get(key)
+        if champ_sd and champ_n:
+            term += float(champ_sd) ** 2 / champ_n
         else:
-            # The incumbent measured nothing, so a prior stands in for it. Named
+            # The champion measured nothing, so a prior stands in for it. Named
             # in the source string rather than folded in silently: substituting
             # an assumption for a measurement without saying so is this
             # project's own recurring defect class.
@@ -253,10 +255,10 @@ def decision_floor(
 
     auc = floor("seed_sd", POOLED_SEED_SD)
     recall = floor("pooled_gate_recall_seed_sd", POOLED_RECALL_SEED_SD)
-    source = f"2 x se(candidate - incumbent), n={n_models}"
+    source = f"2 x se(candidate - champion), n={n_models}"
     if borrowed:
         source += (
-            f"; incumbent variance unmeasured for {sorted(set(borrowed))} — "
+            f"; champion variance unmeasured for {sorted(set(borrowed))} — "
             f"pooled prior used (recall {POOLED_RECALL_SEED_SD}, auc {POOLED_SEED_SD})"
         )
     return DecisionFloor(auc=auc, recall=recall, source=source)
@@ -412,52 +414,52 @@ def _gate_slice(summary: dict[str, Any]) -> dict[str, float] | None:
     return gate
 
 
-def _population_mismatch(candidate: dict[str, Any], incumbent: dict[str, Any]) -> str | None:
+def _population_mismatch(candidate: dict[str, Any], champion: dict[str, Any]) -> str | None:
     """Why these two summaries may not be measured on comparable rows.
 
     A cv_summary records metrics over whatever population its run scored, and
-    nothing in the file says which rows those were. The incumbent `ca906040`
+    nothing in the file says which rows those were. The champion `ca906040`
     was scored on 4,818 rows with zero K2; a current run scores 5,426 including
-    527 K2 the incumbent's build predates. Comparing the two pooled means reads
+    527 K2 the champion's build predates. Comparing the two pooled means reads
     as a model difference and is partly a population difference.
     """
     cand_missions = set(candidate.get("per_mission", {})) - {AGGREGATE_SLICE}
-    inc_missions = set(incumbent.get("per_mission", {})) - {AGGREGATE_SLICE}
-    if not cand_missions or not inc_missions:
+    champ_missions = set(champion.get("per_mission", {})) - {AGGREGATE_SLICE}
+    if not cand_missions or not champ_missions:
         return "one summary carries no per_mission block, so the rows behind each mean are unknown"
-    only_candidate = sorted(cand_missions - inc_missions)
-    only_incumbent = sorted(inc_missions - cand_missions)
+    only_candidate = sorted(cand_missions - champ_missions)
+    only_champion = sorted(champ_missions - cand_missions)
     parts = [
         f"only the candidate scored {', '.join(only_candidate)}" if only_candidate else "",
-        f"only the incumbent scored {', '.join(only_incumbent)}" if only_incumbent else "",
+        f"only the champion scored {', '.join(only_champion)}" if only_champion else "",
     ]
     return "; ".join(p for p in parts if p) or None
 
 
 def _gate_population_drift(
-    cand_slice: dict[str, float] | None, inc_slice: dict[str, float] | None
+    cand_slice: dict[str, float] | None, champ_slice: dict[str, float] | None
 ) -> str | None:
     """Whether the two gate slices are measured over the same number of rows.
 
     `_population_mismatch` compares mission *sets*, so two summaries that both
     carry TESS agree with each other however much their TESS membership differs.
-    Measured 2026-08-08, the re-baselined incumbent gates on 2,367 TESS rows and
+    Measured 2026-08-08, the re-baselined champion gates on 2,367 TESS rows and
     run 2 on 2,399 — a 32-row gap that reads as a model difference. Row counts
     are the only membership evidence a summary carries, and equal counts do not
     prove equal rows; unequal counts disprove it. Alarmed rather than blocking,
     because the catalogue legitimately grows between runs.
     """
-    if cand_slice is None or inc_slice is None:
+    if cand_slice is None or champ_slice is None:
         return None
     # `.get`, not `[]`: this is an advisory alarm, and a summary predating the
     # row count should lose the alarm rather than the whole comparison.
-    cand_n, inc_n = cand_slice.get("n"), inc_slice.get("n")
-    if cand_n is None or inc_n is None or cand_n == inc_n:
+    cand_n, champ_n = cand_slice.get("n"), champ_slice.get("n")
+    if cand_n is None or champ_n is None or cand_n == champ_n:
         return None
-    cand_n, inc_n = int(cand_n), int(inc_n)
+    cand_n, champ_n = int(cand_n), int(champ_n)
     return (
-        f"the {GATE_MISSION} slice holds {cand_n} rows for the candidate and {inc_n} for the "
-        f"incumbent ({cand_n - inc_n:+d}) — the gating comparison is not row-for-row"
+        f"the {GATE_MISSION} slice holds {cand_n} rows for the candidate and {champ_n} for the "
+        f"champion ({cand_n - champ_n:+d}) — the gating comparison is not row-for-row"
     )
 
 
@@ -494,13 +496,13 @@ def _reproducibility_warning(candidate: dict[str, Any]) -> str | None:
 
 
 def _diagnostics(
-    candidate: dict[str, Any], incumbent: dict[str, Any], alarm: float
+    candidate: dict[str, Any], champion: dict[str, Any], alarm: float
 ) -> tuple[list[str], list[str]]:
     """Report every non-gating slice; alarm on any AUC drop beyond `alarm`."""
     reasons, alarms = [], []
     for mission in (*DIAGNOSTIC_MISSIONS, AGGREGATE_SLICE):
         cand = candidate.get("per_mission", {}).get(mission)
-        inc = incumbent.get("per_mission", {}).get(mission)
+        inc = champion.get("per_mission", {}).get(mission)
         if cand is None or inc is None:
             continue
         delta = cand["roc_auc"] - inc["roc_auc"]
@@ -518,7 +520,7 @@ def _diagnostics(
 
 def evaluate_promotion(
     candidate: dict[str, Any],
-    incumbent: dict[str, Any] | None,
+    champion: dict[str, Any] | None,
     *,
     brier_tolerance: float = 0.005,
     ece_tolerance: float = 0.01,
@@ -527,7 +529,7 @@ def evaluate_promotion(
     allow_unmatched_populations: bool = False,
     strict: bool = False,
 ) -> PromotionDecision:
-    """Compare a candidate cv_summary against the incumbent's.
+    """Compare a candidate cv_summary against the champion's.
 
     Gates on `GATE_MISSION` when both summaries carry a `per_mission` block.
     Without it there is no way to check the two means cover the same rows, so
@@ -546,44 +548,45 @@ def evaluate_promotion(
     REJECT: an alarm asks for a human, it does not assert the candidate is worse.
     `ACKNOWLEDGED_ALARMS` carries the standing exceptions.
     """
-    if incumbent is None:
-        return PromotionDecision(
-            Verdict.PROMOTE, ["first registered model — becomes the incumbent"]
-        )
+    if champion is None:
+        return PromotionDecision(Verdict.PROMOTE, ["first registered model — becomes the champion"])
 
-    cand_slice, inc_slice = _gate_slice(candidate), _gate_slice(incumbent)
+    cand_slice, champ_slice = _gate_slice(candidate), _gate_slice(champion)
     cand_recall: float | None = None
-    inc_recall: float | None = None
+    champ_recall: float | None = None
     cand_ece: float | None
-    inc_ece: float | None
-    if cand_slice is not None and inc_slice is not None:
-        cand_auc, inc_auc = cand_slice["roc_auc"], inc_slice["roc_auc"]
-        cand_brier, inc_brier = cand_slice["brier"], inc_slice["brier"]
-        cand_ece, inc_ece = cand_slice["ece"], inc_slice["ece"]
-        cand_recall, inc_recall = cand_slice["recall_at_1pct_fpr"], inc_slice["recall_at_1pct_fpr"]
+    champ_ece: float | None
+    if cand_slice is not None and champ_slice is not None:
+        cand_auc, champ_auc = cand_slice["roc_auc"], champ_slice["roc_auc"]
+        cand_brier, champ_brier = cand_slice["brier"], champ_slice["brier"]
+        cand_ece, champ_ece = cand_slice["ece"], champ_slice["ece"]
+        cand_recall, champ_recall = (
+            cand_slice["recall_at_1pct_fpr"],
+            champ_slice["recall_at_1pct_fpr"],
+        )
         header = f"gated on {GATE_MISSION} (n={cand_slice['n']:.0f}), the deployment population"
     else:
-        cand_auc, inc_auc = _mean(candidate, "test_roc_auc"), _mean(incumbent, "test_roc_auc")
-        cand_brier, inc_brier = _mean(candidate, "test_brier"), _mean(incumbent, "test_brier")
-        cand_ece, inc_ece = (
+        cand_auc, champ_auc = _mean(candidate, "test_roc_auc"), _mean(champion, "test_roc_auc")
+        cand_brier, champ_brier = _mean(candidate, "test_brier"), _mean(champion, "test_brier")
+        cand_ece, champ_ece = (
             _mean_or_none(candidate, "test_ece"),
-            _mean_or_none(incumbent, "test_ece"),
+            _mean_or_none(champion, "test_ece"),
         )
         header = "gated on pooled CV means — a summary here predates the per_mission block"
 
-    floor = decision_floor(candidate, incumbent)
+    floor = decision_floor(candidate, champion)
     if recall_tolerance is None:
         recall_tolerance = floor.recall if floor.recall is not None else LEGACY_RECALL_TOLERANCE
 
-    mismatch = _population_mismatch(candidate, incumbent)
-    paired = paired_folds(candidate, incumbent)
-    gate_size = _gate_population_drift(cand_slice, inc_slice)
+    mismatch = _population_mismatch(candidate, champion)
+    paired = paired_folds(candidate, champion)
+    gate_size = _gate_population_drift(cand_slice, champ_slice)
     reasons = [
         header,
-        f"ROC-AUC {cand_auc:.4f} vs incumbent {inc_auc:.4f}",
-        f"Brier {cand_brier:.4f} vs incumbent {inc_brier:.4f}",
+        f"ROC-AUC {cand_auc:.4f} vs champion {champ_auc:.4f}",
+        f"Brier {cand_brier:.4f} vs champion {champ_brier:.4f}",
     ]
-    diagnostics, alarms = _diagnostics(candidate, incumbent, mission_alarm)
+    diagnostics, alarms = _diagnostics(candidate, champion, mission_alarm)
     unresolved: list[str] = []
     reasons += diagnostics
     if gate_size:
@@ -594,17 +597,17 @@ def evaluate_promotion(
     # Every comparison below is an inequality, and NaN loses all of them — so a
     # degenerate run (a single-class fold, an empty slice, a blown-up loss)
     # would sail through every guard and promote itself. Checked first, on both
-    # sides: a NaN incumbent metric is a corrupt registry, and promoting past it
+    # sides: a NaN champion metric is a corrupt registry, and promoting past it
     # unnoticed is the same failure.
     unmeasured = [
         f"{name} ({side})"
         for name, cand, inc in (
-            ("ROC-AUC", cand_auc, inc_auc),
-            ("Brier", cand_brier, inc_brier),
-            ("ECE", cand_ece, inc_ece),
-            ("recall @1% FPR", cand_recall, inc_recall),
+            ("ROC-AUC", cand_auc, champ_auc),
+            ("Brier", cand_brier, champ_brier),
+            ("ECE", cand_ece, champ_ece),
+            ("recall @1% FPR", cand_recall, champ_recall),
         )
-        for side, value in (("candidate", cand), ("incumbent", inc))
+        for side, value in (("candidate", cand), ("champion", inc))
         if value is not None and not math.isfinite(value)
     ]
     if unmeasured:
@@ -615,9 +618,9 @@ def evaluate_promotion(
     # scored, so a mission only one of them has is worth reporting but does not
     # invalidate the comparison. The pooled fallback has no such footing: it
     # compares each run's mean over its own rows, and this project has been
-    # doing exactly that against an incumbent whose build predates K2.
+    # doing exactly that against a champion whose build predates K2.
     if mismatch:
-        gated_on_slice = cand_slice is not None and inc_slice is not None
+        gated_on_slice = cand_slice is not None and champ_slice is not None
         reasons.append(f"populations differ: {mismatch}")
         if gated_on_slice:
             alarms.append(
@@ -626,51 +629,51 @@ def evaluate_promotion(
         elif not allow_unmatched_populations:
             reasons.append(
                 "refusing to promote on a pooled comparison whose rows cannot be "
-                "matched — re-baseline the incumbent on the current view set, or "
+                "matched — re-baseline the champion on the current view set, or "
                 "pass allow_unmatched_populations=True to read it anyway"
             )
             return PromotionDecision(Verdict.REJECT, reasons, alarms)
 
-    if cand_auc <= inc_auc:
+    if cand_auc <= champ_auc:
         # A tie and a loss are not the same statement, and saying "does not beat"
         # for a delta of 0.0001 asserts a measurement that does not exist. The
-        # gate's answer is identical either way — the incumbent keeps serving,
+        # gate's answer is identical either way — the champion keeps serving,
         # because churning a deployed model on noise is not an upgrade — but the
         # *record* has to distinguish them, or a level result reads for ever
         # after as a defeat. This is the direction of the asymmetry that matters:
         # every other criterion below grants the candidate a tolerance band, so
-        # without this the incumbent silently wins every tie it is handed.
-        margin = inc_auc - cand_auc
+        # without this the champion silently wins every tie it is handed.
+        margin = champ_auc - cand_auc
         if floor.auc is not None and margin <= floor.auc:
             reasons.append(
                 f"level on ROC-AUC — the {margin:.4f} gap is inside this run's own "
                 f"{floor.auc:.4f} floor ({floor.source}), so it is not a measured "
-                "difference. The incumbent stays served because a tie is not a reason "
+                "difference. The champion stays served because a tie is not a reason "
                 "to replace a deployed model, not because the candidate lost"
             )
         else:
             reasons.append(
-                f"does not beat the incumbent's CV score (-{margin:.4f}, "
+                f"does not beat the champion's CV score (-{margin:.4f}, "
                 f"{floor.times(margin, floor.auc)})"
             )
         return PromotionDecision(Verdict.REJECT, reasons, alarms)
-    if cand_brier > inc_brier + brier_tolerance:
+    if cand_brier > champ_brier + brier_tolerance:
         reasons.append(f"calibration degraded beyond tolerance (+{brier_tolerance})")
         return PromotionDecision(Verdict.REJECT, reasons, alarms)
 
-    if cand_ece is not None and inc_ece is not None:
-        reasons.append(f"ECE {cand_ece:.4f} vs incumbent {inc_ece:.4f}")
-        if cand_ece > inc_ece + ece_tolerance:
+    if cand_ece is not None and champ_ece is not None:
+        reasons.append(f"ECE {cand_ece:.4f} vs champion {champ_ece:.4f}")
+        if cand_ece > champ_ece + ece_tolerance:
             reasons.append(f"reliability degraded beyond tolerance (+{ece_tolerance})")
             return PromotionDecision(Verdict.REJECT, reasons, alarms)
     else:
         reasons.append("ECE guard skipped — summary predates the test_ece field")
 
-    if cand_recall is not None and inc_recall is not None:
-        margin = cand_recall - inc_recall
+    if cand_recall is not None and champ_recall is not None:
+        margin = cand_recall - champ_recall
         measured = floor.recall is not None
         reasons.append(
-            f"recall @1% FPR {cand_recall:.3f} vs incumbent {inc_recall:.3f} "
+            f"recall @1% FPR {cand_recall:.3f} vs champion {champ_recall:.3f} "
             f"({margin:+.4f}, {floor.times(margin, floor.recall)}; "
             f"tolerance {recall_tolerance:.4f}"
             + ("" if measured else ", legacy constant — this run reported no variance block")
@@ -694,7 +697,7 @@ def evaluate_promotion(
 
     if paired is not None:
         reasons.append(str(paired))
-        # The mean can clear the incumbent while the candidate loses most folds,
+        # The mean can clear the champion while the candidate loses most folds,
         # which is what winning on training noise looks like. Alarmed rather than
         # blocking: at five folds the signed-rank test cannot reach p<0.05, so
         # refusing on it would refuse every real improvement too.
@@ -709,9 +712,9 @@ def evaluate_promotion(
                 "spread — repeat the run before reading this as an improvement"
             )
 
-    if unresolved_against(cand_auc - inc_auc, floor.auc):
+    if unresolved_against(cand_auc - champ_auc, floor.auc):
         unresolved.append(
-            f"gate AUC margin {cand_auc - inc_auc:+.4f} is within {UNRESOLVED_BAND}x of its "
+            f"gate AUC margin {cand_auc - champ_auc:+.4f} is within {UNRESOLVED_BAND}x of its "
             f"{floor.auc:.4f} floor — too close to call from three draws"
         )
 
@@ -726,7 +729,7 @@ def evaluate_promotion(
         )
         return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms)
 
-    reasons.append("beats incumbent with calibration and shortlist recall intact")
+    reasons.append("beats champion with calibration and shortlist recall intact")
 
     # Only PROMOTE is reachable here, and it is the only verdict `strict` can
     # change — REJECT and UNRESOLVED already withhold promotion, so an alarm has
@@ -750,10 +753,10 @@ def load_registry(models_dir: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def load_incumbent_summary(
+def load_champion_summary(
     models_dir: Path, summary_path: Path | None = None
 ) -> dict[str, Any] | None:
-    """The incumbent's summary — the registry's, or an explicit re-baseline.
+    """The champion's summary — the registry's, or an explicit re-baseline.
 
     **`summary_path` is the other half of stage 3.** The 2026-08-07 audit found
     that the registry's `ca906040` summary carries no `per_mission` block, so
@@ -783,6 +786,12 @@ def load_incumbent_summary(
     if not path.is_absolute():
         path = models_dir.parent / path
     return json.loads(path.read_text())
+
+
+#: The former spelling of `load_champion_summary`, kept because it is a public
+#: function quoted in recorded commands and notebooks. An alias, not a shim:
+#: it is the same object, so the two can never diverge in behaviour.
+load_incumbent_summary = load_champion_summary
 
 
 def publishable_cv_dirs(models_dir: Path) -> list[Path]:

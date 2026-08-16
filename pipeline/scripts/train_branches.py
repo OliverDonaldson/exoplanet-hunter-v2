@@ -4,7 +4,7 @@
         --shards data/processed/viewset_tfrecords \
         --out models/cv/branches-$(date +%Y%m%d)
 
-Writes `cv_summary.json`. Comparing it to the incumbent is `promotion_gate.py`,
+Writes `cv_summary.json`. Comparing it to the champion is `promotion_gate.py`,
 and promoting anything is a separate, deliberate step.
 """
 
@@ -35,7 +35,7 @@ def _augment_config(raw: dict) -> AugmentConfig | None:
 
     A config with no `augmentation` block gets the defaults rather than nothing:
     silently training without augmentation is what made run 1's comparison
-    against the incumbent unlike-for-like.
+    against the champion unlike-for-like.
     """
     declared = raw.get("augmentation", {})
     if declared.get("enabled", True) is False:

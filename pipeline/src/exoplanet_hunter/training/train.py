@@ -422,7 +422,7 @@ def _run_cnn_fold(
         """
         # Reseeded only when there is more than one member. At n=1 this path
         # must stay bit-identical to every dual-view run before 2026-08-14,
-        # including the incumbent's — a re-seed here would silently move the
+        # including the champion's — a re-seed here would silently move the
         # baseline every later result is compared against.
         if n_models > 1:
             tf.keras.utils.set_random_seed(int(cfg.seed) * 1_000 + member)

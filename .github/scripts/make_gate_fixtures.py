@@ -190,14 +190,14 @@ def main(out_dir: Path) -> None:
     if problems:
         raise SystemExit(f"DV fixture fails its own gate: {problems}")
 
-    # Incumbent registry via the real promote() path, plus one candidate the
+    # Champion registry via the real promote() path, plus one candidate the
     # gate must accept and one it must reject.
     models_dir = out_dir / "models"
-    cv_dir = models_dir / "cv" / "incumbent"
+    cv_dir = models_dir / "cv" / "champion"
     cv_dir.mkdir(parents=True, exist_ok=True)
-    incumbent = _cv_summary(auc=0.90, brier=0.10, ece=0.02)
-    incumbent_path = cv_dir / "cv_summary.json"
-    incumbent_path.write_text(json.dumps(incumbent))
+    champion = _cv_summary(auc=0.90, brier=0.10, ece=0.02)
+    champion_path = cv_dir / "cv_summary.json"
+    champion_path.write_text(json.dumps(champion))
     # `promote()` refuses a run with nothing to serve, so the fixture carries
     # per-fold artefacts. A metrics-only run is exactly what stage 2(a) run 1
     # was: it would have promoted cleanly and failed later, at serve time.
@@ -206,14 +206,14 @@ def main(out_dir: Path) -> None:
         fold_dir.mkdir(parents=True, exist_ok=True)
         (fold_dir / "cnn_branches.keras").write_bytes(b"")
         (fold_dir / "cnn_calibrator.joblib").write_bytes(b"")
-    promote(models_dir, "incumbent", incumbent_path)
+    promote(models_dir, "champion", champion_path)
 
     better = _cv_summary(auc=0.93, brier=0.09, ece=0.02)
     worse = _cv_summary(auc=0.88, brier=0.11, ece=0.02)
     (out_dir / "candidate_better.json").write_text(json.dumps(better))
     (out_dir / "candidate_worse.json").write_text(json.dumps(worse))
-    assert evaluate_promotion(better, incumbent).promoted
-    assert not evaluate_promotion(worse, incumbent).promoted
+    assert evaluate_promotion(better, champion).promoted
+    assert not evaluate_promotion(worse, champion).promoted
 
     print(f"gate fixtures written to {out_dir}")
 

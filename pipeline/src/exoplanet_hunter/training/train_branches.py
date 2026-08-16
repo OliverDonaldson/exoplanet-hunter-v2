@@ -4,7 +4,7 @@ Same evaluation contract as `train.py`: StratifiedGroupKFold with group =
 tic_id, a `stratified_inner_split` for early stopping and the Platt fit, and a
 `cv_summary.json` in the schema the promotion gate reads. Reusing that schema
 matters — two implementations of it would drift, and the gate is what decides
-whether a run is better than the incumbent.
+whether a run is better than the champion.
 
 Also the same *artefact* contract, which it did not have until 2026-08-06: a
 per-fold checkpoint and calibration bundle, and every metric measured on the
@@ -13,7 +13,7 @@ stage 4 (old 2(a)) wrote no checkpoint at all, so the model behind its numbers
 no longer exists.
 
 Nothing here promotes anything. It writes a summary; comparing it to the
-incumbent is `promotion_gate.py`'s job.
+champion is `promotion_gate.py`'s job.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ GATE_FPR = 0.01
 #:
 #: AUC was the only one until 2026-08-08, and the omission mattered: **recall
 #: @1% FPR is the criterion that rejected all four arms of stage 4** — run 3 on
-#: 0.145 against the incumbent's 0.307 — while having no variance estimate at
+#: 0.145 against the champion's 0.307 — while having no variance estimate at
 #: all. AUC's floor was measured (`seed_sd 0.0081`, `fold_sd 0.0094`) and "a
 #: margin under ~0.009 is not a decision" adopted from it; the statistic doing
 #: the actual rejecting never got the same treatment, so the capacity arm's
@@ -197,14 +197,14 @@ class CVConfig:
     #: seed variance and fold difficulty can finally be told apart.
     n_models_per_fold: int = 1
     #: None disables augmentation. Run 1 of stage 4 trained without it while
-    #: the incumbent it was compared against had it — one of the ways that
+    #: the champion it was compared against had it — one of the ways that
     #: comparison was not like-for-like.
     augment: AugmentConfig | None = field(default_factory=AugmentConfig)
     #: Stage 8's baseline-bias arm: None (control), "propensity" or "stratified".
     #: Recorded here rather than passed loose so it lands in `run_config` — two
     #: runs differing only in their intervention would otherwise be
     #: indistinguishable from their summaries, which is exactly the defect that
-    #: made run 1's comparison against the incumbent unreadable.
+    #: made run 1's comparison against the champion unreadable.
     baseline_intervention: str | None = None
     #: Strata for that arm. 16 removes the training-set correlation to +0.0025
     #: for propensity weighting and 8 reaches +0.0060 for stratified sampling,
@@ -704,7 +704,7 @@ def run_cv(
         "per_mission": per_mission,
         # What produced these numbers, in the artefact that carries them. The
         # view resolution and whether augmentation ran are exactly the two things
-        # that made run 1's comparison against the incumbent unlike-for-like, and
+        # that made run 1's comparison against the champion unlike-for-like, and
         # neither was recoverable from its summary.
         "run_config": {
             **asdict(config),
@@ -738,7 +738,7 @@ def run_cv(
     (out_dir / "observation_bias.json").write_text(json.dumps(asdict(bias), indent=2))
     log.info(
         "[train-branches] observation bias: transit %+.3f  baseline %+.3f  "
-        "completeness %+.3f  (labelled set: incumbent -0.087 / +0.238, "
+        "completeness %+.3f  (labelled set: champion -0.087 / +0.238, "
         "label itself -0.073 / +0.278)",
         bias.transit_sensitivity,
         bias.baseline_sensitivity,

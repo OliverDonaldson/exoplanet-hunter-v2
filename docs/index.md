@@ -42,7 +42,7 @@ Each module carries its own README with the detail.
    files; every derived artefact is rebuilt by current code and versioned in DVC.
 2. **The `/score/{tic_id}` contract is pinned.** `api/app/schemas.py` and
    `frontend/src/api/types.ts` change together or not at all.
-3. **Models ship only through the promotion gate.** Beat the incumbent's
+3. **Models ship only through the promotion gate.** Beat the champion's
    cross-validated ROC-AUC without degrading Brier or ECE, or it does not become
    the champion. The gate has correctly rejected several retrains; that is it
    working.

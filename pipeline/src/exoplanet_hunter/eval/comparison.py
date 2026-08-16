@@ -1,10 +1,10 @@
 """Comparing two prediction sets — per mission, and never silently.
 
 Two models are compared on the rows they share, and an inner join is a lossy
-operation that reports nothing about what it dropped. Comparing the incumbent
+operation that reports nothing about what it dropped. Comparing the champion
 `ca906040` against the stage 4 (old 2(a)) branch model matched 4,605 rows and looked
 complete; it had silently discarded **all 527 K2 examples**, 9.7% of training,
-because the incumbent's run predates K2 entirely. The surviving weights were
+because the champion's run predates K2 entirely. The surviving weights were
 Kepler 48.6% / TESS 51.4% / K2 0%, in a decision whose consequences are 100%
 TESS.
 
@@ -149,7 +149,7 @@ def mission_coverage(
     """Per-mission accounting of an inner join between two prediction sets.
 
     Either frame may carry the mission column; a set that predates it (the
-    incumbent's `predictions.parquet` has only row/tic_id/fold/y_true/prob) is
+    champion's `predictions.parquet` has only row/tic_id/fold/y_true/prob) is
     labelled from whichever frame does, and rows neither can label become
     `"unknown"` rather than vanishing from the count.
     """

@@ -44,7 +44,7 @@ synthetic ephemeris, so no DV report exists for it and the `detection` / `ghost`
 branches run masked — the model handles that by design, but it is a real
 difference from how 56% of training rows were built. And this does **not**
 restore comparability with 26.4%: that came through the dual-view path, so the
-incumbent is re-measured here and the comparison is made within protocol. No
+champion is re-measured here and the comparison is made within protocol. No
 number from this module can support a claim about *serving*.
 """
 

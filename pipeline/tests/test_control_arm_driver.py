@@ -170,7 +170,7 @@ def test_a_fold_with_no_dualview_checkpoint_returns_nothing(tmp_path):
     assert driver.dualview_members(_fold_0(tmp_path, "cv_summary.json") / "fold_0") == []
 
 
-# The aux width is a property of the run, not a constant. The incumbent serves
+# The aux width is a property of the run, not a constant. The champion serves
 # the 9-dim legacy layout; every dual-view run trained since the vetting
 # features landed expects 13. Assuming 9 raised inside sklearn's imputer *after*
 # the entire host view build had been paid for.

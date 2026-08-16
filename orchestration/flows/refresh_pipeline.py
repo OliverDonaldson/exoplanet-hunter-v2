@@ -56,7 +56,7 @@ EXOFOP_URLS = {
 }
 
 #: The rolling outer split. Every refresh extends it rather than rebuilding it,
-#: so a candidate and the incumbent it is gated against partition their shared
+#: so a candidate and the champion it is gated against partition their shared
 #: population identically. See `roll_fold_assignment`.
 ROLLING_FOLDS = REPO_ROOT / "models" / "fold_assignments" / "rolling.json"
 N_SPLITS = 5
@@ -261,7 +261,7 @@ def train(data_config: str, fold_assignment: Path | None = None) -> None:
     variance block carries no reseeding spread, `decision_floor` returns None,
     and the gate falls back to `LEGACY_RECALL_TOLERANCE = 0.02` — a bar measured
     at 0.68 sigma, which rejects a candidate whose true recall equals the
-    incumbent's about 31% of the time. The fold assignment is what makes two
+    champion's about 31% of the time. The fold assignment is what makes two
     successive candidates comparable at all.
     """
     burst = os.environ.get("BURST_CMD")
@@ -275,7 +275,7 @@ def train(data_config: str, fold_assignment: Path | None = None) -> None:
         _run([PYTHON, "-m", "exoplanet_hunter.training.train", *overrides])
 
 
-def _incumbent_is_sliceable() -> bool:
+def _champion_is_sliceable() -> bool:
     """Does the model the registry currently serves carry a per_mission block?
 
     If it does, the gate needs no override and the comparison tracks the
@@ -306,11 +306,11 @@ def promotion_gate() -> PromotionDecision:
 
     cv_root = REPO_ROOT / "models" / "cv"
     newest = max(cv_root.glob("*/cv_summary.json"), key=lambda p: p.stat().st_mtime)
-    # The incumbent is whatever the REGISTRY names — resolved by
-    # load_incumbent_summary — so the comparison follows each promotion instead
+    # The champion is whatever the REGISTRY names — resolved by
+    # load_champion_summary — so the comparison follows each promotion instead
     # of being pinned to one baseline forever.
     #
-    # --incumbent-summary is a FALLBACK, not the default. It applies only when
+    # --champion-summary is a FALLBACK, not the default. It applies only when
     # the served model's own summary predates the per_mission block, which is
     # true of ca906040 and of nothing trained since adf4a71. Passing it
     # unconditionally would freeze the reference: promote a new model and the
@@ -326,14 +326,18 @@ def promotion_gate() -> PromotionDecision:
         "--promote",
         "--strict",
     ]
-    if not _incumbent_is_sliceable():
+    if not _champion_is_sliceable():
+        # The directory keeps the older "incumbent" spelling. Renaming a path on
+        # disk is a data-layout change — it moves a DVC-tracked artefact and
+        # invalidates every recorded command that names it — so the vocabulary
+        # moved and the directory did not.
         rebaselined = REPO_ROOT / "models" / "cv" / "incumbent-rebaselined" / "cv_summary.json"
         if rebaselined.exists():
             get_run_logger().info(
                 "[gate] the served model's summary predates per_mission — falling back to %s",
                 rebaselined.name,
             )
-            cmd += ["--incumbent-summary", str(rebaselined.relative_to(REPO_ROOT))]
+            cmd += ["--champion-summary", str(rebaselined.relative_to(REPO_ROOT))]
         else:
             get_run_logger().warning(
                 "[gate] the served model's summary cannot be sliced and no re-baselined "

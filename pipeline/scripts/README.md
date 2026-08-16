@@ -34,7 +34,7 @@ its download stage is all cache hits.
 | script | what it does |
 |---|---|
 | `validate_data.py` | the five validation gates (schemas, views, shrink, leakage) |
-| `promotion_gate.py` | does a fresh CV run replace the incumbent? exit 0 = promote |
+| `promotion_gate.py` | does a fresh CV run replace the champion? exit 0 = promote |
 
 Both run in CI against synthetic fixtures and in the DAG against real
 artefacts — the same code either way.

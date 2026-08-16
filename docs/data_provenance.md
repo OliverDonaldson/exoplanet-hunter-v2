@@ -233,7 +233,7 @@ a light curve with no transit in it is reading the star.
 | Architecture | Run | Host-AUC | Paired d vs dual-view | 95% CI |
 |---|---|---:|---:|---|
 | dual-view | stage 10.5 common folds | **0.7102** | — | — |
-| dual-view | incumbent `ca906040` | **0.7123** | −0.0020 | [−0.020, +0.018] crosses |
+| dual-view | champion `ca906040` | **0.7123** | −0.0020 | [−0.020, +0.018] crosses |
 | branch | E-C, un-weighted | 0.6184 | +0.0919 | [+0.029, +0.153] **excludes** |
 | branch | E-P, propensity | 0.5626 | +0.1477 | [+0.086, +0.215] **excludes** |
 
@@ -250,7 +250,7 @@ Ensembling does not move it: E-C +0.0236 [−0.008, +0.055], E-P −0.0174 [−0
 
 | Run | Architecture | Split | Host-AUC |
 |---|---|---:|---:|
-| incumbent `ca906040` | dual-view | **+0.1218** | 0.7123 |
+| champion `ca906040` | dual-view | **+0.1218** | 0.7123 |
 | stage 10.5 dual-view | dual-view | **+0.2713** | 0.7102 |
 
 Same architecture, same hosts, **0.0020 apart** on the threshold-free construct

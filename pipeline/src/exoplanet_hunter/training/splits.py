@@ -164,7 +164,7 @@ def extend_fold_assignment(
     fixed map across refreshes would silently drop every target the catalogue
     gained since it was written, because uncovered groups are dropped rather
     than placed somewhere convenient. Rebuilding the map each refresh instead
-    re-partitions the whole population, so a candidate and the incumbent it is
+    re-partitions the whole population, so a candidate and the champion it is
     gated against are scored on different splits, and part of any margin is only
     which rows landed where.
 

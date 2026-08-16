@@ -1,24 +1,24 @@
 """The control lane: the served model re-scored on the population in front of it.
 
-A candidate is scored on the current catalogue. The incumbent's stored summary
+A candidate is scored on the current catalogue. The champion's stored summary
 was measured on the catalogue it was trained against. Subtracting one from the
 other gives a number that is a model difference and a population difference
 added together, and the gate has been reporting that sum as if it were the
 first.
 
-This module measures the incumbent again, now, on the rows the candidate is
+This module measures the champion again, now, on the rows the candidate is
 being judged on — so the difference the gate reads is attributable to the model.
 
-**Which rows.** The shared out-of-fold population: rows in both the incumbent's
+**Which rows.** The shared out-of-fold population: rows in both the champion's
 training set and the current shard set, each scored by the fold that held it
-out. Rows added since the incumbent was trained are deliberately excluded from
-the comparison. The incumbent never trained on them, so scoring them means
+out. Rows added since the champion was trained are deliberately excluded from
+the comparison. The champion never trained on them, so scoring them means
 averaging all five folds — an ensemble — while the candidate scores each row
-with the single fold that held it out. That would hand the incumbent a
+with the single fold that held it out. That would hand the champion a
 five-model advantage on exactly the rows a refresh adds. They are counted and
 reported; they never gate.
 
-**What this cannot fix.** The shared population is pinned to the incumbent's
+**What this cannot fix.** The shared population is pinned to the champion's
 training set while the catalogue grows, so it covers a falling fraction of what
 the model serves. Nothing here hides that: `PopulationOverlap` reports it every
 run, and below `MIN_GATE_ROWS` the lane refuses rather than deciding on a
@@ -38,7 +38,7 @@ from exoplanet_hunter.validation.promotion import GATE_MISSION
 #: number, which is the failure mode this project keeps finding.
 MIN_GATE_ROWS = 1000
 
-#: How far the re-scored incumbent may differ from a stored measurement of the
+#: How far the re-scored champion may differ from a stored measurement of the
 #: same model on the same rows before the lane is considered to be measuring
 #: something other than what it claims. Same weights, same folds, same rows:
 #: the only expected difference is floating-point.
@@ -47,7 +47,7 @@ REPRODUCTION_TOLERANCE = 1e-6
 
 @dataclass(frozen=True)
 class PopulationOverlap:
-    """How much of the current population the incumbent can be compared on."""
+    """How much of the current population the champion can be compared on."""
 
     shared: int
     added: int
@@ -64,18 +64,18 @@ class PopulationOverlap:
 
     def __str__(self) -> str:
         return (
-            f"{self.shared} of {self.current} current rows are shared with the incumbent "
+            f"{self.shared} of {self.current} current rows are shared with the champion "
             f"({self.covered:.1%}); {self.added} added since it was trained and cannot be "
             f"compared like for like, {self.dropped} of its own rows are gone"
         )
 
 
-def population_overlap(incumbent_tic_ids: set[int], current_tic_ids: set[int]) -> PopulationOverlap:
-    """Split the current population against the one the incumbent was trained on."""
+def population_overlap(champion_tic_ids: set[int], current_tic_ids: set[int]) -> PopulationOverlap:
+    """Split the current population against the one the champion was trained on."""
     return PopulationOverlap(
-        shared=len(incumbent_tic_ids & current_tic_ids),
-        added=len(current_tic_ids - incumbent_tic_ids),
-        dropped=len(incumbent_tic_ids - current_tic_ids),
+        shared=len(champion_tic_ids & current_tic_ids),
+        added=len(current_tic_ids - champion_tic_ids),
+        dropped=len(champion_tic_ids - current_tic_ids),
     )
 
 
@@ -90,7 +90,7 @@ def assert_gateable(summary: dict[str, Any]) -> None:
     if slice_ is None:
         raise ValueError(
             f"the control summary carries no {GATE_MISSION} slice, so it cannot stand in "
-            "for the incumbent in a comparison the gate decides on"
+            "for the champion in a comparison the gate decides on"
         )
     rows = int(slice_["n"])
     if rows < MIN_GATE_ROWS:
@@ -98,7 +98,7 @@ def assert_gateable(summary: dict[str, Any]) -> None:
             f"the shared {GATE_MISSION} population is down to {rows} rows, under the "
             f"{MIN_GATE_ROWS} this lane will decide on. A 1% FPR cut here lands on a "
             "handful of negatives and the recall margin would be set by where they fell. "
-            "Re-baseline the incumbent on the current view set rather than narrowing the "
+            "Re-baseline the champion on the current view set rather than narrowing the "
             "comparison further"
         )
 
@@ -141,8 +141,8 @@ def deltas(
 ) -> tuple[dict[str, float], dict[str, float] | None]:
     """The model effect, and the data effect it has been carrying.
 
-    `model` is the candidate against the incumbent **on the same rows** — what
-    the gate is entitled to call a model difference. `data` is the incumbent
+    `model` is the candidate against the champion **on the same rows** — what
+    the gate is entitled to call a model difference. `data` is the champion
     against its own previous measurement: same weights, a different population,
     and the quantity that has been inside every weekly margin with nothing
     separating it out. `data` is None on the first run, which has nothing to

@@ -160,7 +160,7 @@ its own split over its own population and no shared seed makes them agree.
 
 ## 5. Promotion gate
 
-A new run becomes the served model only if it beats the incumbent's
+A new run becomes the served model only if it beats the champion's
 cross-validated ROC-AUC without degrading Brier score or calibration error.
 
 The gate has rejected multiple retrains. That is the gate working.

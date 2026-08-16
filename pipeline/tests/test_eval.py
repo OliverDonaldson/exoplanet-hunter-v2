@@ -66,12 +66,12 @@ def separable(n, rng, strength):
 
 
 def test_a_mission_the_join_drops_is_named():
-    """The stage 4 case: the incumbent predates K2, so an inner join keeps
+    """The stage 4 case: the champion predates K2, so an inner join keeps
     none of it while reporting a healthy 4,605 rows."""
     branches = frame(list(range(10)), ["K2"] * 4 + ["TESS"] * 3 + ["Kepler"] * 3)
-    incumbent = frame(list(range(4, 10)))
+    champion = frame(list(range(4, 10)))
 
-    coverage = mission_coverage(branches, incumbent)
+    coverage = mission_coverage(branches, champion)
 
     assert coverage.dropped == ["K2"]
     assert coverage.shared == {"TESS": 3, "Kepler": 3}
@@ -87,7 +87,7 @@ def test_shared_weights_expose_the_sampling_artefact():
 
 
 def test_mission_labels_come_from_whichever_side_has_them():
-    """The incumbent's predictions.parquet carries no mission column."""
+    """The champion's predictions.parquet carries no mission column."""
     coverage = mission_coverage(frame([1, 2], None), frame([1, 2], ["TESS", "K2"]))
     assert coverage.shared == {"TESS": 1, "K2": 1}
 
