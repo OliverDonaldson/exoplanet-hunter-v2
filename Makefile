@@ -5,7 +5,20 @@
 #   make PYTHON=/opt/anaconda3/envs/exoplanet-hunter-v2/bin/python data-push
 PYTHON ?= python
 
-.PHONY: env install lint type test validate refresh data-push data-pull mlflow api frontend up
+# ai-slop-detector lives in its own venv, built with --system-site-packages on
+# top of exoplanet-hunter-v2. That is deliberate and the same coupling problem
+# as `dvc` below, in reverse: the tool's phantom_import check resolves imports
+# against whatever interpreter runs it, so it MUST see numpy/pandas/sklearn/
+# exoplanet_hunter or it reports them as critical "phantom imports" (measured
+# 2026-08-16: 47 false criticals, score 11.9 instead of 2.47). Building the venv
+# on the conda env gives it read access to those without letting pip resolve
+# anything into the env that owns the TensorFlow pins.
+#   Rebuild: conda activate exoplanet-hunter-v2 && \
+#     python -m venv --system-site-packages ~/.local/venvs/ai-slop-detector && \
+#     ~/.local/venvs/ai-slop-detector/bin/pip install "ai-slop-detector==3.8.7"
+SLOP ?= $(HOME)/.local/venvs/ai-slop-detector/bin/slop-detector
+
+.PHONY: env install lint type test validate refresh data-push data-pull mlflow api frontend up slop slop-report
 
 env:            ## Create the conda env (pipeline + api, editable, dev extras)
 	conda env create -f environment.yml
@@ -22,6 +35,12 @@ type:
 test:           ## Fast tests only (network/slow markers excluded)
 	pytest pipeline/tests -m "not network and not slow"
 	pytest api/tests
+
+slop:           ## Structural-risk scan; same gate CI runs (fails above 3.5)
+	$(SLOP) --project . --no-history --fail-threshold 3.5
+
+slop-report:    ## Full audit incl. cross-file duplicates and JS/TS -> slop.json
+	$(SLOP) --project . --cross-file --js --no-history --json --output slop.json
 
 validate:       ## Run the data validation gates on whatever artefacts exist
 	$(PYTHON) pipeline/scripts/validate_data.py

@@ -70,7 +70,7 @@ def main(cfg: DictConfig) -> None:
     catalog = build_labels_from_cfg(
         cfg.data,
         paths.data_labels,
-        paths.root / "data" / "catalogue" / "candidates.parquet",
+        paths.root / "data" / "tables" / "catalogue" / "candidates.parquet",
     )
 
     # --- Stage 2 — download light curves -------------------------------

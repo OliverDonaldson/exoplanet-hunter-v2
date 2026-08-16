@@ -73,6 +73,52 @@ jobs:
             --viewset "$RUNNER_TEMP/fixtures/viewset" \
             --previous-labels "$RUNNER_TEMP/fixtures/labels_previous.parquet"
 
+  # Structural-risk gate: catches code that is shaped like an implementation but
+  # is empty, disconnected, or imports things that do not exist. It is not a
+  # linter (ruff already runs above) and it proves nothing about runtime
+  # correctness — a pass means the structure is clean, not that the code works.
+  #
+  # The install order below is load-bearing. The phantom_import check resolves
+  # every import against the *running interpreter*, so if the project's
+  # dependencies are not installed first, numpy/pandas/sklearn/exoplanet_hunter
+  # all report as critical "phantom imports" and the score is garbage. Measured
+  # 2026-08-16: 47 false criticals and a weighted score of 11.9 in a bare env,
+  # versus 2.47 with deps present. Install the project, then the detector.
+  #
+  # The tool version is pinned. Its score is a moving target across releases, so
+  # an unpinned upgrade would move the gate under us.
+  slop-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # churn/hotspot ranking reads commit history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install project first (see note above)
+        run: pip install -e ./pipeline[dev] -e ./api[dev]
+      - name: Install detector
+        run: pip install "ai-slop-detector==3.8.7"
+      - name: Scan
+        # Baseline on 2026-08-16 was 2.47 weighted with zero deficit files.
+        # 3.5 is set just above that: one new critical-deficit file lands at
+        # ~3.8, so a genuinely fake-done file trips this, while ordinary drift
+        # does not. Raise it only with a measurement, never to make CI green.
+        # --no-history keeps the runner from writing a trend DB it then throws
+        # away; the analysis cache is cold on every run, which is what we want.
+        run: |
+          slop-detector --project . --no-history \
+            --fail-threshold 3.5 \
+            --json --output slop.json
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slop-report
+          path: slop.json
+
   promotion-gate:
     runs-on: ubuntu-latest
     steps:

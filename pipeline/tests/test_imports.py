@@ -47,3 +47,31 @@ def test_module_imports(module: str) -> None:
 @pytest.mark.parametrize("script", DELETED_SCRIPTS)
 def test_scripts_that_could_write_wrong_data_stay_deleted(script: str) -> None:
     assert not (Path(__file__).resolve().parents[1] / "scripts" / script).exists()
+
+
+#: Resolved by NAME out of persisted sklearn pipelines, never called by our own
+#: code. `e5388ed9`, `cebb0fe6` and the live `ca906040` pickle these by
+#: reference, so unpickling a served bundle looks them up in the module at
+#: serve time. That makes them unreferenced by design and indistinguishable from
+#: dead code to any static sweep — deleting or renaming one breaks serving, and
+#: breaks it at model-load rather than at import, which is the worst place.
+PICKLE_RESOLVED_BY_NAME = [
+    ("exoplanet_hunter.datasets.aux_transform", "_log1p_centroid"),
+]
+
+
+@pytest.mark.parametrize(("module", "attribute"), PICKLE_RESOLVED_BY_NAME)
+def test_functions_persisted_pickles_resolve_by_name_stay_put(module: str, attribute: str) -> None:
+    """Not a behaviour test — a name test, which is the whole point.
+
+    The signature and the module path are the contract, because that is what
+    pickle stored. `getattr` here is exactly what `joblib.load` does.
+    """
+    import inspect
+
+    resolved = getattr(importlib.import_module(module), attribute)
+    assert callable(resolved)
+    assert list(inspect.signature(resolved).parameters) == ["X"], (
+        f"{module}.{attribute} is resolved by name out of persisted pipelines; "
+        "its signature is a serving contract, not an implementation detail"
+    )

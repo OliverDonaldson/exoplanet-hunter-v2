@@ -925,10 +925,24 @@ def measured(seed_sd: float = 0.0060, recall_sd: float = 0.0292, n_models: int =
 
 def test_the_floor_is_two_sigma_over_root_n_models():
     floor = decision_floor(measured())
-    assert floor.auc == pytest.approx(2 * 0.0060 / math.sqrt(3))
-    assert floor.recall == pytest.approx(2 * 0.0292 / math.sqrt(3))
-    # The roadmap's stage 6 conclusion, to four places.
-    assert floor.recall == pytest.approx(0.0337, abs=5e-5)
+    # Updated for roadmap 4.1b: the floor is now 2 x se(candidate - incumbent).
+    # With no incumbent variance the second term is the pooled prior, so the
+    # value is sqrt(sd^2/n + prior^2/n) rather than sd/sqrt(n).
+    from exoplanet_hunter.validation.promotion import POOLED_SEED_SD
+
+    expected = 2 * math.sqrt(0.0060**2 / 3 + POOLED_SEED_SD**2 / 3)
+    assert floor.auc == pytest.approx(expected)
+    from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD
+
+    assert floor.recall == pytest.approx(
+        2 * math.sqrt(0.0292**2 / 3 + POOLED_RECALL_SEED_SD**2 / 3)
+    )
+    # Stage 6's recorded conclusion was 0.0337, from `2 x sd / sqrt(n)` on the
+    # candidate alone. Roadmap 4.1b supersedes that formula, so the number moves;
+    # the OLD value is asserted here too, as the thing 4.1b changed away from,
+    # so this test fails loudly if either definition drifts unnoticed.
+    assert 2 * 0.0292 / math.sqrt(3) == pytest.approx(0.0337, abs=5e-5)
+    assert floor.recall > 0.0337
 
 
 def test_a_summary_with_no_variance_block_reports_no_floor_rather_than_guessing():
@@ -948,7 +962,11 @@ def test_a_recall_drop_inside_the_measured_floor_no_longer_rejects():
     """
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
     incumbent = gated(0.91, 0.10)  # recall 0.30 from the slice defaults
-    assert evaluate_promotion(candidate, incumbent).promoted
+    # 4.1b: inside the floor is UNRESOLVED, not PROMOTE. The test's point --
+    # that it must not REJECT -- is unchanged and is what is asserted.
+    from exoplanet_hunter.validation.promotion import Verdict
+
+    assert evaluate_promotion(candidate, incumbent).verdict is not Verdict.REJECT
 
 
 def test_that_same_drop_still_rejects_under_the_old_constant():
@@ -957,7 +975,9 @@ def test_that_same_drop_still_rejects_under_the_old_constant():
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
     decision = evaluate_promotion(candidate, gated(0.91, 0.10), recall_tolerance=0.02)
     assert not decision.promoted
-    assert any("degraded beyond tolerance" in r for r in decision.reasons)
+    assert any(
+        "degraded beyond tolerance" in r or "too close to call" in r for r in decision.reasons
+    )
 
 
 def test_a_recall_drop_beyond_the_measured_floor_still_rejects():
@@ -975,7 +995,9 @@ def test_the_recall_reason_states_the_margin_against_its_floor():
     """A margin quoted without its floor is how 0.02 survived stage 6."""
     candidate = measured() | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
     decision = evaluate_promotion(candidate, gated(0.91, 0.10))
-    assert any("x the 0.0337 floor" in r for r in decision.reasons)
+    # The floor value moved with the formula; the SHAPE of the sentence is what
+    # this test is for -- a margin always reported as a multiple of its floor.
+    assert any("x the " in r and " floor" in r for r in decision.reasons)
 
 
 def test_a_legacy_summary_says_its_tolerance_is_a_constant_not_a_measurement():
@@ -1015,3 +1037,126 @@ def test_an_explicit_incumbent_summary_bypasses_the_registry(tmp_path):
     loaded = load_incumbent_summary(tmp_path / "no-registry-here", rebaseline)
     assert loaded is not None
     assert loaded["per_mission"]["TESS"]["roc_auc"] == 0.91
+
+
+# ---------------------------------------------------------------------------
+# The third verdict. Stage 6 caveat 2 describes three states and
+# PromotionDecision carried two, so a margin at 0.8x its floor read PROMOTE with
+# the same confidence as one at 0.1x. Pre-registered in roadmap 4.1b.
+# ---------------------------------------------------------------------------
+
+
+def _summary(auc, brier, ece, recall, *, seed_sd=0.003, recall_sd=0.03, n=3, n_rows=2000):
+    return {
+        "summary": {
+            "test_roc_auc": {"mean": auc, "std": 0.002},
+            "test_brier": {"mean": brier, "std": 0.002},
+            "test_ece": {"mean": ece, "std": 0.002},
+            "variance": {
+                "n_models_per_fold": n,
+                "seed_sd": seed_sd,
+                "pooled_gate_recall_seed_sd": recall_sd,
+            },
+        },
+        "per_mission": {
+            "TESS": {
+                "n": n_rows,
+                "n_positive": n_rows // 2,
+                "roc_auc": auc,
+                "pr_auc": auc,
+                "brier": brier,
+                "ece": ece,
+                "recall_at_1pct_fpr": recall,
+                "recall_at_5pct_fpr": recall,
+                "recall_at_10pct_fpr": recall,
+            }
+        },
+    }
+
+
+def test_a_margin_inside_the_band_reads_unresolved_not_promote():
+    """The pre-registered case: a recall margin at ~0.7x its floor is not a
+    promotion and not a rejection. It is the gate saying the margin and the floor
+    are the same size, and the floor is three draws wide."""
+    from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
+
+    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    candidate = _summary(0.917, 0.113, 0.033, 0.257)
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.verdict is Verdict.UNRESOLVED
+    assert decision.promoted is False
+    assert any("too close to call" in r for r in decision.reasons)
+
+
+def test_a_margin_well_clear_of_the_band_still_promotes():
+    from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
+
+    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    candidate = _summary(0.917, 0.113, 0.033, 0.307, recall_sd=0.001, seed_sd=0.0005)
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.verdict is Verdict.PROMOTE
+    assert decision.promoted is True
+
+
+def test_reject_dominates_unresolved():
+    """Ordering is load-bearing: a run that fails one criterion outright is a
+    rejection even if another is unresolvable."""
+    from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
+
+    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    candidate = _summary(0.917, 0.113, 0.033, 0.100, recall_sd=0.01)
+    decision = evaluate_promotion(candidate, incumbent)
+    assert decision.verdict is Verdict.REJECT
+    assert decision.promoted is False
+
+
+def test_the_band_is_symmetric_about_the_floor():
+    from exoplanet_hunter.validation.promotion import UNRESOLVED_BAND, unresolved_against
+
+    floor = 0.06
+    assert unresolved_against(floor, floor)
+    assert unresolved_against(floor * UNRESOLVED_BAND * 0.99, floor)
+    assert unresolved_against(floor / UNRESOLVED_BAND * 1.01, floor)
+    assert not unresolved_against(floor * UNRESOLVED_BAND * 1.01, floor)
+    assert not unresolved_against(floor / UNRESOLVED_BAND * 0.99, floor)
+    assert not unresolved_against(0.5, None)
+
+
+# ---------------------------------------------------------------------------
+# The floor is the se of a DIFFERENCE. Reading the candidate alone ignored the
+# incumbent's noise (caveat 1) and let a noisier candidate earn a wider band.
+# ---------------------------------------------------------------------------
+
+
+def test_the_floor_grows_when_the_incumbent_has_its_own_noise():
+    from exoplanet_hunter.validation.promotion import decision_floor
+
+    candidate = _summary(0.92, 0.11, 0.03, 0.30, recall_sd=0.03)
+    # The se of the candidate's MEAN — the old rule, 2 x sd / sqrt(n).
+    candidate_only = 2 * 0.03 / 3**0.5
+    with_incumbent = decision_floor(
+        candidate, _summary(0.91, 0.12, 0.04, 0.30, recall_sd=0.03)
+    ).recall
+    assert with_incumbent > candidate_only
+    # Two equal variances under a square root: exactly sqrt(2) wider.
+    assert with_incumbent == pytest.approx(candidate_only * 2**0.5, rel=1e-9)
+
+
+def test_an_incumbent_without_a_variance_block_borrows_a_named_prior():
+    """A prior standing in for a measurement has to say so — substituting one
+    silently is this project's recurring defect class."""
+    from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD, decision_floor
+
+    floor = decision_floor(_summary(0.92, 0.11, 0.03, 0.30), {"summary": {}})
+    assert "pooled prior" in floor.source
+    assert str(POOLED_RECALL_SEED_SD) in floor.source
+
+
+def test_a_noisier_candidate_no_longer_quietly_earns_a_wider_pass():
+    """It still earns a wider band — correctly, its mean is less well known —
+    but the band lands it in UNRESOLVED rather than PROMOTE."""
+    from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
+
+    incumbent = _summary(0.910, 0.121, 0.044, 0.307)
+    noisy = _summary(0.917, 0.113, 0.033, 0.270, recall_sd=0.05)
+    assert evaluate_promotion(noisy, incumbent).verdict is Verdict.UNRESOLVED

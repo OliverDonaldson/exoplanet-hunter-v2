@@ -157,8 +157,8 @@ def plot_coverage_map(pos: pd.DataFrame, candidates: pd.DataFrame, out: Path) ->
 
 
 def main() -> None:
-    catalog = pd.read_parquet(REPO_ROOT / "data" / "labels" / "labels.parquet")
-    candidates = pd.read_parquet(REPO_ROOT / "data" / "catalogue" / "candidates.parquet")
+    catalog = pd.read_parquet(REPO_ROOT / "data" / "tables" / "labels" / "labels.parquet")
+    candidates = pd.read_parquet(REPO_ROOT / "data" / "tables" / "catalogue" / "candidates.parquet")
     pos = _resolve_positions(catalog)
 
     FIG_DIR.mkdir(parents=True, exist_ok=True)

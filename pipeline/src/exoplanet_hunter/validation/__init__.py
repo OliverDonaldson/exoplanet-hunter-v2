@@ -17,6 +17,7 @@ from exoplanet_hunter.validation.leakage import (
 from exoplanet_hunter.validation.promotion import (
     PairedFolds,
     PromotionDecision,
+    Verdict,
     decision_floor,
     evaluate_promotion,
     load_incumbent_summary,
@@ -39,6 +40,7 @@ __all__ = [
     "PairedFolds",
     "PromotionDecision",
     "RefreshDecision",
+    "Verdict",
     "assert_refresh_safe",
     "candidate_catalogue_schema",
     "check_catalogue_shrink",

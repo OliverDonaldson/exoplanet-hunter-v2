@@ -572,12 +572,42 @@ def _run_cnn_fold(
     }
 
 
+#: Where the label catalogue sits relative to the repository root.
+LABELS_RELATIVE = Path("data") / "tables" / "labels" / "labels.parquet"
+
+
+def _labels_path(cv_root: Path) -> Path:
+    """Resolve the label catalogue from a run directory, positionally.
+
+    `_aggregate_cv` is called without a cfg, so the path is derived from
+    `models/cv/<run>` rather than configured. That derivation is an assumption
+    about layout, and layout has already moved once — the caches were
+    reorganised by mission on 2026-08-15 — so it is asserted rather than
+    trusted. A silently wrong root here writes a summary with no mission block,
+    and the gate's resulting REJECT is indistinguishable from a quality one.
+    """
+    root = cv_root.parents[2]
+    if cv_root.parent.name != "cv" or cv_root.parents[1].name != "models":
+        raise ValueError(
+            f"cannot resolve the repository root from {cv_root}: expected a "
+            f"models/cv/<run> layout, got .../{cv_root.parents[1].name}/"
+            f"{cv_root.parent.name}/{cv_root.name}"
+        )
+    return root / LABELS_RELATIVE
+
+
 def _labelled_predictions(cv_root: Path) -> pd.DataFrame | None:
     """The pooled out-of-fold set, with the columns the summary pieces expect.
 
     The trainer writes `y_true`/`prob_calibrated` and no mission, because it
     never needed them. Both shared summary functions read `label`, `score` and
     `mission`, so the join happens here rather than in either of them.
+
+    Raises rather than returning None when the labels are absent. Returning None
+    writes a summary the gate cannot slice, and the gate then REJECTs on
+    "populations differ" — a message indistinguishable from a real quality
+    rejection, which is precisely the defect class the 2026-08-07 audit was
+    written about: *a check that returns a plausible answer instead of failing*.
     """
     import pandas as pd
 
@@ -587,17 +617,14 @@ def _labelled_predictions(cv_root: Path) -> pd.DataFrame | None:
     frame = pd.read_parquet(path)
     frame = frame.rename(columns={"y_true": "label", "prob_calibrated": "score"})
     if MISSION_COLUMN not in frame.columns:
-        # models/cv/<run> -> repo root. Derived rather than configured because
-        # _aggregate_cv is called without cfg, and a summary that silently
-        # drops its mission block is the defect this function exists to fix.
-        labels = cv_root.parents[2] / "data" / "tables" / "labels" / "labels.parquet"
+        labels = _labels_path(cv_root)
         if not labels.exists():
-            log.warning(
-                "[train-cnn-cv] no labels at %s — writing no per_mission block, "
-                "which the promotion gate cannot slice",
-                labels,
+            raise FileNotFoundError(
+                f"no label catalogue at {labels}, so no per-mission block can be "
+                "written and the promotion gate cannot slice this run's population. "
+                "Refusing to write a summary that would be REJECTed for a reason "
+                "indistinguishable from a quality rejection"
             )
-            return None
         missions = pd.read_parquet(labels)[["tic_id", MISSION_COLUMN]].drop_duplicates("tic_id")
         frame = frame.merge(missions, on="tic_id", how="left", validate="many_to_one")
     return frame

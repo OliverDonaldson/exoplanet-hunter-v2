@@ -81,7 +81,7 @@ def _notify(message: str) -> None:
 
 @task(retries=2, retry_delay_seconds=60)
 def download_exofop_exports() -> None:
-    dest = REPO_ROOT / "data" / "exofop"
+    dest = REPO_ROOT / "data" / "csv" / "exofop"
     dest.mkdir(parents=True, exist_ok=True)
     for name, url in EXOFOP_URLS.items():
         resp = requests.get(url, timeout=300)
@@ -103,7 +103,7 @@ def refresh_label_catalogue(data_config: str) -> Path:
     Must run the *same* data group the build uses: a capped rebuild here
     silently shrinks the data-of-record and starves the refresh trigger.
     """
-    labels = REPO_ROOT / "data" / "labels" / "labels.parquet"
+    labels = REPO_ROOT / "data" / "tables" / "labels" / "labels.parquet"
     previous = labels.with_suffix(".previous.parquet")
     if labels.exists():
         shutil.copy(labels, previous)
@@ -128,7 +128,7 @@ def decide_training(previous_labels: Path, min_new_labelled: int, force: bool) -
         return True
     decision = evaluate_refresh(
         pd.read_parquet(previous_labels),
-        pd.read_parquet(REPO_ROOT / "data" / "labels" / "labels.parquet"),
+        pd.read_parquet(REPO_ROOT / "data" / "tables" / "labels" / "labels.parquet"),
         min_new_labelled=min_new_labelled,
         force=force,
     )
@@ -239,35 +239,67 @@ def train(data_config: str, fold_assignment: Path | None = None) -> None:
         _run([PYTHON, "-m", "exoplanet_hunter.training.train", *overrides])
 
 
+def _incumbent_is_sliceable() -> bool:
+    """Does the model the registry currently serves carry a per_mission block?
+
+    If it does, the gate needs no override and the comparison tracks the
+    registry — which is what makes a promotion move the reference.
+    """
+    registry = REPO_ROOT / "models" / "registry.json"
+    if not registry.exists():
+        return False
+    run_id = json.loads(registry.read_text()).get("run_id")
+    if not run_id:
+        return False
+    summary = REPO_ROOT / "models" / "cv" / run_id / "cv_summary.json"
+    if not summary.exists():
+        return False
+    return "per_mission" in json.loads(summary.read_text())
+
+
 @task
 def promotion_gate() -> bool:
     """Gate the newest CV run; promote (update registry) if it wins."""
     cv_root = REPO_ROOT / "models" / "cv"
     newest = max(cv_root.glob("*/cv_summary.json"), key=lambda p: p.stat().st_mtime)
-    # The incumbent is gated against its RE-BASELINED summary, not the one
-    # registry.json names. `ca906040`'s own summary predates the per_mission
-    # block, so without this the gate cannot slice its population and refuses to
-    # compare at all — REJECT before a metric is read, whatever the candidate
-    # scored. 3.7 found that and closed it with this flag; the flow never passed
-    # it, so the weekly loop kept hitting the defect 3.7 had already fixed.
+    # The incumbent is whatever the REGISTRY names — resolved by
+    # load_incumbent_summary — so the comparison follows each promotion instead
+    # of being pinned to one baseline forever.
+    #
+    # --incumbent-summary is a FALLBACK, not the default. It applies only when
+    # the served model's own summary predates the per_mission block, which is
+    # true of ca906040 and of nothing trained since adf4a71. Passing it
+    # unconditionally would freeze the reference: promote a new model and the
+    # next candidate would still be gated against the old re-baselined one.
     cmd = [
         PYTHON,
         "pipeline/scripts/promotion_gate.py",
         str(newest.relative_to(REPO_ROOT)),
         "--promote",
     ]
-    rebaselined = REPO_ROOT / "models" / "cv" / "incumbent-rebaselined" / "cv_summary.json"
-    if rebaselined.exists():
-        cmd += ["--incumbent-summary", str(rebaselined.relative_to(REPO_ROOT))]
-    else:
-        get_run_logger().warning(
-            "[gate] no re-baselined incumbent summary at %s — the gate will compare "
-            "pooled means and may refuse on population mismatch",
-            rebaselined,
-        )
+    if not _incumbent_is_sliceable():
+        rebaselined = REPO_ROOT / "models" / "cv" / "incumbent-rebaselined" / "cv_summary.json"
+        if rebaselined.exists():
+            get_run_logger().info(
+                "[gate] the served model's summary predates per_mission — falling back to %s",
+                rebaselined.name,
+            )
+            cmd += ["--incumbent-summary", str(rebaselined.relative_to(REPO_ROOT))]
+        else:
+            get_run_logger().warning(
+                "[gate] the served model's summary cannot be sliced and no re-baselined "
+                "summary exists — the gate will refuse on population mismatch"
+            )
+
     result = subprocess.run(cmd, cwd=REPO_ROOT)
+    # 0 promote, 1 reject, 2 unresolved. UNRESOLVED must not collapse into either
+    # neighbour: as 0 the loop would promote on a margin it cannot resolve, as 1
+    # it would report a quality rejection that did not happen.
+    verdict = {0: "PROMOTED", 1: "rejected", 2: "UNRESOLVED — stop and ask"}.get(
+        result.returncode, f"gate failed (exit {result.returncode})"
+    )
     promoted = result.returncode == 0
-    get_run_logger().info("promotion gate: %s", "PROMOTED" if promoted else "rejected")
+    get_run_logger().info("promotion gate: %s", verdict)
     return promoted
 
 

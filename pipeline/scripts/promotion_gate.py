@@ -18,6 +18,7 @@ from pathlib import Path
 
 from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation import (
+    Verdict,
     evaluate_promotion,
     load_incumbent_summary,
     promote,
@@ -74,7 +75,11 @@ def main() -> None:
         registry = promote(args.models_dir, run_id, args.cv_summary)
         log.info("[promotion] registry updated -> run %s", registry["run_id"])
 
-    sys.exit(0 if decision.promoted else 1)
+    # Three exit codes for three verdicts. UNRESOLVED must not collapse into
+    # either neighbour: read as 0 an unattended loop would promote on a margin
+    # it cannot resolve, and read as 1 it would report a quality rejection that
+    # did not happen.
+    sys.exit({Verdict.PROMOTE: 0, Verdict.REJECT: 1, Verdict.UNRESOLVED: 2}[decision.verdict])
 
 
 if __name__ == "__main__":

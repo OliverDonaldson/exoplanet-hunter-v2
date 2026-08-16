@@ -21,7 +21,7 @@ log = get_logger(__name__)
 
 def _default_tics(root: Path) -> list[int]:
     tics: set[int] = set()
-    labels = root / "data" / "labels" / "labels.parquet"
+    labels = root / "data" / "tables" / "labels" / "labels.parquet"
     if labels.exists():
         df = pd.read_parquet(labels)
         tics |= {int(t) for t in df[df["mission"] == "TESS"]["tic_id"]}
@@ -38,7 +38,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()
 
-    out = args.out or (args.root / "data" / "gaia" / "ruwe.parquet")
+    out = args.out or (args.root / "data" / "tables" / "gaia" / "ruwe.parquet")
     out.parent.mkdir(parents=True, exist_ok=True)
 
     tics = _default_tics(args.root)

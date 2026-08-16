@@ -42,6 +42,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -189,43 +190,121 @@ class DecisionFloor:
 LEGACY_RECALL_TOLERANCE = 0.02
 
 
-def decision_floor(summary: dict[str, Any]) -> DecisionFloor:
-    """Resolvable margins for this candidate, by stage 6's rule.
+#: Pooled median `pooled_gate_recall_seed_sd` over the 11 runs on disk that
+#: measured one (0.0029-0.0632, a 22.1x spread). Used ONLY for the incumbent
+#: term, and only until an incumbent is re-baselined carrying its own variance
+#: block — no incumbent summary on disk has one. Pre-registered in roadmap 4.1b.
+POOLED_RECALL_SEED_SD = 0.0353
+#: The same, for AUC. Both are priors standing in for a measurement, and every
+#: decision text that leans on one has to say so.
+POOLED_SEED_SD = 0.0081
 
-    Read from the candidate rather than the incumbent: the incumbent's summary
-    is a stored artefact that may predate the variance block entirely, and it is
-    the candidate's own reseeding spread that says whether *this* run's margin
-    is real.
-    """
+
+def _variance(summary: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
     variance = summary.get("summary", {}).get("variance") or {}
     n_models = variance.get("n_models_per_fold")
-    if not n_models or n_models < 1:
+    return variance, int(n_models) if n_models and n_models >= 1 else None
+
+
+def decision_floor(
+    summary: dict[str, Any], incumbent: dict[str, Any] | None = None
+) -> DecisionFloor:
+    """Resolvable margins, by stage 6's rule applied to what is being compared.
+
+    The quantity under test is a **difference of two run means**, so the
+    tolerance is `2 x se(delta)` with
+
+        se(delta) = sqrt( sd_cand^2 / n_cand + sd_inc^2 / n_inc )
+
+    not `2 x sd_cand / sqrt(n_cand)`, which is the se of the candidate's mean
+    alone. Reading only the candidate ignored the incumbent's noise entirely —
+    stage 6's caveat 1 says plainly that it should not — and let a noisier
+    candidate earn itself a wider band to clear. Across the 11 runs on disk that
+    quantity spans 22.1x.
+
+    A noisier candidate still earns a wider band under this rule, correctly:
+    its mean is genuinely less well known. What stops that being exploitable is
+    `Verdict.UNRESOLVED`, which catches exactly the case where a margin has
+    become comparable to its own floor. Adopted and pre-registered in 4.1b.
+    """
+    variance, n_models = _variance(summary)
+    if n_models is None:
         return DecisionFloor(None, None, "no variance block — run with --n-models-per-fold")
 
-    root = math.sqrt(float(n_models))
+    inc_variance, inc_n = _variance(incumbent or {})
+    borrowed: list[str] = []
 
-    def floor(key: str) -> float | None:
+    def floor(key: str, pooled: float) -> float | None:
         sd = variance.get(key)
-        return 2.0 * float(sd) / root if sd else None
+        if not sd:
+            return None
+        term = float(sd) ** 2 / n_models
+        inc_sd = inc_variance.get(key)
+        if inc_sd and inc_n:
+            term += float(inc_sd) ** 2 / inc_n
+        else:
+            # The incumbent measured nothing, so a prior stands in for it. Named
+            # in the source string rather than folded in silently: substituting
+            # an assumption for a measurement without saying so is this
+            # project's own recurring defect class.
+            term += pooled**2 / n_models
+            borrowed.append(key)
+        return 2.0 * math.sqrt(term)
 
-    return DecisionFloor(
-        auc=floor("seed_sd"),
-        recall=floor("pooled_gate_recall_seed_sd"),
-        source=f"2 x seed_sd / sqrt({int(n_models)}), measured by this run",
-    )
+    auc = floor("seed_sd", POOLED_SEED_SD)
+    recall = floor("pooled_gate_recall_seed_sd", POOLED_RECALL_SEED_SD)
+    source = f"2 x se(candidate - incumbent), n={n_models}"
+    if borrowed:
+        source += (
+            f"; incumbent variance unmeasured for {sorted(set(borrowed))} — "
+            f"pooled prior used (recall {POOLED_RECALL_SEED_SD}, auc {POOLED_SEED_SD})"
+        )
+    return DecisionFloor(auc=auc, recall=recall, source=source)
+
+
+class Verdict(StrEnum):
+    """Three states, because stage 6's caveat 2 describes three.
+
+    A `bool` made a margin at 0.8x its floor read the same as one at 0.1x. The
+    roadmap's own words: *"If the result lands within a factor of ~1.5 of a
+    threshold, the honest reading is unresolved — that is a stop-and-ask."*
+    """
+
+    PROMOTE = "PROMOTE"
+    UNRESOLVED = "UNRESOLVED"
+    REJECT = "REJECT"
+
+
+#: A margin between `floor / 1.5` and `floor * 1.5` is not resolvable against a
+#: floor estimated from three draws, whose own sampling spread is ~40% of its
+#: value (stage 6, caveat 2).
+UNRESOLVED_BAND = 1.5
+
+
+def unresolved_against(margin: float, floor: float | None) -> bool:
+    """Is `margin` too close to `floor` for the comparison to decide?"""
+    if floor is None or floor <= 0.0:
+        return False
+    return floor / UNRESOLVED_BAND <= abs(margin) <= floor * UNRESOLVED_BAND
 
 
 @dataclass
 class PromotionDecision:
-    promoted: bool
+    verdict: Verdict
     reasons: list[str] = field(default_factory=list)
-    #: Reported slices whose AUC fell beyond `mission_alarm`. Never blocking —
-    #: each one owes a written explanation in the roadmap before promotion.
+    #: Reported slices whose AUC fell beyond `mission_alarm`. Advisory by
+    #: default; blocking under `strict`, which is what an unattended loop uses —
+    #: "owes a written explanation in the roadmap before promotion" is a
+    #: condition no unattended run can satisfy.
     alarms: list[str] = field(default_factory=list)
 
+    @property
+    def promoted(self) -> bool:
+        """Only PROMOTE promotes. UNRESOLVED is explicitly not a promotion."""
+        return self.verdict is Verdict.PROMOTE
+
     def __str__(self) -> str:
-        verdict = "PROMOTE" if self.promoted else "REJECT"
-        out = f"{verdict}: " + "; ".join(self.reasons)
+        out = f"{self.verdict.value}: " + "; ".join(self.reasons)
         return out + ("\nALARM: " + "; ".join(self.alarms) if self.alarms else "")
 
 
@@ -388,7 +467,9 @@ def evaluate_promotion(
     what the pre-stage-6 tests do deliberately.
     """
     if incumbent is None:
-        return PromotionDecision(True, ["first registered model — becomes the incumbent"])
+        return PromotionDecision(
+            Verdict.PROMOTE, ["first registered model — becomes the incumbent"]
+        )
 
     cand_slice, inc_slice = _gate_slice(candidate), _gate_slice(incumbent)
     cand_recall: float | None = None
@@ -410,7 +491,7 @@ def evaluate_promotion(
         )
         header = "gated on pooled CV means — a summary here predates the per_mission block"
 
-    floor = decision_floor(candidate)
+    floor = decision_floor(candidate, incumbent)
     if recall_tolerance is None:
         recall_tolerance = floor.recall if floor.recall is not None else LEGACY_RECALL_TOLERANCE
 
@@ -423,6 +504,7 @@ def evaluate_promotion(
         f"Brier {cand_brier:.4f} vs incumbent {inc_brier:.4f}",
     ]
     diagnostics, alarms = _diagnostics(candidate, incumbent, mission_alarm)
+    unresolved: list[str] = []
     reasons += diagnostics
     if gate_size:
         alarms.append(gate_size)
@@ -447,7 +529,7 @@ def evaluate_promotion(
     ]
     if unmeasured:
         reasons.append(f"not measurable: {', '.join(unmeasured)}")
-        return PromotionDecision(False, reasons, alarms)
+        return PromotionDecision(Verdict.REJECT, reasons, alarms)
 
     # Gating on the deployment slice compares one mission the two runs both
     # scored, so a mission only one of them has is worth reporting but does not
@@ -467,7 +549,7 @@ def evaluate_promotion(
                 "matched — re-baseline the incumbent on the current view set, or "
                 "pass allow_unmatched_populations=True to read it anyway"
             )
-            return PromotionDecision(False, reasons, alarms)
+            return PromotionDecision(Verdict.REJECT, reasons, alarms)
 
     if cand_auc <= inc_auc:
         # A tie and a loss are not the same statement, and saying "does not beat"
@@ -491,16 +573,16 @@ def evaluate_promotion(
                 f"does not beat the incumbent's CV score (-{margin:.4f}, "
                 f"{floor.times(margin, floor.auc)})"
             )
-        return PromotionDecision(False, reasons, alarms)
+        return PromotionDecision(Verdict.REJECT, reasons, alarms)
     if cand_brier > inc_brier + brier_tolerance:
         reasons.append(f"calibration degraded beyond tolerance (+{brier_tolerance})")
-        return PromotionDecision(False, reasons, alarms)
+        return PromotionDecision(Verdict.REJECT, reasons, alarms)
 
     if cand_ece is not None and inc_ece is not None:
         reasons.append(f"ECE {cand_ece:.4f} vs incumbent {inc_ece:.4f}")
         if cand_ece > inc_ece + ece_tolerance:
             reasons.append(f"reliability degraded beyond tolerance (+{ece_tolerance})")
-            return PromotionDecision(False, reasons, alarms)
+            return PromotionDecision(Verdict.REJECT, reasons, alarms)
     else:
         reasons.append("ECE guard skipped — summary predates the test_ece field")
 
@@ -514,9 +596,19 @@ def evaluate_promotion(
             + ("" if measured else ", legacy constant — this run reported no variance block")
             + ")"
         )
-        if margin < -recall_tolerance:
+        # Order matters and is pre-registered: a margin 1.02x its own floor is
+        # not a confident rejection, so the band is tested BEFORE the threshold.
+        # Only a margin clear of the band on the wrong side rejects.
+        if margin < -recall_tolerance and not unresolved_against(margin, recall_tolerance):
             reasons.append(f"shortlist recall degraded beyond tolerance (-{recall_tolerance:.4f})")
-            return PromotionDecision(False, reasons, alarms)
+            return PromotionDecision(Verdict.REJECT, reasons, alarms)
+        if unresolved_against(margin, recall_tolerance):
+            # Not a rejection and not a promotion: the margin and the floor it is
+            # read against are the same size, and the floor is three draws wide.
+            unresolved.append(
+                f"shortlist recall margin {margin:+.4f} is within {UNRESOLVED_BAND}x of its "
+                f"{recall_tolerance:.4f} floor — too close to call from three draws"
+            )
     else:
         reasons.append("recall guard skipped — summary predates the per_mission block")
 
@@ -537,8 +629,25 @@ def evaluate_promotion(
                 "spread — repeat the run before reading this as an improvement"
             )
 
+    if unresolved_against(cand_auc - inc_auc, floor.auc):
+        unresolved.append(
+            f"gate AUC margin {cand_auc - inc_auc:+.4f} is within {UNRESOLVED_BAND}x of its "
+            f"{floor.auc:.4f} floor — too close to call from three draws"
+        )
+
+    if unresolved:
+        # REJECT dominates UNRESOLVED dominates PROMOTE. Reaching here means no
+        # criterion rejected, so the only question left is whether any of them
+        # could be resolved at all.
+        reasons.extend(unresolved)
+        reasons.append(
+            "no criterion rejected, but the decision is not resolvable against a floor "
+            "this wide — a stop-and-ask, per stage 6 caveat 2"
+        )
+        return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms)
+
     reasons.append("beats incumbent with calibration and shortlist recall intact")
-    return PromotionDecision(True, reasons, alarms)
+    return PromotionDecision(Verdict.PROMOTE, reasons, alarms)
 
 
 # ------------------------------------------------------------------ registry --

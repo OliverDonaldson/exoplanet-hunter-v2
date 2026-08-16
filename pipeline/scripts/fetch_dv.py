@@ -27,7 +27,7 @@ log = get_logger(__name__)
 def _default_tics(root: Path) -> list[int]:
     """Labelled TESS targets ∪ scored candidates."""
     tics: set[int] = set()
-    labels = root / "data" / "labels" / "labels.parquet"
+    labels = root / "data" / "tables" / "labels" / "labels.parquet"
     if labels.exists():
         df = pd.read_parquet(labels)
         tics |= {int(t) for t in df[df["mission"] == "TESS"]["tic_id"]}

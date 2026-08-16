@@ -101,7 +101,8 @@ def get_scorer():
                 ),
                 candidates_path=Path(
                     os.environ.get(
-                        "CATALOGUE_PATH", _ROOT / "data" / "catalogue" / "candidates.parquet"
+                        "CATALOGUE_PATH",
+                        _ROOT / "data" / "tables" / "catalogue" / "candidates.parquet",
                     )
                 ),
             )

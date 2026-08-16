@@ -83,7 +83,7 @@ def _lightcurve_path(root: Path, tic: int, mission: str) -> tuple[Path | None, s
 
 def _side_tables(root: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     dv_path = root / "data" / "processed" / "dv_scalars.parquet"
-    ruwe_path = root / "data" / "gaia" / "ruwe.parquet"
+    ruwe_path = root / "data" / "tables" / "gaia" / "ruwe.parquet"
     dv = pd.read_parquet(dv_path) if dv_path.exists() else pd.DataFrame(columns=["tic_id"])
     if len(dv):
         # One DV row per target: the widest run, which is the usable one.
@@ -191,7 +191,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    catalogue = args.catalogue or (args.root / "data" / "labels" / "labels.parquet")
+    catalogue = args.catalogue or (args.root / "data" / "tables" / "labels" / "labels.parquet")
     out = args.out or (args.root / "data" / "processed")
     cache = args.cache or (args.root / "data" / "interim" / "viewset")
     _cache_dir(cache).mkdir(parents=True, exist_ok=True)

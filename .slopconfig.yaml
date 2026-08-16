@@ -1,0 +1,105 @@
+# .slopconfig.yaml — ai-slop-detector configuration
+#
+# Committed on purpose (the tool's --init gitignores this by default). CI and a
+# local run must score the same code the same way, or the gate is meaningless.
+#
+# Pinned tool version: 3.8.7 — see .github/workflows/ci.yml.
+
+version: "2.0"
+
+# ── Metric weights ──────────────────────────────────────────────────────────
+# Baseline is the tool's scientific/ml domain profile, with one deliberate
+# change: purity 0.05 -> 0.15, taken off ldr and ddc. purity is the
+# critical-pattern penalty, and the critical patterns it scores
+# (bare_except, empty_except, mutable_default_arg) are the exact shape of this
+# repo's defining failure mode — a check that returns a plausible answer
+# instead of failing loudly. Weighting it at 0.05 would let those hide behind
+# good structure elsewhere. See docs/audit-2026-08-07.md.
+weights:
+  ldr:       0.45  # Logic Density Ratio
+  inflation: 0.05  # Inflation-to-Code Ratio (jargon density)
+  ddc:       0.35  # Deep Dependency Check (import usage ratio)
+  purity:    0.15  # Critical-pattern penalty
+
+# ── Ignore patterns ─────────────────────────────────────────────────────────
+ignore:
+  # Vendored third-party source is kept byte-for-byte as upstream ships it.
+  # Same rationale as the .pre-commit-config.yaml exclude: we do not own this
+  # code and must not be scored on it.
+  - "pipeline/vendor/**"
+
+  # Tests: one test file per source module is an explicit project rule, so the
+  # test tree is intentionally repetitive. Scoring it produces clone noise, not
+  # findings. Drop these two lines if you ever want the test tree audited.
+  - "**/tests/**"
+  - "**/test_*.py"
+  - "**/*_test.py"
+
+  # Re-export shims carry no logic; they score as empty by construction.
+  - "**/__init__.py"
+
+  # Generated / environment noise.
+  - "**/.venv/**"
+  - "**/site-packages/**"
+  - "**/.mypy_cache/**"
+  - "**/node_modules/**"
+  - "frontend/**/dist/**"
+
+  # Run artefacts and data. No .py lives here today; these keep it that way if
+  # a stray script ever lands in a run directory.
+  - "mlruns/**"
+  - "models/**"
+  - "results/**"
+  - "outputs/**"
+  - "data/**"
+  - "**/*.ipynb"
+
+# ── Analysis cache ──────────────────────────────────────────────────────────
+# The tool defaults this to ~/.slop-detector/analysis_cache.db — one cache
+# shared by every repo on the machine. Its key is
+# (path, size, mtime, sha256, engine_version, config_fingerprint), which does
+# NOT include the Python environment. phantom_import results DO depend on the
+# environment, so a scan run with the project's deps missing writes wrong
+# results that later, correct runs then reuse for unchanged files. That is how
+# this repo first measured 11.9 with 47 bogus criticals instead of 2.56.
+# Keeping the cache in-repo scopes the blast radius to this project.
+# If a scan ever looks wrong, delete .slop-detector/ and re-run.
+# (The key is advanced.analysis_cache_db — see the `advanced` block below.)
+
+# ── Pattern detection ────────────────────────────────────────────────────────
+patterns:
+  enabled: true
+  severity_threshold: low
+
+  # Cross-language patterns assume a Python author fumbling another language's
+  # idiom. In a numpy/pandas codebase they mostly fire on real library APIs.
+  # Measured here on 2026-08-16: java_equals flagged
+  # eval/comparison.py:231, where `.equals()` is pandas Series.equals — and its
+  # suggested fix (use `==`) would turn a whole-object guard into an elementwise
+  # comparison, i.e. silently convert a working check into one that returns a
+  # plausible answer. That is the precise failure mode this repo exists to
+  # avoid, so the whole family is off rather than suppressed per-line.
+  disabled:
+    - java_equals      # pandas/numpy .equals()
+    - js_push          # list-like .push() on JS-interop objects
+    - csharp_length    # .Length on array wrappers
+    - php_strlen
+    - ruby_each
+    - go_println
+
+  god_function:
+    complexity_threshold: 15
+    lines_threshold: 100
+    domain_overrides: []
+
+  nested_complexity:
+    depth_threshold: 6
+    cc_threshold: 20
+    domain_overrides: []
+
+# ── Advanced ─────────────────────────────────────────────────────────────────
+advanced:
+  use_radon: true
+  min_file_size: 10
+  # Project-local, not ~/.slop-detector/. See the analysis-cache note above.
+  analysis_cache_db: ".slop-detector/analysis_cache.db"
