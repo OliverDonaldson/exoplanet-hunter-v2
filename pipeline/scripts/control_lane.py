@@ -45,6 +45,13 @@ from exoplanet_hunter.validation import load_registry
 
 log = get_logger(__name__)
 
+#: The lane refusing to decide is not the lane crashing, and an unattended caller
+#: cannot tell them apart from "non-zero" alone — the same conflation that made a
+#: crashed gate read as a quality rejection. A gate slice too thin to measure is a
+#: legitimate answer: *not resolvable on this population*. It shares UNRESOLVED's
+#: exit code because it is the same verdict, reached one step earlier.
+REFUSED_EXIT_CODE = 2
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -145,7 +152,13 @@ def main() -> None:
     # Both guards run before anything is written. A summary on disk is a summary
     # something will read, and a caller that finds one has no way to know it was
     # produced by a run that failed its own checks.
-    assert_gateable(summary)
+    try:
+        assert_gateable(summary)
+    except ValueError as refusal:
+        # Exit, not raise: a traceback here is indistinguishable from a genuine
+        # fault to anything reading the return code, and this is a decision.
+        log.error("[control] refusing to produce a control summary: %s", refusal)
+        raise SystemExit(REFUSED_EXIT_CODE) from refusal
     if args.reproduces is not None:
         original = json.loads(args.reproduces.read_text())
         if drifted := reproduces(summary, original):

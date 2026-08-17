@@ -3068,12 +3068,32 @@ Verified on the real index — built over 5,426 groups at
 `[1085, 1085, 1085, 1085, 1086]`; a simulated refresh adding 300 targets gives
 **0 moved** and `[1146, 1145, 1145, 1145, 1145]`.
 
-**Defect 1 is not fixed and is not wiring.** The evaluation population itself
-grows every refresh, so a delta still blends the model effect with the data
-effect. Isolating it needs a **control lane** — the incumbent re-scored on the
-new population — which is compute, and is the open remainder of this item.
-Until it lands, a weekly promotion is attributable to "the model or the data",
-not to the model.
+~~**Defect 1 is not fixed and is not wiring.**~~ **Closed 2026-08-17.** The
+evaluation population itself grows every refresh, so a delta blended the model
+effect with the data effect. Isolating it needed a **control lane** — the
+champion re-scored on the new population — built at 4.1c, validated at 4.1d and
+now **read by the weekly gate**: `refresh_pipeline` runs the lane after
+`preprocess_and_shard` and passes its summary as `--champion-summary` on every
+run. A weekly promotion is now attributable to the model.
+
+Three things about the wiring worth having written down:
+
+- **The reference follows the registry by construction, not by a branch.** The
+  old `--champion-summary` had to be conditional — it named one model measured on
+  one 2026-08-07 population, so passing it always would have frozen the
+  comparison. The lane re-derives from `models/registry.json` every run, so
+  passing it unconditionally is what keeps the reference moving.
+- **There is no fallback, deliberately.** When the lane refuses, the flow does
+  not gate at all: it reports UNRESOLVED and asks for a re-baseline. Substituting
+  the stored summary for a control the lane declined to produce is exactly the
+  "quietly deciding on the remainder" 4.1c rule 3 forbids. `incumbent-rebaselined`
+  stays on disk because recorded commands name it, and nothing routes to it.
+- **A refusal and a crash are different exits.** The lane exits `2` — UNRESOLVED's
+  own code — when the shared slice is too thin, and non-zero-but-not-2 when it
+  actually failed. This is the same conflation that made a crashed gate read as a
+  quality rejection, fixed once here rather than twice later. Exit `0` with no
+  summary written is also a failure: the file at that path would otherwise be
+  last week's control, read as this week's.
 
 #### Calibration run — 2026-08-16. It did not measure a floor; it found why there isn't one
 

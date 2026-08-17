@@ -275,26 +275,63 @@ def train(data_config: str, fold_assignment: Path | None = None) -> None:
         _run([PYTHON, "-m", "exoplanet_hunter.training.train", *overrides])
 
 
-def _champion_is_sliceable() -> bool:
-    """Does the model the registry currently serves carry a per_mission block?
-
-    If it does, the gate needs no override and the comparison tracks the
-    registry — which is what makes a promotion move the reference.
-    """
-    registry = REPO_ROOT / "models" / "registry.json"
-    if not registry.exists():
-        return False
-    run_id = json.loads(registry.read_text()).get("run_id")
-    if not run_id:
-        return False
-    summary = REPO_ROOT / "models" / "cv" / run_id / "cv_summary.json"
-    if not summary.exists():
-        return False
-    return "per_mission" in json.loads(summary.read_text())
+#: The lane's summary lands in `models/cv/` like every run's does, so the gate
+#: needs to tell it from a candidate. A name, not a path built from `REPO_ROOT`:
+#: that is monkeypatched per-test and a module-level path would capture the real
+#: repository at import and silently stop matching.
+CONTROL_LANE_DIR_NAME = "control-lane"
 
 
 @task
-def promotion_gate() -> PromotionDecision:
+def control_lane() -> Path | None:
+    """Re-score the served model on today's population, before the gate reads it.
+
+    Without this the gate compares a candidate scored on the current catalogue
+    against the champion's summary from whenever it was trained, and reports the
+    sum of a model effect and a population effect as if it were the first. This
+    measures the champion again, now, on the rows the candidate is judged on.
+
+    It runs **after** `preprocess_and_shard`, because "today's population" means
+    the shard set this refresh just built, and it scores the champion by the
+    champion's own folds — the ones that held each row out — not the candidate's.
+
+    Returns the summary's path, or **None when the lane refused**: a shared
+    population too thin to measure is a verdict, not a fault, and 4.1c fixed what
+    happens next — the run reports UNRESOLVED and asks for a re-baseline rather
+    than quietly deciding on the remainder. Falling back to a stored summary here
+    would be exactly that, so there is no fallback.
+    """
+    from exoplanet_hunter.validation import VERDICT_EXIT_CODES, Verdict
+
+    out = REPO_ROOT / "models" / "cv" / CONTROL_LANE_DIR_NAME / "cv_summary.json"
+    result = subprocess.run(
+        [PYTHON, "pipeline/scripts/control_lane.py", "--out", str(out.relative_to(REPO_ROOT))],
+        cwd=REPO_ROOT,
+    )
+    if result.returncode == VERDICT_EXIT_CODES[Verdict.UNRESOLVED]:
+        get_run_logger().warning(
+            "[control] the lane refused: the population shared with the champion is too "
+            "thin to decide on. Nothing will be gated this run"
+        )
+        return None
+    if result.returncode != 0:
+        _fail(
+            f"the control lane exited {result.returncode} without refusing and without "
+            "producing a summary — it crashed rather than deciding. Nothing was compared "
+            "and nothing was promoted. This is NOT a quality rejection"
+        )
+    if not out.exists():
+        # Exit 0 and no file is worse than a crash: every later step would read a
+        # summary from a previous week and call it this week's control.
+        _fail(
+            f"the control lane exited 0 but wrote no summary at {out} — the file a gate "
+            "would read here is whatever an earlier run left behind"
+        )
+    return out
+
+
+@task
+def promotion_gate(champion_summary: Path) -> PromotionDecision:
     """Gate the newest CV run; promote (update registry) if it wins.
 
     Returns the gate's own verdict with its reasons and alarms, not a bool. A
@@ -305,16 +342,33 @@ def promotion_gate() -> PromotionDecision:
     from exoplanet_hunter.validation import VERDICT_EXIT_CODES, read_decision
 
     cv_root = REPO_ROOT / "models" / "cv"
-    newest = max(cv_root.glob("*/cv_summary.json"), key=lambda p: p.stat().st_mtime)
-    # The champion is whatever the REGISTRY names — resolved by
-    # load_champion_summary — so the comparison follows each promotion instead
-    # of being pinned to one baseline forever.
+    # The candidate is the newest summary that is not the control lane's. The
+    # lane writes into models/cv/ like everything else, so without this it can be
+    # the newest file present and the gate would select it as the candidate and
+    # compare it against itself — a guaranteed dead heat, reported as a decision.
+    # The lane also runs before train() so its summary is not newest in practice;
+    # this is here because "in practice" is doing too much work in that sentence.
+    candidates = [
+        path
+        for path in cv_root.glob("*/cv_summary.json")
+        if path.parent.name != CONTROL_LANE_DIR_NAME
+    ]
+    if not candidates:
+        _fail("no candidate cv_summary.json under models/cv — there is nothing to gate")
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    # `champion_summary` is the control lane's, so it is by construction a
+    # measurement of **whatever the registry currently serves**, taken on **this
+    # week's population**. That is why it can be passed unconditionally where a
+    # stored summary could not: the old fallback to `incumbent-rebaselined` had
+    # to be conditional precisely because it was pinned to one model measured on
+    # one 2026-08-07 population, and passing it always would have frozen the
+    # reference. The lane re-derives from the registry every run, so it follows
+    # each promotion instead of outliving it.
     #
-    # --champion-summary is a FALLBACK, not the default. It applies only when
-    # the served model's own summary predates the per_mission block, which is
-    # true of ca906040 and of nothing trained since adf4a71. Passing it
-    # unconditionally would freeze the reference: promote a new model and the
-    # next candidate would still be gated against the old re-baselined one.
+    # There is deliberately no fallback: the flow does not reach here at all when
+    # the lane refuses. Substituting a stored summary for a control the lane
+    # declined to produce is "quietly deciding on the remainder", which is the
+    # move 4.1c rule 3 exists to forbid.
     #
     # --strict because nobody is here. An alarm owes a written explanation
     # before promotion, and an unattended run cannot give one — left advisory it
@@ -325,24 +379,9 @@ def promotion_gate() -> PromotionDecision:
         str(newest.relative_to(REPO_ROOT)),
         "--promote",
         "--strict",
+        "--champion-summary",
+        str(champion_summary.relative_to(REPO_ROOT)),
     ]
-    if not _champion_is_sliceable():
-        # The directory keeps the older "incumbent" spelling. Renaming a path on
-        # disk is a data-layout change — it moves a DVC-tracked artefact and
-        # invalidates every recorded command that names it — so the vocabulary
-        # moved and the directory did not.
-        rebaselined = REPO_ROOT / "models" / "cv" / "incumbent-rebaselined" / "cv_summary.json"
-        if rebaselined.exists():
-            get_run_logger().info(
-                "[gate] the served model's summary predates per_mission — falling back to %s",
-                rebaselined.name,
-            )
-            cmd += ["--champion-summary", str(rebaselined.relative_to(REPO_ROOT))]
-        else:
-            get_run_logger().warning(
-                "[gate] the served model's summary cannot be sliced and no re-baselined "
-                "summary exists — the gate will refuse on population mismatch"
-            )
 
     # The exit code alone cannot be trusted to name the verdict: an uncaught
     # exception also exits 1, which is REJECT's code, so a gate that died on a
@@ -420,23 +459,43 @@ def refresh_pipeline(
 
     if decide_training(previous, min_new_labelled, force_train):
         preprocess_and_shard(data_config)
+        # Before training, not after. The lane scores the *champion* and needs
+        # only the shards this step just rebuilt, so this is the earliest correct
+        # point — and it keeps the lane's summary from being the newest file in
+        # models/cv/ when the gate looks for a candidate. Training still happens
+        # if the lane refuses: the candidate is the refresh's actual output and is
+        # worth having on disk for whoever re-baselines. It is simply not gated.
+        control = control_lane()
         folds = roll_fold_assignment()
         train(data_config, fold_assignment=folds)
-        decision = promotion_gate()
-        registry = json.loads((REPO_ROOT / "models" / "registry.json").read_text())
-        message = (
-            f"exoplanet-hunter refresh: trained; gate "
-            f"{_gate_headline(decision.verdict.value)} — serving run "
-            f"{registry['run_id'][:8]} (AUC {registry['test_roc_auc_mean']:.4f})"
-        )
-        # Anything that did not promote has to carry its own explanation. The
-        # verdict alone cannot distinguish a candidate that lost on recall from
-        # one nobody could measure, and this message is the whole report.
-        if not decision.promoted:
-            message += "\n" + "; ".join(decision.reasons)
-        if decision.alarms:
-            message += "\nALARM: " + "; ".join(decision.alarms)
-        _notify(message)
+        if control is None:
+            # The lane refused, so there is no like-for-like reference and the
+            # run has nothing it may honestly gate against. This is UNRESOLVED
+            # reached one step early, and it is notified in those words: the
+            # candidate was not judged and failed nothing.
+            _notify(
+                f"exoplanet-hunter refresh: trained; gate "
+                f"{_gate_headline('UNRESOLVED')} — the control lane refused, because "
+                "the population shared with the champion is too thin to measure on. "
+                "Nothing was gated and nothing promoted; the candidate was not judged. "
+                "Re-baseline the champion on the current view set"
+            )
+        else:
+            decision = promotion_gate(control)
+            registry = json.loads((REPO_ROOT / "models" / "registry.json").read_text())
+            message = (
+                f"exoplanet-hunter refresh: trained; gate "
+                f"{_gate_headline(decision.verdict.value)} — serving run "
+                f"{registry['run_id'][:8]} (AUC {registry['test_roc_auc_mean']:.4f})"
+            )
+            # Anything that did not promote has to carry its own explanation. The
+            # verdict alone cannot distinguish a candidate that lost on recall from
+            # one nobody could measure, and this message is the whole report.
+            if not decision.promoted:
+                message += "\n" + "; ".join(decision.reasons)
+            if decision.alarms:
+                message += "\nALARM: " + "; ".join(decision.alarms)
+            _notify(message)
     else:
         _notify("exoplanet-hunter refresh: catalogue updated, no retrain warranted")
     publish()
