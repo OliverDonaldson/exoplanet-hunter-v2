@@ -3526,6 +3526,150 @@ means choosing what the correctness check should have been, and that is a
 decision about what "the same measurement" means when the inputs are allowed to
 move. It is not a decision to take by editing a tolerance until the run passes.
 
+### 4.1d Pre-registered — the corrected check, which is two checks (2026-08-17, nothing run)
+
+Ollie's ruling on 4.1c. The original rule 4 **asked one question that was
+actually two**, and mixing them is why it could not be answered. They are
+separated here and written down before either is run.
+
+#### Why this is a replacement and not a tolerance adjustment
+
+Recorded explicitly, because a future reader looking for precedent to loosen a
+criterion must not find one here.
+
+**The tolerance does not move. It stays `1e-6`.** What changes is *what the
+check ranges over*. The original demanded that a measurement taken on today's
+inputs equal one taken on 7 August — which is true only if the population never
+moves, and retiring that assumption is the entire reason the lane exists. The
+rule this project runs on forbids **adjusting a criterion to fit a result**. It
+does not forbid **replacing a criterion that measured the wrong thing**.
+
+**The test of whether that distinction is honest: the corrected check can still
+fail.** If the lane's calibrator, its aux pipeline, its fold assignment or its
+metric definitions had diverged from the original path, then rows that did *not*
+change would disagree too — on the same day, on identical inputs, with no
+population drift available to blame. A repair that could not fail would be the
+tolerance-shopping this is not.
+
+**The restricted-population repair is available and is deliberately not taken.**
+Keeping the original comparison and excluding the moved rows does work — the
+evidence is already in hand at 4,595 of 4,610 — but it needs an exclusion
+predicate defined **on the inputs** (rows whose catalogue fields were revised),
+never on whether the output happened to match, or the test is defined by its own
+result. Same-day equivalence needs no such care, so it is strictly the better
+instrument. The restricted form is the fallback only if the original path cannot
+be re-run, and Task 2B established that it can.
+
+#### Check A — method equivalence. Time is removed from it
+
+**The question.** Does the lane compute what the original path computes? That
+has nothing to do with dates, so both sides are run **today**, against the same
+frozen shard set, the same labels table and the same weights.
+
+Left — the original path, the one that produced `incumbent-rebaselined`:
+
+```
+python pipeline/scripts/evaluate.py score \
+    --run models/cv/ca906040cdb74ba6b07353a500244777 --protocol oof \
+    --out results/champion_rebaselined_today.parquet
+
+python pipeline/scripts/evaluate.py summarise \
+    --predictions results/champion_rebaselined_today.parquet --protocol oof \
+    --out models/cv/champion-rebaselined-today/cv_summary.json --exclude-unresolved
+```
+
+Right — the lane, checked against it:
+
+```
+python pipeline/scripts/control_lane.py \
+    --out models/cv/control-lane/cv_summary.json \
+    --reproduces models/cv/champion-rebaselined-today/cv_summary.json \
+    --reproduces-predictions results/champion_rebaselined_today.parquet
+```
+
+**What must agree, at `1e-6`, with no exclusions and no coverage floor:**
+
+1. **Every row.** Identical `tic_id` set, identical fold assignment per row, and
+   `max |Δscore|` over all of them within tolerance. Not a sampled subset and not
+   a slice — if the two paths score a row differently, that is the finding.
+2. **Every slice.** Every metric of every `per_mission` block, not only the
+   `TESS` one rule 4 looked at.
+
+**One scope statement, made here so it is not a hidden carve-out later.** The
+comparison is **out-of-fold only**, because out-of-fold is the only thing the
+lane produces. The stored artefact bundles 4,610 out-of-fold rows with 770
+zero-shot ones; the lane computes no zero-shot block at all, and `per_mission` is
+built from held-out rows in both paths regardless. This excludes no row from a
+comparison either side claims to make.
+
+**If Check A fails, the lane is wrong and is not wired in.** That is a result,
+not an obstacle, and the same rule applies to it as applied to rule 4.
+
+#### Check B — the drift measurement. Not a gate, and not a failure
+
+The 15 rows are the lane's **first real output**, not the wreckage of a failed
+check. Fifteen rows moving in ten days — 0.33% of the gated population, 12
+confirmed planets and 3 false positives, all TESS — is precisely the quantity
+that justifies building the lane, and it is recorded as a measurement **with no
+tolerance attached** and nothing riding on its size.
+
+**One sub-measurement is owed, because 4.1c's stated mechanism is in doubt.**
+That result attributed the drift to revised `period`, `duration` and `depth`
+reaching the score through the label catalogue. Reading `legacy_aux` says that
+cannot be the path: those fields are baked into the **frozen** shard index, and
+the only catalogue column the scorer reads live is `snr`. Check B therefore
+records *which input actually changed*, and 4.1c is corrected against whatever it
+finds rather than left standing.
+
+#### The staleness dependency — the one way this lane goes quietly wrong
+
+`score_run` assembles each feature vector from **two sources with different
+freshness**, and nothing anywhere checks that they correspond:
+
+| what scoring reads | source | last moved |
+|---|---|---|
+| `global_view`, `local_view` | `data/processed/tfrecords/*.tfrecord` | **25 Jul** |
+| `label` — the ground truth every metric is computed against | `tfrecords/index.parquet` | **25 Jul** |
+| aux 0–6 and 8 — period, duration, depth and the rest | `tfrecords/index.parquet` | **25 Jul** |
+| aux 7 — `snr` | `data/tables/labels/labels.parquet` | **15 Aug** |
+
+Three consequences, all silent today:
+
+1. **A revised disposition never reaches the lane.** Ground truth comes from the
+   25 July index, so the lane scores against three-week-old labels while
+   reporting itself as "the champion on the current population".
+2. **A revised `snr` reaches it alone.** One feature moves while the eight beside
+   it stay frozen — an internally inconsistent vector, and no guard notices.
+3. **Rebuilding the view set moves everything at once**, including what a fold
+   assignment refers to, and the lane would report that as a model measurement.
+
+The lane's name claims more currency than its inputs have. **The missing guard
+is a correspondence check between the shard set and the labels table**, and it is
+recorded here as a known hole rather than closed in the same commit that
+discovers it.
+
+*Predictions, recorded so they can be wrong.*
+
+1. **Check A passes** at `1e-6` on every row and every slice. The two paths call
+   the same `score_run` and the same `summarise_scored`; what differs between
+   them is a parquet round trip, a `protocol` column supplied by flag on one side
+   and by assignment on the other, and the mission merge. If any of those is
+   lossy, this is where it shows.
+2. *(restated from 4.1c, still unevaluated)* The model effect against `fc4f3515`
+   is **smaller in magnitude** than the −0.0500 recall margin read against the
+   stored summary. Direction is not predicted.
+3. *(restated from 4.1c, still unevaluated)* The verdict on `fc4f3515` stays
+   **UNRESOLVED**.
+4. **The drift is carried by `snr` alone**, and 4.1c's account of the mechanism
+   is wrong.
+
+**Stops if.** Check A fails: the lane does not get wired in, predictions 2–4 stay
+unevaluated a second time, and the divergence is diagnosed before anything else
+is built on the lane.
+
+**Nothing promotes on any of this.** `models/registry.json` is untouched and
+`ca906040` stays served.
+
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
 **Stage 9 *(old 2(d))* — difference-image branch.** The only genuine *build*
@@ -3655,14 +3799,24 @@ is struck out; everything below the rule is what remains.
 |---|---|---:|---:|---:|---|
 | ~~—~~ | ~~stage 10.5, both halves (3.11c–e)~~ | ~~8–10 h~~ | ~~11 h~~ | ~~**done**~~ | — |
 | ~~—~~ | ~~4.1a wiring: rolling folds + members~~ | ~~2 h~~ | ~~—~~ | ~~**done**~~ | — |
-| **1** | **4.1a remainder** — calibration run, then the control lane | 2–3 h | 5–9 h | **7–12 h** | nothing |
+| **1** | **4.1a remainder** — calibration run, then the control lane | 2–3 h | ~~5–9 h~~ **minutes** | **2–3 h** | nothing |
 | **2** | stage 9 — difference-image branch | 6–9 h | 3–4 h | **9–13 h** | stamp re-grid |
 | **3** | stage 10 — Optuna re-tune | 2 h | 10–13 h | **12–15 h** | stage 9 |
 | **4** | stage 7ii — branch attribution | 1 h | ~7 h | **8 h** | nothing |
 | **5** | stage 11 — serving parity | 12–18 h | — | **12–18 h** | see below |
 | **6** | finishing touches | 4–6 h | — | **4–6 h** | W7 decision |
 | **7** | stage 12 — UI redesign | *unestimated* | — | *unestimated* | everything |
-| | | | | **~52–72 h** plus the UI | |
+| | | | | **~47–63 h** plus the UI | |
+
+**Item 1's compute was wrong by three orders of magnitude, and it was wrong in
+the direction that delays work.** The 5–9 h assumed both halves needed fresh
+scoring runs. Neither did: the control lane is **inference over 4,610 rows, and
+measures 10.6 s** (4.1c), and the variance block the floor comes from was
+arithmetic over member columns the prediction set already carried, costing no new
+compute at all. What is left in the row is build time. The lesson is not the
+arithmetic — it is that **an item was sequenced behind a compute budget nobody
+had measured**, which is the same mistake this project keeps finding in its
+metrics, applied to its own plan.
 
 **Item 1 is first and is not optional.** The weekly gate is the one automated
 decision in the project and it is the only one still read against an
