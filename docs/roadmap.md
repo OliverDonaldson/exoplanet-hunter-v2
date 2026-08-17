@@ -3501,10 +3501,15 @@ better than pre-registered.
 are **bit-identical** to each other on every metric, so inference here is
 deterministic. Against the stored artefact, **4,595 of 4,610 rows agree
 exactly** and **15 differ**, one by 0.072. All 15 are TESS — 12 confirmed
-planets and 3 false positives — and their `period`, `duration` and `depth` come
+planets and 3 false positives — and ~~their `period`, `duration` and `depth` come
 from the label catalogue, which has been refreshed since the stored artefact was
 produced on 2026-08-07. Changed parameters change the aux features, which change
-the score. `data/processed/tfrecords` itself is clean against its DVC pointer;
+the score.~~ **that mechanism is wrong and 4.1d disproves it.** `period`,
+`duration` and `depth` are baked into the *frozen* shard index and cannot reach a
+score at all; the only catalogue column `legacy_aux` reads live is `snr`, which
+4.1d then confirmed by perturbation. The 15 rows and their dispositions are
+correct as recorded — the account of *why* they moved was not.
+`data/processed/tfrecords` itself is clean against its DVC pointer;
 the three artefacts `dvc status` does report as drifted are the *viewset* ones,
 already carried as Ollie's open decision in 4.8.
 
@@ -3669,6 +3674,94 @@ is built on the lane.
 
 **Nothing promotes on any of this.** `models/registry.json` is untouched and
 `ca906040` stays served.
+
+#### Result — Check A passes bitwise, and the lane's first measurement is zero (2026-08-17)
+
+**Check A: PASSED, and by more than the criterion asked for.** The two paths do
+not agree to `1e-6` — they agree **exactly**, on every row and every metric.
+
+| Check A, both paths run today on identical inputs | |
+|---|---:|
+| rows compared | 4,610, symmetric difference **0** |
+| rows agreeing **bitwise** | **4,610 / 4,610** |
+| max abs score difference | **0** (criterion: ≤ 1e-6) |
+| fold assignments disagreeing | 0 |
+| ground-truth labels disagreeing | 0 |
+| metrics compared | 27, across `TESS`, `Kepler` and `all` |
+| worst metric difference | **0** |
+
+**What that does and does not establish.** It establishes that the lane's own
+new code — resolving `fold_of` from the registry, the out-of-fold subsetting,
+the mission merge, the summary assembly — introduces nothing. It **cannot**
+detect a fault inside `score_run` or `summarise_scored`, because both paths call
+them. That limit is a property of any equivalence check between two callers of
+one primitive, and it is stated here rather than left for a reader to notice.
+
+**Check B: the drift, measured.** 15 of 4,610 shared rows — **0.33%** — moved
+beyond `1e-6` in the ten days since the stored artefact, worst **0.0718**. All
+TESS, **12 confirmed planets and 3 false positives**. No row changed fold, and
+**no row changed label**, which is itself a finding: ground truth comes from the
+frozen index, so a disposition revised in the catalogue would not have shown up
+here at all.
+
+| data effect — same champion, two populations, TESS | lane today | stored 7 Aug | effect |
+|---|---:|---:|---:|
+| `roc_auc` | 0.910005 | 0.910004 | +7.2e-07 |
+| `pr_auc` | 0.920337 | 0.920330 | +6.9e-06 |
+| `brier` | 0.121129 | 0.121128 | +7.6e-07 |
+| `ece` | 0.043828 | 0.043850 | −2.2e-05 |
+| **`recall_at_1pct_fpr`** — the gating statistic | 0.306923 | 0.306923 | **exactly 0** |
+| `recall_at_5pct_fpr`, `recall_at_10pct_fpr` | | | **exactly 0** |
+
+**The mechanism, and 4.1c was wrong about it.** `legacy_aux` splices exactly one
+live catalogue column — `snr` — into eight frozen ones; `period`, `duration` and
+`depth` live in the 25 July index and cannot reach a score. Confirmed by
+perturbation rather than argued: doubling `snr` on **exactly those 15 rows**
+moved **exactly those 15 rows**, worst 0.0757 against the observed 0.0718, and
+left the other **4,595 bitwise unchanged**. `snr` is the carrier, it is the only
+carrier, and it has the right leverage.
+
+**The 7 August values are gone and cannot be recovered.** `data/tables/labels.dvc`
+has exactly one commit — 2026-08-15. Before that the labels table, **the only
+live input the lane has**, was versioned by nothing. So the drift is measurable
+and its direction is not: no one can reconstruct which `snr` values produced the
+7 August artefact. This is a worse hole than the staleness dependency 4.1d
+pre-registered, because it cannot be closed retroactively — only from here on.
+
+*Predictions.*
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | Check A passes at 1e-6 on every row and slice | **confirmed**, bitwise |
+| 2 | model effect **smaller** than the −0.0500 stored margin | **FALSIFIED** — it is *equal*, at −0.050000 |
+| 3 | verdict on `fc4f3515` stays UNRESOLVED | **confirmed** |
+| 4 | the drift is carried by `snr` alone | **confirmed** by perturbation |
+
+**Prediction 2 failed because its reasoning was wrong, and it should not have
+been restated.** It assumed the −0.0500 margin contained a data effect the lane
+would remove. The data effect on `recall_at_1pct_fpr` is **exactly zero** — the
+15 moved rows do not cross the 1% FPR threshold — so the model effect is the
+whole of it. Worse, 4.1c's own result table already recorded that recall
+difference as `0`, so this was falsified by evidence in hand at the moment it was
+carried forward into 4.1d unexamined. Restating a prediction is not the same as
+re-deriving it, and this is what the difference costs.
+
+**The honest headline: the lane's first measurement is that there was nothing to
+correct.** It was built to strip a population effect out of the weekly margin;
+on this candidate the population effect on the gating statistic measures zero, to
+the last digit. Re-gated against the control summary, `fc4f3515` returns
+**UNRESOLVED** with a **−0.0500** margin at **0.7×** the 0.0733 floor — the same
+verdict, the same number, and the same reason as against the stored summary.
+
+That is not an argument against the lane. Before this run, "the weekly margin is
+contaminated by population drift" was an **assumption**, and 4.1c stated it as
+the defect being closed. It is now a **measurement**, and on this occasion it
+reads zero. The lane's value is that the next non-zero one will be visible
+instead of silently inside the margin.
+
+**Nothing promotes on any of this.** `models/registry.json` is untouched,
+`ca906040` stays served, and every artefact written here is gitignored like every
+other CV run.
 
 ### 4.2 Stage 9 — difference-image branch · 6–9 h build · 3–4 h compute
 
