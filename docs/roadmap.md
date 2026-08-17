@@ -188,7 +188,7 @@ One table, kept current. Detail for each row is in the stage sections below.
 | **7i** *(old D)* offline control-arm harness | **done** 2026-08-12 — criterion **NOT met**; the branch line has no measured advantage on either criterion | the instrument: `clean`/`flatten` → `inject_box_transit` → `build_view_set` → `write_viewset_shards` → `make_viewset_dataset` → a run directory's fold members and calibrator. It is **stage 8's measuring instrument**, which is why it leads |
 | **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving |
 | **8** *(old 3)* labels and negatives | **done** 2026-08-14 — four arms measured 2026-08-13, prediction 4 on 2026-08-14; **all four pre-registered predictions falsified** | **propensity weighting eliminated the architecture's amplification of the baseline confound at no measurable cost** (gap +0.1265 → −0.0071, 3.3× its bar). Synthetic negatives null; arm S unreadable by construction. The control-arm split also fell (−0.0966, 1.3× its bar) but **threshold-free host-scoring did not move**, so that second win is recorded as *qualified*. Group (a), external catalogue negatives, deliberately not done |
-| **10.5** the ensemble arm | **recall measured 2026-08-15 — BOTH ARMS CLEAR**; the control-arm pass is outstanding (4.1) | **the branch line's value is as a complement, not a replacement.** Mean-of-logits recall @1% FPR **0.4362** (E-C) and **0.4223** (E-P) against the common-fold dual-view member's 0.3046 — **3.9x and 4.1x** their own floors. Reopens nothing about stage 4, whose rejections were about replacement. Nothing promotes |
+| **10.5** the ensemble arm | **CLOSED 2026-08-15 — BOTH ARMS CLEAR**; the control-arm pass landed the same day (3.11e) | **the branch line's value is as a complement, not a replacement.** Mean-of-logits recall @1% FPR **0.4362** (E-C) and **0.4223** (E-P) against the common-fold dual-view member's 0.3046 — **3.9x and 4.1x** their own floors. Reopens nothing about stage 4, whose rejections were about replacement. Nothing promotes |
 | **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
 | **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
 | **11** *(old 4)* serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
@@ -3002,7 +3002,7 @@ Nothing promoted. The stage leaves two things for later items to answer:
    between two runs of one architecture that are threshold-free identical. Any
    later item planning to read it should read the host-AUC beside it, or instead.
 
-### 4.1a Calibrate the refresh loop to its own noise — **BUILT 2026-08-16**, one part open
+### 4.1a Calibrate the refresh loop to its own noise — **CLOSED 2026-08-17**, all three defects
 
 **New, 2026-08-15, from Ollie's question: does the weekly refresh apply the same
 test each time?** The gate code is the same every run. The comparison is not.
@@ -3205,7 +3205,7 @@ than a replacement for it — the same convention `incumbent-rebaselined` follow
 The original summary keeps its `folds` block and its AUC variance, neither of
 which a pooled re-summary can reproduce.
 
-### 4.1b Pre-registered — the gate's third verdict and what its floor is made of (2026-08-16, nothing implemented)
+### 4.1b Pre-registered — the gate's third verdict and what its floor is made of (pre-registered 2026-08-16; **implemented in `839ff8c`**)
 
 Written before any of `adf4a71`'s follow-up is built, because two of the five
 items change **what a verdict means** rather than adding a feature, and a
@@ -3379,7 +3379,7 @@ ever wanted for a decision.
 **Nothing promotes on any of this.** `models/registry.json` is untouched and
 `ca906040` stays served.
 
-### 4.1c Pre-registered — the control lane, and what a weekly delta is allowed to mean (2026-08-17, nothing built)
+### 4.1c Pre-registered — the control lane, and what a weekly delta is allowed to mean (pre-registered 2026-08-17; **the lane is built** — its own check was FALSIFIED and is replaced by 4.1d)
 
 Written before the lane exists, because it decides **what the one automated
 number in this project refers to**, and a rule chosen after seeing which way the
@@ -3551,7 +3551,7 @@ means choosing what the correctness check should have been, and that is a
 decision about what "the same measurement" means when the inputs are allowed to
 move. It is not a decision to take by editing a tolerance until the run passes.
 
-### 4.1d Pre-registered — the corrected check, which is two checks (2026-08-17, nothing run)
+### 4.1d Pre-registered — the corrected check, which is two checks (pre-registered 2026-08-17; **run** — Check A passed bitwise)
 
 Ollie's ruling on 4.1c. The original rule 4 **asked one question that was
 actually two**, and mixing them is why it could not be answered. They are
@@ -3912,18 +3912,18 @@ is struck out; everything below the rule is what remains.
 |---|---|---:|---:|---:|---|
 | ~~—~~ | ~~stage 10.5, both halves (3.11c–e)~~ | ~~8–10 h~~ | ~~11 h~~ | ~~**done**~~ | — |
 | ~~—~~ | ~~4.1a wiring: rolling folds + members~~ | ~~2 h~~ | ~~—~~ | ~~**done**~~ | — |
-| **1** | **4.1a remainder** — calibration run, then the control lane | 2–3 h | ~~5–9 h~~ **minutes** | **2–3 h** | nothing |
-| **2** | stage 9 — difference-image branch | 6–9 h | 3–4 h | **9–13 h** | stamp re-grid |
-| **3** | stage 10 — Optuna re-tune | 2 h | 10–13 h | **12–15 h** | stage 9 |
-| **4** | stage 7ii — branch attribution | 1 h | ~7 h | **8 h** | nothing |
-| **5** | stage 11 — serving parity | 12–18 h | — | **12–18 h** | see below |
-| **6** | finishing touches | 4–6 h | — | **4–6 h** | W7 decision |
-| **7** | stage 12 — UI redesign | *unestimated* | — | *unestimated* | everything |
-| | | | | **~47–63 h** plus the UI | |
+| ~~—~~ | ~~4.1a remainder — calibration run, then the control lane~~ | ~~2–3 h~~ | ~~minutes~~ | ~~**done**~~ | — |
+| **1** | stage 9 — difference-image branch | 6–9 h | 3–4 h | **9–13 h** | stamp re-grid |
+| **2** | stage 10 — Optuna re-tune | 2 h | 10–13 h | **12–15 h** | stage 9 |
+| **3** | stage 7ii — branch attribution | 1 h | ~7 h | **8 h** | nothing |
+| **4** | stage 11 — serving parity | 12–18 h | — | **12–18 h** | see below |
+| **5** | finishing touches | 4–6 h | — | **4–6 h** | W7 decision |
+| **6** | stage 12 — UI redesign | *unestimated* | — | *unestimated* | everything |
+| | | | | **~45–60 h** plus the UI | |
 
-**Item 1's compute was wrong by three orders of magnitude, and it was wrong in
-the direction that delays work.** The 5–9 h assumed both halves needed fresh
-scoring runs. Neither did: the control lane is **inference over 4,610 rows, and
+**The 4.1a remainder's compute was wrong by three orders of magnitude, and it
+was wrong in the direction that delays work.** The 5–9 h assumed both halves
+needed fresh scoring runs. Neither did: the control lane is **inference over 4,610 rows, and
 measures 10.6 s** (4.1c), and the variance block the floor comes from was
 arithmetic over member columns the prediction set already carried, costing no new
 compute at all. What is left in the row is build time. The lesson is not the
@@ -3931,11 +3931,12 @@ arithmetic — it is that **an item was sequenced behind a compute budget nobody
 had measured**, which is the same mistake this project keeps finding in its
 metrics, applied to its own plan.
 
-**Item 1 is first and is not optional.** The weekly gate is the one automated
-decision in the project and it is the only one still read against an
-uncontrolled comparison. Order within it: the calibration run (measures the
-floor that is now wired but unmeasured), then the control lane (isolates the
-model effect from the data effect).
+**The 4.1a remainder was first and was not optional, and it was done in that
+order.** The weekly gate is the one automated decision in the project and it was
+the only one still read against an uncontrolled comparison. The calibration run
+came first (4.1a's closing note: the recall floor is **0.0733** at n=3), then the
+control lane (4.1c built, 4.1d validated), which the weekly flow now runs on
+every refresh. Stage 9 is what the gate reads next.
 
 **Stage 11's estimate has moved from 10–15 h to 12–18 h.** 3.11c established the
 branch line as a complement, so stage 11 serves **two** models rather than one;
