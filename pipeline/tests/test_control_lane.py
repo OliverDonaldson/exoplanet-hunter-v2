@@ -9,6 +9,7 @@ part the gate may attribute to the model and the part it may not.
 
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from exoplanet_hunter.eval.control_lane import (
@@ -18,6 +19,7 @@ from exoplanet_hunter.eval.control_lane import (
     outweighed_by_data,
     population_overlap,
     reproduces,
+    rows_reproduce,
 )
 
 
@@ -104,6 +106,74 @@ def test_nothing_in_common_is_refused_rather_than_passing_vacuously():
     as "reproduces exactly" — a check that passes because it ran on nothing."""
     with pytest.raises(ValueError, match="cannot run"):
         reproduces({"per_mission": {"TESS": {}}}, {"per_mission": {"TESS": {}}})
+
+
+def test_a_slice_outside_the_gate_is_checked_too():
+    """4.1c looked at TESS alone. A lane that agreed there and disagreed on
+    Kepler would have passed a check on the gate slice and still been wrong
+    about what it computes."""
+    drifted = reproduces(
+        {"per_mission": {"TESS": {"roc_auc": 0.91}, "Kepler": {"roc_auc": 0.95}}},
+        {"per_mission": {"TESS": {"roc_auc": 0.91}, "Kepler": {"roc_auc": 0.88}}},
+    )
+    assert len(drifted) == 1
+    assert drifted[0].startswith("Kepler.roc_auc")
+
+
+# --------------------------------------------------------------------------
+# The same check at the row level, which is the half with teeth.
+# --------------------------------------------------------------------------
+
+
+def scored(tic_ids=(1, 2, 3), scores=(0.1, 0.5, 0.9), folds=(0, 1, 2), labels=(0, 1, 1)):
+    return pd.DataFrame(
+        {"tic_id": list(tic_ids), "score": list(scores), "fold": list(folds), "label": list(labels)}
+    )
+
+
+def test_two_identical_scorings_agree_row_for_row():
+    assert rows_reproduce(scored(), scored()) == []
+
+
+def test_floating_point_noise_is_not_a_row_disagreement():
+    assert rows_reproduce(scored(scores=(0.1 + 1e-9, 0.5, 0.9)), scored()) == []
+
+
+def test_one_moved_row_is_caught_and_located():
+    """The case slice means hide: a single object scored differently by the two
+    paths while the averages stay within tolerance."""
+    problems = rows_reproduce(scored(scores=(0.1, 0.5, 0.8)), scored())
+    assert len(problems) == 1
+    assert "1 of 3 rows" in problems[0] and "tic_id 3" in problems[0]
+
+
+def test_a_row_only_one_path_scored_is_named():
+    problems = rows_reproduce(
+        scored(tic_ids=(1, 2), scores=(0.1, 0.5), folds=(0, 1), labels=(0, 1)), scored()
+    )
+    assert len(problems) == 1
+    assert "missing from the lane" in problems[0]
+
+
+def test_a_row_scored_by_a_different_fold_is_a_disagreement_even_at_the_same_score():
+    """Same number, different measurement. An out-of-fold score from a fold that
+    trained on the row is not the quantity the gate thinks it is reading."""
+    problems = rows_reproduce(scored(folds=(0, 1, 3)), scored())
+    assert len(problems) == 1
+    assert "disagree on fold" in problems[0]
+
+
+def test_a_row_measured_against_a_different_label_is_a_disagreement():
+    """Both paths read ground truth from the same frozen index, so a label that
+    differs means they are not reading the same index."""
+    problems = rows_reproduce(scored(labels=(1, 1, 1)), scored())
+    assert len(problems) == 1
+    assert "disagree on label" in problems[0]
+
+
+def test_no_shared_rows_is_refused_rather_than_passing_vacuously():
+    with pytest.raises(ValueError, match="cannot run"):
+        rows_reproduce(scored(tic_ids=(1, 2, 3)), scored(tic_ids=(4, 5, 6)))
 
 
 # --------------------------------------------------------------------------

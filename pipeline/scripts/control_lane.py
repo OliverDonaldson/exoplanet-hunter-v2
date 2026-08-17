@@ -11,10 +11,16 @@ Run from the repository root:
     python pipeline/scripts/control_lane.py \
         --out models/cv/control-lane/cv_summary.json
 
-    # check it reproduces a stored measurement of the same model
+    # check it computes what the original path computes (4.1d Check A). The
+    # reference is regenerated TODAY, from the same shards and the same labels,
+    # so the only difference left between the two sides is the code path:
+    #   evaluate.py score --run <champion> --protocol oof --out <ref>.parquet
+    #   evaluate.py summarise --predictions <ref>.parquet --protocol oof \
+    #       --out <ref>/cv_summary.json --exclude-unresolved
     python pipeline/scripts/control_lane.py \
         --out models/cv/control-lane/cv_summary.json \
-        --reproduces models/cv/incumbent-rebaselined/cv_summary.json
+        --reproduces <ref>/cv_summary.json \
+        --reproduces-predictions <ref>.parquet
 
 The registry is never modified. This scores and summarises; deciding anything is
 `promotion_gate.py`'s job, and it reads the summary written here.
@@ -32,6 +38,7 @@ from exoplanet_hunter.eval.control_lane import (
     assert_gateable,
     population_overlap,
     reproduces,
+    rows_reproduce,
 )
 from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation import load_registry
@@ -65,9 +72,21 @@ def main() -> None:
         type=Path,
         default=None,
         help=(
-            "a stored summary of this same model to check against. Same weights, same "
-            "folds, the same rows — a disagreement beyond floating point means the "
-            "re-score is not measuring the model the registry names, and the run fails"
+            "a cv_summary.json produced by the original scoring path FROM THE SAME "
+            "INPUTS ON THE SAME DAY. Every metric of every per-mission slice must agree "
+            "to 1e-6: both sides then differ only in code path, which is the only thing "
+            "this checks. Pointing it at a summary from another date makes it a test of "
+            "whether the catalogue moved instead — the mistake 4.1c made and 4.1d fixed"
+        ),
+    )
+    parser.add_argument(
+        "--reproduces-predictions",
+        type=Path,
+        default=None,
+        help=(
+            "the predictions.parquet beside --reproduces. Checks membership, fold, label "
+            "and score row by row rather than trusting slice means, which can agree while "
+            "the individual objects the shortlist is made of do not"
         ),
     )
     args = parser.parse_args()
@@ -128,15 +147,26 @@ def main() -> None:
     # produced by a run that failed its own checks.
     assert_gateable(summary)
     if args.reproduces is not None:
-        stored = json.loads(args.reproduces.read_text())
-        if drifted := reproduces(summary, stored):
+        original = json.loads(args.reproduces.read_text())
+        if drifted := reproduces(summary, original):
             raise SystemExit(
-                "the re-scored champion does not reproduce its stored measurement on "
-                f"{len(drifted)} metric(s): {'; '.join(drifted)}. Same weights and the same "
-                "rows should give the same numbers, so the lane is measuring something "
-                "other than the model the registry names and every delta from it is void"
+                f"the lane disagrees with {args.reproduces} on {len(drifted)} metric(s): "
+                f"{'; '.join(drifted)}. Both measure the same weights over the same shards "
+                "and the same labels, so the only thing left between them is the code path "
+                "— the lane computes something other than what it claims to, and every "
+                "delta built on it is void"
             )
-        log.info("[control] reproduces %s exactly", args.reproduces)
+        log.info("[control] matches %s on every slice", args.reproduces)
+    if args.reproduces_predictions is not None:
+        rows = pd.read_parquet(args.reproduces_predictions)
+        if drifted := rows_reproduce(frame, rows):
+            raise SystemExit(
+                f"the lane disagrees with {args.reproduces_predictions} row by row: "
+                f"{'; '.join(drifted)}. Slice means can agree while individual objects do "
+                "not, and the shortlist this system exists to produce is made of individual "
+                "objects, so this is the disagreement that matters"
+            )
+        log.info("[control] matches %s row for row", args.reproduces_predictions)
 
     predictions_out = args.predictions_out or args.out.parent / "predictions.parquet"
     args.out.parent.mkdir(parents=True, exist_ok=True)

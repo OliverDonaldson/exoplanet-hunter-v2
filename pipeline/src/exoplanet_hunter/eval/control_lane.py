@@ -30,6 +30,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+import pandas as pd
+
 from exoplanet_hunter.validation.promotion import GATE_MISSION
 
 #: Below this the 1% FPR cut lands on fewer than about ten negatives and the
@@ -38,10 +41,15 @@ from exoplanet_hunter.validation.promotion import GATE_MISSION
 #: number, which is the failure mode this project keeps finding.
 MIN_GATE_ROWS = 1000
 
-#: How far the re-scored champion may differ from a stored measurement of the
-#: same model on the same rows before the lane is considered to be measuring
-#: something other than what it claims. Same weights, same folds, same rows:
-#: the only expected difference is floating-point.
+#: How far the lane may differ from the original scoring path **measured on the
+#: same inputs on the same day** before it is considered to be computing
+#: something other than what that path computes. Same weights, same shards, same
+#: labels, same folds: the only expected difference is floating-point.
+#:
+#: 4.1c set this against a summary produced on a *different date*, which made it
+#: a test of whether the population had moved — the one thing this lane exists to
+#: stop assuming. 4.1d removed time from the comparison instead of loosening the
+#: number: the tolerance is unchanged, what it ranges over is not.
 REPRODUCTION_TOLERANCE = 1e-6
 
 
@@ -103,26 +111,99 @@ def assert_gateable(summary: dict[str, Any]) -> None:
         )
 
 
-def reproduces(control: dict[str, Any], stored: dict[str, Any]) -> list[str]:
-    """Metrics where a re-score disagrees with a stored measurement of the same model.
+def reproduces(
+    control: dict[str, Any],
+    stored: dict[str, Any],
+    tolerance: float = REPRODUCTION_TOLERANCE,
+) -> list[str]:
+    """Metrics where the lane disagrees with the original path on the same inputs.
 
-    The lane's own correctness check. Same weights, same folds, the same rows:
-    a disagreement beyond floating point means the re-score is not measuring the
-    model the registry names, and every delta built on it is void.
+    **Check A of 4.1d, at the summary level.** Every metric of every
+    `per_mission` slice, not the gate slice alone — a lane that agreed on TESS
+    while disagreeing on Kepler would have passed 4.1c's version of this and
+    still been wrong.
+
+    Both summaries must be measurements of the same model over the same shard
+    set and the same labels, so the only difference left between them is the
+    code path. That is the entire question this asks; it is not a test of
+    whether the population has moved, and pointing it at a summary from another
+    date turns it into one.
     """
-    left = (control.get("per_mission") or {}).get(GATE_MISSION) or {}
-    right = (stored.get("per_mission") or {}).get(GATE_MISSION) or {}
-    shared = sorted(set(left) & set(right))
-    if not shared:
+    left_slices = control.get("per_mission") or {}
+    right_slices = stored.get("per_mission") or {}
+    drifted, compared = [], 0
+    for name in sorted(set(left_slices) & set(right_slices)):
+        left, right = left_slices[name] or {}, right_slices[name] or {}
+        for metric in sorted(set(left) & set(right)):
+            compared += 1
+            if abs(float(left[metric]) - float(right[metric])) > tolerance:
+                drifted.append(
+                    f"{name}.{metric}: lane {float(left[metric]):.6f} "
+                    f"vs original {float(right[metric]):.6f}"
+                )
+    if not compared:
+        # An empty list reads as "reproduces exactly", so a comparison with
+        # nothing in it must refuse rather than return the same value as a
+        # comparison that passed.
         raise ValueError(
-            f"no {GATE_MISSION} metrics in common between the re-score and the stored "
-            "summary, so the check that the lane measures the right model cannot run"
+            "no per-mission metrics in common between the lane and the summary it is "
+            "checked against, so the check that the lane computes the right thing cannot run"
         )
-    return [
-        f"{metric}: re-scored {left[metric]:.6f} vs stored {right[metric]:.6f}"
-        for metric in shared
-        if abs(float(left[metric]) - float(right[metric])) > REPRODUCTION_TOLERANCE
-    ]
+    return drifted
+
+
+def rows_reproduce(
+    lane: pd.DataFrame,
+    original: pd.DataFrame,
+    tolerance: float = REPRODUCTION_TOLERANCE,
+) -> list[str]:
+    """Row-level disagreements between two scorings of the same model.
+
+    **Check A of 4.1d, at the row level, and the half that has teeth.** Slice
+    metrics are means: two paths can average to the same AUC while disagreeing
+    about individual objects, and the shortlist this system exists to produce is
+    made of individual objects. Membership, fold assignment, ground-truth label
+    and score are all compared, because a difference in any of them makes the
+    two paths different measurements whatever the aggregates say.
+    """
+    left, right = lane.set_index("tic_id"), original.set_index("tic_id")
+    problems: list[str] = []
+    for missing, side in (
+        (right.index.difference(left.index), "the lane"),
+        (left.index.difference(right.index), "the original path"),
+    ):
+        if len(missing):
+            problems.append(
+                f"{len(missing)} rows are missing from {side}, e.g. {sorted(missing.tolist())[:3]}"
+            )
+
+    shared = left.index.intersection(right.index)
+    if not len(shared):
+        raise ValueError(
+            "the lane and the original path share no rows, so the check that they compute "
+            "the same thing cannot run"
+        )
+    left, right = left.loc[shared], right.loc[shared]
+
+    # Fold and label before score: a row scored by a different fold, or measured
+    # against a different label, is a different measurement even where the two
+    # numbers happen to land within tolerance of each other.
+    for column in ("fold", "label"):
+        if column in left.columns and column in right.columns:
+            moved = shared[left[column].to_numpy() != right[column].to_numpy()]
+            if len(moved):
+                problems.append(
+                    f"{len(moved)} rows disagree on {column}, e.g. {sorted(moved.tolist())[:3]}"
+                )
+
+    delta = np.abs(left["score"].to_numpy(dtype=float) - right["score"].to_numpy(dtype=float))
+    if over := int((delta > tolerance).sum()):
+        worst = int(delta.argmax())
+        problems.append(
+            f"{over} of {len(shared)} rows differ in score beyond {tolerance:g}; "
+            f"worst {delta[worst]:.3g} at tic_id {shared[worst]}"
+        )
+    return problems
 
 
 #: Row counts, not metrics. Differencing them is a population statement and
