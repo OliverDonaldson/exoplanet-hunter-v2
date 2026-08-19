@@ -56,7 +56,18 @@ BRANCH_SCALARS: dict[str, tuple[str, ...]] = {
     "gap_view": (),
     "periodogram_view": (),
     "periodogram_masked_view": (),
+    # `mean_sky_offset` and `control_sky_offset` are DV's own summary of these
+    # stamps and would sit naturally here, but they are already scoped to
+    # `centroid_view`. Moving them would change two branches at once and make
+    # this branch's contribution unattributable, so they stay where they are.
+    "difference_view": (),
 }
+
+#: Views that feed another branch rather than owning one. `difference_quality_
+#: view` is how the difference branch weights its sectors; built as a branch of
+#: its own it would put DV's opinion of the data straight into fusion as
+#: evidence about the target.
+ATTENTION_VIEWS: frozenset[str] = frozenset({"difference_quality_view"})
 
 #: Views that are the same measurement — phase-folded flux at LOCAL_BINS — and
 #: are meant to be compared against each other. They share one conv tower, so a
@@ -100,7 +111,11 @@ SCALAR_BRANCH_MASK: dict[str, str] = {"detection": "dv_usable", "ghost": "dv_usa
 BRANCH_NAMES: frozenset[str] = frozenset(
     [name for name in SHARED_LOCAL_VIEWS if name not in CONTRAST_PAIR]
     + [CONTRAST_BRANCH]
-    + [name for name in VIEW_SHAPES if name not in SHARED_LOCAL_VIEWS]
+    + [
+        name
+        for name in VIEW_SHAPES
+        if name not in SHARED_LOCAL_VIEWS and name not in ATTENTION_VIEWS
+    ]
     + list(SCALAR_BRANCHES)
 )
 
@@ -124,6 +139,7 @@ BRANCH_FAMILIES: dict[str, tuple[str, ...]] = {
     "periodogram": ("periodogram_view", "periodogram_masked_view"),
     "centroid": ("centroid_view",),
     "gap": ("gap_view",),
+    "difference": ("difference_view",),
     "scalar_only": tuple(SCALAR_BRANCHES),
 }
 
@@ -234,6 +250,46 @@ def _conv_tower_model(
     return Model(view, encoded, name=name)
 
 
+#: Conv kernel over a difference-image stamp. Three, not the 5 the phase-folded
+#: views use: those run over 201-2001 bins, a stamp is 17 px across, and a 5x5
+#: kernel spans nearly a third of it — wide enough that a centroid shift and the
+#: star itself fall inside one receptive field.
+DIFF_KERNEL_SIZE = 3
+#: Pooling stride for the same reason. 17 -> 8 -> 4 over two blocks still
+#: resolves which side of the aperture the flux moved to, which is the question.
+DIFF_POOL_SIZE = 2
+
+
+def _conv_tower_2d(
+    input_shape: tuple[int, ...],
+    *,
+    blocks: int,
+    filters: int,
+    name: str,
+) -> Model:
+    """Conv-BN-ReLU blocks over a 2-D stamp, as a reusable `Model`.
+
+    Separate from `_conv_tower` rather than generalised over rank: the 1-D towers
+    are the project's main measurement path, and threading a rank switch through
+    them to serve one branch would put every existing branch's behaviour on a
+    code path this one exercises.
+    """
+    stamp = layers.Input(shape=input_shape, name=f"{name}_input")
+    x = stamp
+    for block in range(blocks):
+        x = layers.Conv2D(
+            filters * (2**block),
+            DIFF_KERNEL_SIZE,
+            padding="same",
+            name=f"{name}_conv{block}",
+        )(x)
+        x = layers.BatchNormalization(name=f"{name}_bn{block}")(x)
+        x = layers.Activation("relu", name=f"{name}_relu{block}")(x)
+        if x.shape[1] is not None and x.shape[1] >= DIFF_POOL_SIZE * 2:
+            x = layers.MaxPooling2D(DIFF_POOL_SIZE, name=f"{name}_pool{block}")(x)
+    return Model(stamp, layers.GlobalAveragePooling2D(name=f"{name}_gap")(x), name=name)
+
+
 def _branch(
     view: tf.Tensor,
     scalars: tf.Tensor | None,
@@ -335,6 +391,111 @@ def _unfolded_branch(
         parts.append(scalars)
     x = layers.Concatenate(name=f"{name}_with_scalars")(parts)
     return layers.Dense(units, activation="relu", name=f"{name}_fc")(x)
+
+
+def _difference_branch(
+    view: tf.Tensor,
+    quality: tf.Tensor,
+    scalars: tf.Tensor | None,
+    *,
+    blocks: int,
+    filters: int,
+    units: int,
+    name: str,
+) -> tf.Tensor:
+    """Per-sector 2-D tower, pooled across sectors by attention over DV's quality.
+
+    A star's difference image is measured once per sector, and the sectors are
+    not equally worth reading: DV publishes a quality metric per image, and
+    17.5% of them are flagged invalid. A plain mean over sectors would let one
+    bad image drag a good one, and there is no fixed number of them to average —
+    the count runs from 1 to 43, with a median of 3.
+
+    So the pool is an attention over sectors whose logits see both the encoded
+    stamp and DV's own quality for it. Weighting on quality *alone* would ignore
+    what the image shows; on the embedding alone it would ignore that DV already
+    said which images to distrust.
+
+    **The mask, not a mean.** 58.9% of the set has no difference image at all,
+    and unmeasured sectors are zero-padded slots. Attention over them would put
+    the padding's learned embedding into the pool, and — because the number of
+    measured sectors is how many times TESS looked at the star — make this
+    branch's output scale with observation baseline, which is the confound the
+    whole project has been pulling out of its metrics.
+    """
+    tower = _conv_tower_2d(
+        tuple(view.shape[2:]),
+        blocks=blocks,
+        filters=filters,
+        name=f"{name}_tower",
+    )
+    encoded = layers.TimeDistributed(tower, name=f"{name}_td")(view)
+    measured = SectorPresence(name=f"{name}_sectors_present")(view)
+    logits = layers.TimeDistributed(layers.Dense(1, name=f"{name}_score"), name=f"{name}_score_td")(
+        layers.Concatenate(name=f"{name}_scored")([encoded, quality])
+    )
+    parts: list[tf.Tensor] = [MaskedAttentionPool(name=f"{name}_pool")([encoded, logits, measured])]
+    if scalars is not None:
+        parts.append(scalars)
+    pooled = parts[0] if len(parts) == 1 else layers.Concatenate(name=f"{name}_with_scalars")(parts)
+    return layers.Dense(units, activation="relu", name=f"{name}_fc")(pooled)
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class SectorPresence(layers.Layer):
+    """Which sector slots hold a measured stamp.
+
+    Reads the stamp's own presence channel, so the three states DV distinguishes
+    stay distinguished: no report, a sector DV declined to measure, and a sector
+    measured and flat. Only the third has a presence channel set, and only the
+    third is evidence that the star did not move.
+    """
+
+    def call(self, view: tf.Tensor) -> tf.Tensor:
+        return tf.cast(tf.reduce_max(view[..., -1], axis=(2, 3)) > 0.0, tf.float32)
+
+    def compute_output_shape(self, input_shape: tuple) -> tuple:
+        return (input_shape[0], input_shape[1])
+
+
+@keras.saving.register_keras_serializable(package="exoplanet_hunter")
+class MaskedAttentionPool(layers.Layer):
+    """Softmax over measured slots only, then the weighted sum of their embeddings.
+
+    Takes `[encoded, logits, measured]` — `(batch, slots, width)` embeddings,
+    `(batch, slots, 1)` attention logits and the `(batch, slots)` flags — and
+    returns `(batch, width)`.
+
+    **Finite when nothing is measured, which is the common case here.** Masking
+    by adding `-inf` to absent slots is the textbook form and returns NaN when
+    every slot is absent — true for 58.9% of this set. The branch is gated on
+    presence downstream and a gate multiplies, so `NaN * 0` would poison the
+    whole model rather than contribute nothing. A large finite offset plus an
+    explicit zeroing keeps every row finite.
+    """
+
+    def __init__(self, offset: float = 1.0e9, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.offset = float(offset)
+
+    def call(self, inputs: list[tf.Tensor]) -> tf.Tensor:
+        encoded, logits, measured = inputs
+        mask = measured[..., None]
+        shifted = logits - (1.0 - mask) * self.offset
+        # Subtracting the row max before exponentiating: the logits are learned
+        # and unbounded, and exp() of a large one overflows to inf in float32
+        # long before training diverges enough to notice.
+        shifted = shifted - tf.reduce_max(shifted, axis=1, keepdims=True)
+        weights = tf.exp(shifted) * mask
+        weights = weights / tf.maximum(tf.reduce_sum(weights, axis=1, keepdims=True), 1.0e-9)
+        return tf.reduce_sum(encoded * weights, axis=1)
+
+    def compute_output_shape(self, input_shape: list[tuple]) -> tuple:
+        encoded = input_shape[0]
+        return (encoded[0], encoded[2])
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "offset": self.offset}
 
 
 @keras.saving.register_keras_serializable(package="exoplanet_hunter")
@@ -648,19 +809,30 @@ def build_cnn_branches(
             )
 
     for name in VIEW_SHAPES:
-        if name in SHARED_LOCAL_VIEWS or name in dropped:
+        if name in SHARED_LOCAL_VIEWS or name in ATTENTION_VIEWS or name in dropped:
             continue
         view = inputs[name]
-        embedding = _branch(
-            view,
-            _slice(BRANCH_SCALARS.get(name, ())),
-            blocks=blocks,
-            filters=filters,
-            kernel_size=kernel_size,
-            pool_size=pool_size,
-            units=branch_units,
-            name=name,
-        )
+        if name == "difference_view":
+            embedding = _difference_branch(
+                view,
+                inputs["difference_quality_view"],
+                _slice(BRANCH_SCALARS.get(name, ())),
+                blocks=blocks,
+                filters=filters,
+                units=branch_units,
+                name=name,
+            )
+        else:
+            embedding = _branch(
+                view,
+                _slice(BRANCH_SCALARS.get(name, ())),
+                blocks=blocks,
+                filters=filters,
+                kernel_size=kernel_size,
+                pool_size=pool_size,
+                units=branch_units,
+                name=name,
+            )
         embeddings.append(_gated(embedding, view, name))
 
     mask_index = {name: i for i, name in enumerate(mask_columns)}

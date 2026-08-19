@@ -23,8 +23,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES, ViewSetArrays
+from exoplanet_hunter.datasets.viewset_io import (
+    LIGHTCURVE_VIEWS,
+    VIEW_SHAPES,
+    ViewSetArrays,
+)
 from exoplanet_hunter.preprocess import clean_lightcurve, flatten_lightcurve
+from exoplanet_hunter.preprocess.diffimage import (
+    build_difference_views,
+    empty_difference_views,
+)
 from exoplanet_hunter.preprocess.viewset import GLOBAL_BINS, LOCAL_BINS, build_view_set
 from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation.schemas import MISSIONS
@@ -117,6 +125,37 @@ def _build_one(path: Path, row: pd.Series) -> tuple[object, dict] | None:
         "secondary_phase": views.secondary_phase,
     }
     return views, scalars
+
+
+def _difference_views(
+    root: Path, tic: int, dv_file: str | None, period: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """This target's re-gridded difference-image stamps and their quality view.
+
+    Absent — all zeros, presence 0 — for every target with no DV report, which
+    is all of Kepler and K2 by construction and 6.8% of TESS. That is a real
+    fact about the target rather than a fetch failure, and it has to stay
+    distinguishable from a stamp DV measured and found flat.
+
+    A parse failure is **not** silently absent. The DV archive parses cleanly on
+    every one of its 6,484 reports, so a failure here means the archive changed
+    under us, and reading that as "this star has no difference image" would
+    quietly drop the branch for however many targets it affected.
+    """
+    if not dv_file or not isinstance(dv_file, str):
+        return empty_difference_views()
+    path = root / "data" / "raw" / "tess" / "dv" / f"tic_{tic}" / dv_file
+    if not path.exists():
+        raise SystemExit(
+            f"{path} is named in dv_scalars.parquet but is not on disk — refusing to "
+            "record a missing archive file as a target with no difference image"
+        )
+    from exoplanet_hunter.data.dv_xml import parse_dv_xml
+
+    result = parse_dv_xml(path, period_days=period)
+    if not result.difference_images:
+        return empty_difference_views()
+    return build_difference_views(result.difference_images)
 
 
 def _ephemeris_key(row: pd.Series) -> str:
@@ -238,7 +277,7 @@ def main() -> None:
             views, scalars = result
             np.savez_compressed(
                 target_cache,
-                **{name: getattr(views, name) for name in VIEW_SHAPES},
+                **{name: getattr(views, name) for name in LIGHTCURVE_VIEWS},
                 **{k: np.asarray(v) for k, v in scalars.items()},
                 lc_source=np.asarray(source),
             )
@@ -260,6 +299,14 @@ def main() -> None:
 
     # --- assemble -------------------------------------------------------
     dv, ruwe = _side_tables(args.root)
+    # Captured before `dv_file` is dropped from the frame below, and keyed on the
+    # same one-row-per-target selection the scalars merge uses, so the stamps and
+    # the DV scalars on a row come from the same report.
+    dv_files: dict[int, str] = (
+        dict(zip(dv["tic_id"].astype(int), dv["dv_file"], strict=True))
+        if "dv_file" in dv.columns
+        else {}
+    )
     view_sets: list[dict] = []
     rows: list[dict] = []
     uncached = 0
@@ -275,7 +322,15 @@ def main() -> None:
             uncached += 1
             continue
         with np.load(target_cache, allow_pickle=False) as f:
-            view_sets.append({name: f[name] for name in VIEW_SHAPES})
+            views = {name: f[name] for name in LIGHTCURVE_VIEWS}
+            # Built here rather than in `_build_one`: they come from the DV
+            # report, not the light curve, so they do not belong in a cache
+            # keyed on bin resolution and ephemeris — and building them here
+            # costs a DV re-parse instead of re-folding every curve.
+            views["difference_view"], views["difference_quality_view"] = _difference_views(
+                args.root, tic, dv_files.get(tic), float(row["period"])
+            )
+            view_sets.append(views)
             rows.append(
                 {
                     "tic_id": tic,

@@ -20,6 +20,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from exoplanet_hunter.preprocess.diffimage import (
+    DIFF_CHANNELS,
+    DIFF_GRID,
+    MAX_DIFF_SECTORS,
+)
 from exoplanet_hunter.preprocess.viewset import (
     GLOBAL_BINS,
     LOCAL_BINS,
@@ -43,7 +48,22 @@ VIEW_SHAPES: dict[str, tuple[int, ...]] = {
     "gap_view": (GLOBAL_BINS, 2),
     "periodogram_view": (PERIODOGRAM_BINS, 2),
     "periodogram_masked_view": (PERIODOGRAM_BINS, 2),
+    "difference_view": (MAX_DIFF_SECTORS, DIFF_GRID, DIFF_GRID, DIFF_CHANNELS),
+    # Not a branch of its own — it is how the difference branch weights its
+    # sectors, and `cnn_branches.ATTENTION_VIEWS` keeps it out of the fusion.
+    "difference_quality_view": (MAX_DIFF_SECTORS, 2),
 }
+
+#: Views built from the DV report rather than from the light curve. They depend
+#: on neither the bin resolution nor the epoch and duration a curve is folded
+#: on, so they are **not** part of the per-target light-curve cache — which is
+#: keyed on exactly those things. Keeping them out of it means adding this
+#: branch costs a DV re-parse (minutes) instead of re-deriving every folded view
+#: from the FITS files again (~95 min), and it stops a cache keyed on an
+#: ephemeris from implying these arrays were folded on one.
+DV_VIEWS: frozenset[str] = frozenset({"difference_view", "difference_quality_view"})
+#: The rest: everything a `_build_one` pass produces from a light curve.
+LIGHTCURVE_VIEWS: tuple[str, ...] = tuple(n for n in VIEW_SHAPES if n not in DV_VIEWS)
 
 NPZ_NAME = "viewset.npz"
 SCALARS_NAME = "viewset_scalars.parquet"

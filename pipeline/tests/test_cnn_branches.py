@@ -73,7 +73,9 @@ def test_scoring_is_deterministic_but_mc_dropout_still_works(model):
     assert any(not np.array_equal(sampled[0], other) for other in sampled[1:])
 
 
-@pytest.mark.parametrize("view", ["centroid_view", "trend_view", "unfolded_view"])
+@pytest.mark.parametrize(
+    "view", ["centroid_view", "trend_view", "unfolded_view", "difference_view"]
+)
 def test_an_absent_branch_contributes_exactly_zero(model, view):
     # The whole point of the presence channel: a branch with nothing measured
     # must contribute nothing, not a learned bias on a zero tensor. Without
@@ -543,3 +545,147 @@ def test_dropping_the_contrast_keeps_its_two_halves_measurable():
     assert not any(layer.name.startswith("odd_even") for layer in ablated.layers)
     assert any(layer.name.startswith("local_shared") for layer in ablated.layers)
     assert np.all(np.isfinite(ablated(make_batch()).numpy()))
+
+
+# --------------------------------------------------------- difference images
+
+DIFF_VIEW = "difference_view"
+QUALITY_VIEW = "difference_quality_view"
+
+
+def diff_batch(n: int = 4, *, sectors: int = 0, seed: int = 0, quality: float = 0.8) -> dict:
+    """A batch whose difference branch has exactly `sectors` measured slots.
+
+    Every other view stays present, so anything this moves is attributable to
+    the difference branch rather than to a neighbour going absent.
+    """
+    rng = np.random.default_rng(seed)
+    batch = make_batch(n, seed=seed)
+    batch[DIFF_VIEW] = np.zeros_like(batch[DIFF_VIEW])
+    batch[QUALITY_VIEW] = np.zeros_like(batch[QUALITY_VIEW])
+    grid = batch[DIFF_VIEW].shape[2]
+    edge = (grid - 11) // 2
+    for slot in range(sectors):
+        batch[DIFF_VIEW][:, slot, edge : edge + 11, edge : edge + 11, 0] = rng.normal(
+            0, 0.05, (n, 11, 11)
+        )
+        batch[DIFF_VIEW][:, slot, edge : edge + 11, edge : edge + 11, 2] = 1.0
+        batch[QUALITY_VIEW][:, slot] = (quality, 1.0)
+    return batch
+
+
+def test_a_target_with_no_difference_image_gives_finite_predictions(model):
+    """58.9% of the set is in exactly this state — every Kepler and K2 row plus
+    6.8% of TESS. A masked softmax written the textbook way returns NaN when
+    every slot is masked, and a NaN reaching the gate multiplies to NaN rather
+    than to nothing."""
+    out = model(diff_batch(sectors=0), training=False).numpy()
+    assert np.isfinite(out).all()
+    probe = probe_of(model, f"{DIFF_VIEW}_pool")
+    assert np.isfinite(probe(diff_batch(sectors=0), training=False).numpy()).all()
+
+
+def test_the_pool_is_exactly_zero_when_no_sector_is_measured(model):
+    pooled = probe_of(model, f"{DIFF_VIEW}_pool")(diff_batch(sectors=0), training=False).numpy()
+    assert np.abs(pooled).sum() == pytest.approx(0.0)
+
+
+def test_padded_sectors_do_not_dilute_the_pool(model):
+    """The number of measured sectors is how many times TESS looked at the star,
+    so a pool that averaged over the padding too would make this branch's output
+    scale with observation baseline — the confound stage 8 exists to remove."""
+    pool = probe_of(model, f"{DIFF_VIEW}_pool")
+    one = diff_batch(sectors=1, seed=3)
+    # Same single measured sector, but the slot count the pool could divide by
+    # changes only in the padding.
+    padded = {k: v.copy() for k, v in one.items()}
+    assert np.array_equal(padded[DIFF_VIEW][:, 1:], np.zeros_like(padded[DIFF_VIEW][:, 1:]))
+    assert np.allclose(pool(one, training=False).numpy(), pool(padded, training=False).numpy())
+
+
+def test_the_pool_does_not_depend_on_the_order_sectors_arrive_in(model):
+    """Slot order is the order `build_difference_views` happened to sort in.
+    Attention is a weighted sum, so the pooled vector must be invariant to it —
+    if it is not, the branch is reading slot index as a feature."""
+    pool = probe_of(model, f"{DIFF_VIEW}_pool")
+    batch = diff_batch(sectors=3, seed=5)
+    shuffled = {k: v.copy() for k, v in batch.items()}
+    order = [2, 0, 1, *range(3, batch[DIFF_VIEW].shape[1])]
+    shuffled[DIFF_VIEW] = batch[DIFF_VIEW][:, order]
+    shuffled[QUALITY_VIEW] = batch[QUALITY_VIEW][:, order]
+    assert np.allclose(
+        pool(batch, training=False).numpy(),
+        pool(shuffled, training=False).numpy(),
+        atol=1e-5,
+    )
+
+
+def test_the_quality_metric_changes_how_sectors_are_weighted(model):
+    """The attention's reason for existing. Two identical stamps weighted
+    differently only because DV rates them differently."""
+    pool = probe_of(model, f"{DIFF_VIEW}_pool")
+    low = diff_batch(sectors=2, seed=7, quality=0.1)
+    high = {k: v.copy() for k, v in low.items()}
+    # Same stamps, one sector's quality raised.
+    high[QUALITY_VIEW] = low[QUALITY_VIEW].copy()
+    high[QUALITY_VIEW][:, 0, 0] = 0.99
+    assert not np.allclose(pool(low, training=False).numpy(), pool(high, training=False).numpy())
+
+
+def test_a_declined_sector_and_a_flat_one_are_not_the_same_input(model):
+    """DV writes a sector it declined to measure as zeros, and a stamp measured
+    flat is also zeros. The presence channel is the only thing separating them,
+    and the branch has to act on it."""
+    pool = probe_of(model, f"{DIFF_VIEW}_pool")
+    flat = diff_batch(sectors=1, seed=9)
+    flat[DIFF_VIEW][..., 0] = 0.0  # measured, and genuinely featureless
+    declined = {k: v.copy() for k, v in flat.items()}
+    declined[DIFF_VIEW][..., 2] = 0.0  # DV produced nothing for this sector
+    declined[QUALITY_VIEW][:] = 0.0
+    assert np.abs(pool(flat, training=False).numpy()).sum() > 0
+    assert np.abs(pool(declined, training=False).numpy()).sum() == pytest.approx(0.0)
+
+
+def test_the_quality_view_is_not_a_branch_of_its_own(model):
+    """It weights the stamps; built as a branch it would put DV's opinion of the
+    data into fusion as evidence about the target."""
+    assert QUALITY_VIEW not in BRANCH_NAMES
+    assert f"{QUALITY_VIEW}_fc" not in {layer.name for layer in model.layers}
+    # ...but it must still reach the model, or the attention has nothing to read.
+    assert QUALITY_VIEW in {t.name.split(":")[0] for t in model.inputs}
+
+
+def test_every_sector_is_encoded_by_the_same_weights(model):
+    """One tower under `TimeDistributed`, so a difference between two sectors is
+    a difference in the data rather than between two sets of kernels."""
+    encoded = probe_of(model, f"{DIFF_VIEW}_td")
+    batch = diff_batch(sectors=2, seed=11)
+    # Put the identical stamp in both slots; their embeddings must match.
+    batch[DIFF_VIEW][:, 1] = batch[DIFF_VIEW][:, 0]
+    out = encoded(batch, training=False).numpy()
+    assert np.allclose(out[:, 0], out[:, 1], atol=1e-5)
+
+
+def test_the_attention_pool_is_a_convex_combination():
+    """Weights sum to one over measured slots, so the pooled vector stays on the
+    scale of a single sector's embedding however many sectors there are."""
+    from exoplanet_hunter.models.cnn_branches import MaskedAttentionPool
+
+    encoded = tf.constant([[[1.0, 0.0], [3.0, 0.0], [9.0, 0.0]]])
+    logits = tf.zeros((1, 3, 1))
+    measured = tf.constant([[1.0, 1.0, 0.0]])
+    pooled = MaskedAttentionPool()([encoded, logits, measured]).numpy()
+    # Equal logits over the two measured slots: the mean of 1 and 3, not of all
+    # three and not their sum.
+    assert pooled[0, 0] == pytest.approx(2.0)
+
+
+def test_the_attention_pool_survives_extreme_logits():
+    """The logits are learned and unbounded; exp() of a large one overflows to
+    inf in float32 well before training has visibly diverged."""
+    from exoplanet_hunter.models.cnn_branches import MaskedAttentionPool
+
+    encoded = tf.ones((1, 3, 2))
+    logits = tf.constant([[[500.0], [-500.0], [0.0]]])
+    measured = tf.constant([[1.0, 1.0, 1.0]])
+    assert np.isfinite(MaskedAttentionPool()([encoded, logits, measured]).numpy()).all()

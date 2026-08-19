@@ -1,8 +1,8 @@
 """Stochastic augmentation for the view set — `augment.py`'s semantics, per view.
 
-The champion augments two `(bins, 1)` tensors. The view set has eleven views of
-`(bins, channels)` plus a `(20, 31, 3)` unfolded stack, so an exact reuse is not
-possible. What is preserved is the operation set, their magnitudes and their
+The champion augments two `(bins, 1)` tensors. The view set has ten views of
+`(bins, channels)`, a `(20, 31, 3)` unfolded stack and a stack of 2-D sky
+stamps, so an exact reuse is not possible. What is preserved is the operation set, their magnitudes and their
 order: coherent phase shift, independent Gaussian noise, coherent depth scale,
 independent bin masking.
 
@@ -20,7 +20,9 @@ by `present` so a bin that held no cadence keeps the zero that says so.
 rolling them shifts the peak onto a different period rather than shifting the
 star in time. They take noise and masking but no phase shift. The unfolded
 stack's phase axis is its second-to-last; axis 0 is transit number, and rolling
-that would reorder the transits.
+that would reorder the transits. The difference-image stamps are indexed by
+*sky position*, where a roll would move the star across its own aperture —
+inventing the centroid shift the branch exists to detect.
 
 Which view is which lives in `VIEW_KINDS`, keyed by name — a view added to the
 shard writer without a kind here raises rather than being silently augmented as
@@ -50,6 +52,16 @@ class ViewKind(Enum):
     PHASE_FRACTION = "phase_fraction"
     #: Period-indexed and peak-normalised; a phase shift is meaningless here.
     PERIODOGRAM = "periodogram"
+    #: A stack of 2-D difference-image stamps on a CCD pixel grid: (sectors,
+    #: row, col, 3). Both spatial axes are sky, and the two data channels are on
+    #: different scales — the difference is a fraction of the star's brightness
+    #: and the out-of-transit image is that brightness — so only the noise op
+    #: has a meaning that survives here.
+    SKY_STAMP = "sky_stamp"
+    #: DV's per-sector quality metric and its presence flag. Not an observation
+    #: of the star at all, but an annotation about the data, and no augmentation
+    #: op describes a plausible alternative DV report.
+    SECTOR_QUALITY = "sector_quality"
 
 
 VIEW_KINDS: dict[str, ViewKind] = {
@@ -64,10 +76,22 @@ VIEW_KINDS: dict[str, ViewKind] = {
     "gap_view": ViewKind.PHASE_FRACTION,
     "periodogram_view": ViewKind.PERIODOGRAM,
     "periodogram_masked_view": ViewKind.PERIODOGRAM,
+    "difference_view": ViewKind.SKY_STAMP,
+    "difference_quality_view": ViewKind.SECTOR_QUALITY,
 }
 
 #: Views whose bin axis is phase, so the coherent shift applies.
 _SHIFTED = (ViewKind.FOLDED_FLUX, ViewKind.UNFOLDED_FLUX, ViewKind.PHASE_FRACTION)
+#: Views carrying a measurement that noise is a plausible perturbation of. Spelt
+#: out rather than left as the default, so a view whose data channel is an
+#: annotation rather than an observation does not get jittered for free.
+_NOISED = (
+    ViewKind.FOLDED_FLUX,
+    ViewKind.UNFOLDED_FLUX,
+    ViewKind.PHASE_FRACTION,
+    ViewKind.PERIODOGRAM,
+    ViewKind.SKY_STAMP,
+)
 #: Views whose data channels are on the primary's depth scale, so the coherent
 #: depth scaling applies. A gap fraction and a peak-normalised periodogram are
 #: not depths and do not move when the transit gets deeper.
@@ -119,7 +143,8 @@ def _augment_view(view: tf.Tensor, kind: ViewKind, draw: _Draw, cfg: AugmentConf
 
     # Multiplied by presence: a bin that held no cadence is encoded as a zero
     # with present 0, and noise there invents a measurement that was never made.
-    data = data + tf.random.normal(tf.shape(data), stddev=cfg.noise_std) * present
+    if kind in _NOISED:
+        data = data + tf.random.normal(tf.shape(data), stddev=cfg.noise_std) * present
 
     if cfg.scale_range > 0 and kind in _DEPTH_SCALED:
         data = data * draw.scale

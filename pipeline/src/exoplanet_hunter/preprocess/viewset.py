@@ -15,10 +15,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from exoplanet_hunter.preprocess.diffimage import (
+    build_difference_views,
+    empty_difference_views,
+)
 from exoplanet_hunter.preprocess.fold import bin_profile
 
 if TYPE_CHECKING:
     import lightkurve as lk
+
+    from exoplanet_hunter.data.dv_xml import DVDifferenceImage
 
 #: The champion's resolution, restored 2026-08-06. Stage 4 run 1 built these
 #: at ExoMiner's 301/31 — on views ours oversample ~7x — and lost 0.0348 AUC on
@@ -48,6 +54,12 @@ class ViewSet:
     gap_view: np.ndarray  # (301, 2) [missing fraction, present]
     periodogram_view: np.ndarray  # (256, 2) [BLS power, present], fixed grid
     periodogram_masked_view: np.ndarray  # (256, 2) same, transits removed
+    #: (8, 17, 17, 3) per-sector difference-image stamps, and (8, 2) the quality
+    #: DV assigns each one. The only view sourced from the DV report rather than
+    #: the light curve, so it is absent for every Kepler and K2 row by
+    #: construction — 58.9% of the set carries presence 0 here.
+    difference_view: np.ndarray
+    difference_quality_view: np.ndarray
     #: Coverage the folded views cannot express: a single-transit candidate and
     #: a 40-transit one look identical once folded.
     observed_transit_count: int
@@ -325,6 +337,7 @@ def build_view_set(
     local_durations: float = LOCAL_DURATIONS,
     max_transits: int = MAX_TRANSITS,
     periodogram_bins: int = PERIODOGRAM_BINS,
+    difference_images: list[DVDifferenceImage] | None = None,
 ) -> ViewSet:
     """Build every view for one (light curve, ephemeris).
 
@@ -342,6 +355,12 @@ def build_view_set(
                       `clean_lightcurve` drops `MOM_CENTR1/2`, so it cannot be
                       recovered downstream. Omitted, that branch reads as absent
                       rather than as flat.
+    difference_images : this target's per-sector DV difference images. Omitted,
+                      the branch is all zeros with `present` 0 — which is the
+                      right encoding for the majority of the set, since Kepler
+                      and K2 have no DV report at all. A target that *has* a
+                      report but whose every sector DV declined also lands here,
+                      and both are distinct from a stamp measured flat.
     """
     if not np.isfinite(period) or period <= 0:
         raise ValueError(f"invalid period: {period}")
@@ -403,6 +422,11 @@ def build_view_set(
         _mask_transits(lc, period, t0, duration), periodogram_bins
     )
 
+    if difference_images:
+        difference_view, difference_quality_view = build_difference_views(difference_images)
+    else:
+        difference_view, difference_quality_view = empty_difference_views()
+
     return ViewSet(
         global_view=global_view,
         local_view=local_view,
@@ -415,6 +439,8 @@ def build_view_set(
         gap_view=gap_view,
         periodogram_view=periodogram_view,
         periodogram_masked_view=periodogram_masked_view,
+        difference_view=difference_view,
+        difference_quality_view=difference_quality_view,
         observed_transit_count=observed,
         expected_transit_count=expected,
         secondary_phase=sec_phase,

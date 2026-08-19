@@ -5,9 +5,15 @@ number rather than an error:
 
 - one `planetResults` per TCE, not per target — the catalogue period picks the
   nearest `@orbitalPeriodInDays` and the mismatch is returned;
-- difference images are a sparse CCD-pixel list sized to the target's aperture,
-  not Kepler's fixed 33x33 — re-gridding is the consumer's job;
-- `-1.0` is DV's "attempted, undefined" sentinel, not a measurement.
+- difference images are a CCD-pixel list sized to the target's aperture, not
+  Kepler's fixed 33x33 — re-gridding is the consumer's job. Measured 2026-08-17
+  over the whole archive, the list is *dense*: it fills its bounding box
+  exactly, with no gaps and no repeated coordinates, so reconstructing the
+  rectangle is exact rather than an interpolation. 95.8% are 11x11 and the full
+  range is 11-25 px;
+- `-1.0` is DV's "attempted, undefined" sentinel, not a measurement — including
+  per pixel, where it marks a whole sector DV declined to measure while writing
+  its flux as a plausible 0.0. See `DVDifferenceImage.declined`.
 """
 
 from __future__ import annotations
@@ -51,6 +57,18 @@ def _i(element: ET.Element | None, attr: str) -> int | None:
     return None if value is None else int(value)
 
 
+def _nan(value: float | None) -> float:
+    """None -> NaN, keeping a measured 0.0 as 0.0.
+
+    Spelled out rather than `value or np.nan`, which agrees with this for every
+    input except zero and is silently wrong for that one. Exactly 0.0 is how DV
+    writes a pixel it declined to measure, so the shorter form collapsed
+    "declined" into "unreadable" — and a consumer that cannot tell those apart
+    cannot build an honest presence mask.
+    """
+    return float("nan") if value is None else value
+
+
 @dataclass(frozen=True)
 class DVDifferenceImage:
     """One sector's in-transit minus out-of-transit image, as sparse pixels."""
@@ -65,10 +83,36 @@ class DVDifferenceImage:
     quality_valid: bool
     n_transits: int | None
     n_cadences_in_transit: int | None
+    #: Per-pixel uncertainty on `flux_difference`. DV's -1.0 sentinel here is
+    #: what marks a pixel it did not measure, and it is the only unambiguous
+    #: marker: the value itself is written as a plausible 0.0.
+    flux_difference_uncertainty: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, dtype=np.float32)
+    )
 
     @property
     def n_pixels(self) -> int:
         return int(self.ccd_rows.size)
+
+    @property
+    def declined(self) -> bool:
+        """True when DV produced no difference image for this sector at all.
+
+        Measured 2026-08-17 over the 53,118 difference images in the archive:
+        **26.6% are declined**, and the state is all-or-nothing — every pixel of
+        an image carries the sentinel or none of them does, with nothing in
+        between. Every declined image also reports `quality_metric` exactly 0.0
+        and `quality_valid` false, so DV is consistent about it in two places.
+
+        This is a third state, and the reason it is named here rather than
+        inferred downstream: a declined sector is *not* a measurement of no
+        centroid shift. Fed to a model as zeros it would be indistinguishable
+        from a star that genuinely did not move, which is the strongest evidence
+        this diagnostic can give.
+        """
+        if not self.n_pixels or not self.flux_difference_uncertainty.size:
+            return True
+        return bool(np.all(self.flux_difference_uncertainty == _SENTINEL))
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -172,6 +216,7 @@ def _difference_images(planet: ET.Element) -> list[DVDifferenceImage]:
         rows: list[int] = []
         cols: list[int] = []
         diff: list[float] = []
+        diff_unc: list[float] = []
         in_tr: list[float] = []
         out_tr: list[float] = []
         for pixel in block.findall(f"{NS}differenceImagePixelData"):
@@ -180,9 +225,13 @@ def _difference_images(planet: ET.Element) -> list[DVDifferenceImage]:
                 continue
             rows.append(row)
             cols.append(col)
-            diff.append(_f(pixel.find(f"{NS}meanFluxDifference"), "value") or np.nan)
-            in_tr.append(_f(pixel.find(f"{NS}meanFluxInTransit"), "value") or np.nan)
-            out_tr.append(_f(pixel.find(f"{NS}meanFluxOutOfTransit"), "value") or np.nan)
+            difference = pixel.find(f"{NS}meanFluxDifference")
+            diff.append(_nan(_f(difference, "value")))
+            # Read raw: `_f(..., sentinel=True)` would map -1.0 to None, which is
+            # the one value this column exists to preserve.
+            diff_unc.append(_nan(_f(difference, "uncertainty")))
+            in_tr.append(_nan(_f(pixel.find(f"{NS}meanFluxInTransit"), "value")))
+            out_tr.append(_nan(_f(pixel.find(f"{NS}meanFluxOutOfTransit"), "value")))
         quality = block.find(f"{NS}qualityMetric")
         images.append(
             DVDifferenceImage(
@@ -190,6 +239,7 @@ def _difference_images(planet: ET.Element) -> list[DVDifferenceImage]:
                 ccd_rows=np.asarray(rows, dtype=np.int32),
                 ccd_cols=np.asarray(cols, dtype=np.int32),
                 flux_difference=np.asarray(diff, dtype=np.float32),
+                flux_difference_uncertainty=np.asarray(diff_unc, dtype=np.float32),
                 flux_in_transit=np.asarray(in_tr, dtype=np.float32),
                 flux_out_of_transit=np.asarray(out_tr, dtype=np.float32),
                 quality_metric=_f(quality, "value"),
