@@ -32,16 +32,37 @@ NEGATIVE = {"FP", "FA"}
 
 
 def flipped_holdout(holdout_path: Path, catalogue_path: Path) -> pd.DataFrame:
-    """Training-time PCs that now carry a final disposition (same TIC+period)."""
+    """Training-time PCs that now carry a final disposition (same TIC+period).
+
+    The refreshed disposition is renamed **before** the merge rather than left to
+    pandas' `suffixes`. Both frames carry a `disposition` column, so an unrenamed
+    merge leaves `disposition` holding the *training-time* value — which is `PC`
+    for every held-out candidate by definition — and a `y_true` read from it is
+    zero on every row. That is not a hypothetical: it is what produced the two
+    stored rows of 2026-07-20, one of them a confirmed planet labelled 0, and the
+    same column-collision that once dropped the transit counts past every gate.
+    """
     pc = pd.read_parquet(holdout_path)
     cat = pd.read_parquet(catalogue_path, columns=["tic_id", "period_days", "disposition"]).dropna()
-    cat = cat[cat["disposition"].isin(POSITIVE | NEGATIVE)]
+    cat = cat[cat["disposition"].isin(POSITIVE | NEGATIVE)].rename(
+        columns={"disposition": "disposition_now"}
+    )
 
-    merged = pc.merge(cat, on="tic_id", suffixes=("", "_now"))
+    merged = pc.merge(cat, on="tic_id")
     same_planet = np.abs(merged["period_days"] - merged["period"]) / merged["period"] < 0.01
     merged = merged[same_planet & merged["period"].gt(0) & merged["duration"].gt(0)]
-    merged["y_true"] = merged["disposition"].isin(POSITIVE).astype(int)
-    return merged.drop_duplicates("tic_id")
+    merged["y_true"] = merged["disposition_now"].isin(POSITIVE).astype(int)
+    merged = merged.drop_duplicates("tic_id")
+
+    # A single-class set cannot be evaluated: AUC is undefined and recall is
+    # either 0 or 1 by construction, both of which read as a measurement.
+    if len(merged) and merged["y_true"].nunique() < 2:
+        raise ValueError(
+            f"all {len(merged)} prospective targets carry the same label "
+            f"({merged['disposition_now'].unique().tolist()}) — there is nothing to rank, "
+            "and a ranking metric over one class is a number rather than a measurement"
+        )
+    return merged
 
 
 def main() -> None:
