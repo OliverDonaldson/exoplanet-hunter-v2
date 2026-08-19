@@ -3805,6 +3805,189 @@ against a post-stage-8 control.
 **Stops if.** Re-gridding costs more than ~3 h or is lossy enough to need a
 design decision. That is a stop-and-ask, not a judgement call to make alone.
 
+#### The blocker dissolved — the stamps were never sparse (2026-08-17)
+
+**The stop-condition did not fire, and the reason is a measurement rather than a
+judgement.** Every claim below is over the whole archive — all 6,484 DV reports,
+33,540 difference images on the selected TCE — not a sample.
+
+| what the note assumed | what the archive says |
+|---|---|
+| sparse pixels on a variable bounding box | **dense**: `n_pixels / box area` is **1.000 at the minimum**, zero repeated coordinates |
+| re-gridding is a resampling, so lossy | scattering the list back into a rectangle is **exact** |
+| 11–17 px | **11–25 px**; 95.8% are exactly 11x11, 99.88% are within 11–17 |
+| — | 0 parse failures, 0 reports with no difference image |
+
+So the "re-grid" is a placement, not an interpolation, and it cost well under
+the 3 h the stop-condition names.
+
+**The grid is 17x17, and the criterion is the peak pixel.** A centroid shift is
+read from *where the difference is brightest*, so a crop that keeps most of the
+flux but moves the peak out of frame has destroyed the measurement while looking
+almost lossless. Peak pixels lost by a centred crop:
+
+| grid | stamps cropped | **peak pixel lost** | mean flux lost, of those cropped | padding on a typical 11x11 |
+|---|---:|---:|---:|---:|
+| 11x11 | 4.24% | 366 (1.09%) | 5.06% | 0% |
+| 13x13 | 1.06% | 109 (0.33%) | 6.64% | 28.4% |
+| 15x15 | 0.28% | 24 (0.07%) | 1.49% | 46.2% |
+| **17x17** | **0.12%** (39) | **0** | 2.28% | 58.1% |
+| 25x25 | 0 | 0 | 0 | 80.6% |
+
+**17x17 is the smallest grid that loses no peak pixel.** 25x25 is the smallest
+fully lossless one and is rejected: it buys 39 stamps' edge rows at the price of
+leaving a typical stamp in 19% of its own view. **What that throws away, stated
+plainly:** 39 stamps of 33,540 lose edge rows, mean 2.28% of their absolute flux
+and at worst 18.2%. Nothing is interpolated — one grid cell is one CCD pixel on
+every target, because the branch's subject is *where* flux moved, and a
+per-target pixel scale is the defect `_periodogram_view` and `_centroid_view`
+already refuse.
+
+#### A third state nobody had looked for — DV declines 26.6% of its own images
+
+**DV writes a sector it did not measure as every pixel `value="0.0"` with
+`uncertainty="-1.0"`** — its documented "attempted, undefined" sentinel, applied
+per pixel. **14,154 of 53,118 difference images (26.6%) are in that state.** It
+is all-or-nothing: an image carries the sentinel on every pixel or on none, with
+**nothing in between**, and every declined image also reports `quality_metric`
+exactly 0.0 with `quality_valid` false.
+
+This is the third case the presence convention exists for, and it was invisible.
+It survived only by accident: `_f(...) or np.nan` in the pixel loop maps a
+measured 0.0 to NaN, so a declined image happened to read as unreadable. The
+same expression would map a *genuine* zero-flux pixel to NaN — latent today,
+since no non-declined image contains one, and now removed. `DVDifferenceImage`
+carries the uncertainty and names the state, so the distinction is a fact about
+the data rather than a side effect.
+
+| state | encoding | rows |
+|---|---|---:|
+| no DV report at all | stamp absent, `present` 0 | **58.9%** — all Kepler, all K2, 6.8% of TESS |
+| DV declined this sector | that slot absent, `present` 0 | 26.6% of images; costs only 3 targets their last sector |
+| measured, and flat | stamp present, `present` 1, values 0 | the only one that is evidence |
+
+**Presence is 41.1% of rows (2,232 of 5,426), not the 81.5% the "18.5% have no
+difference images" note implies.** That 18.5% (19.96% on the manifest) is the
+share of *TESS targets queried* with no DV product. On the view set the branch is
+absent for every Kepler and K2 row by construction, and present on **93.0% of
+TESS**.
+
+**The presence flag adds no leakage, checked rather than assumed.** It is
+label-correlated (TESS: 57.6% positive when present against 23.2% absent), which
+would be a real hazard on a stage aimed at W2. But it is a **strict subset** of
+`dv_usable` — `dv_usable = 1` implies a stamp exists, with 142 rows the other way
+— and `dv_usable` is already a mask column riding into fusion. Alone it is the
+*weaker* discriminator: AUC 0.5443 against `dv_usable`'s 0.5649 on TESS. The
+branch therefore hands the model no separation it did not already have.
+
+#### The control, fixed before the run
+
+**§4.2 asked for "a post-stage-8 control" and named none.** Five runs on disk
+could answer to it. Decided from the record, before any stage-9 number exists:
+
+| candidate | verdict |
+|---|---|
+| `branches-20260808-rebaseline` | **no.** Stage 6 named it "the control for every stage after it", but that was written before stage 8 and 10.5 existed. It predates the label work and builds its own `StratifiedGroupKFold` |
+| `stage8-propensity`, `stage105-propensity` | **no.** Propensity weighting was never adopted — 4.8 still carries "stage 8's qualified second win" as Ollie's open decision, and 3.11e weakened it. Stage 9 runs unweighted, so its control is unweighted |
+| `stage8-control` | **no.** Right architecture and `baseline_intervention: None`, but no `fold_assignment`: it builds its own partition at n=5,426, so part of any margin is only which rows fell where |
+| **`stage105-control`** | **yes** — the only post-stage-8 run of the unchanged branch architecture carrying the pinned `models/fold_assignments/stage10_5.json` |
+
+**But it is the anchor, not the comparison.** Stage 9 rebuilds the shard set —
+new views, and from a labels table that has moved since. Measuring a rebuilt
+shard set against `stage105-control`'s old one would confound the branch with the
+rebuild, which is the error this section exists to avoid. So:
+
+1. **Arm D** — the rebuilt shard set **with** the difference branch.
+2. **Arm C, the paired control** — the *same* shard set with
+   `drop_branches: ["difference"]`. The declared-ablation mechanism keeps every
+   `Input` in the signature, so the two differ in the branch and in nothing else.
+   **The branch's effect is Arm D minus Arm C.**
+3. **`stage105-control` is the anchor**: Arm C against it says whether the
+   rebuild moved the baseline. A large move there is a finding about the data,
+   reported separately, and does not touch the D−C contrast.
+
+**Both arms run on `models/fold_assignments/stage10_5.json` at
+`n_models_per_fold: 3`.** The trainer *drops* rows the artefact does not cover,
+so this restricts the rebuild to the control's own **5,375** groups on the
+identical partition — no extension, no new targets, comparability for free from
+the artefact 4.8 already identified as the shared prerequisite.
+
+#### Pre-registered — recorded 2026-08-17, before either arm is launched
+
+**The floor, and which one.** Per **3.11d**, the pairing between two runs' members
+is arbitrary and the floor **marginalises over all 3! = 6 pairings**, each by
+stage 6's `2 x sd(draws) / sqrt(3)`. The **maximum**-pairing floor is the bar; the
+mean is the headline; the minimum is reported and is explicitly not the headline.
+Each arm measures its own — a fixed floor is not available, since the recall
+floors on disk span **22.1x** (0.00286 to 0.06318 in `pooled_gate_recall_seed_sd`,
+`branches-20260809-drop-periodogram-clean` to `stage105-propensity`).
+
+**How each outcome reads. Fixed now, so no number below can be re-read later.**
+
+| # | prediction | what confirms it | what falsifies it |
+|---|---|---|---|
+| **1** | **W2 — the stage's reason to exist.** The control-arm **host-AUC** falls from Arm C to Arm D by more than the max-pairing floor | a fall clearing `1x` the max-pairing floor | a fall inside the floor, or any *rise*. **This is the falsification of the branch's value**: it attacks host-scoring at source, and if it does not move host-scoring it has not done the one thing it was built for |
+| **2** | **Recall.** TESS recall @1% FPR is **not** moved beyond its own max-pairing floor | margin inside `1x` | a margin clearing `1x` either way |
+| **3** | The presence flag adds no mission separation: Arm D's TESS-vs-Kepler split does not exceed Arm C's beyond its floor | within floor | Arm D separates missions more |
+| **4** | The rebuild is not itself an effect: Arm C's TESS recall sits within its floor of `stage105-control`'s 0.2831 | within floor | outside it — then the rebuild moved the baseline and **1–3 are reported against Arm C only**, with the anchor comparison recorded as failed |
+
+**"Unresolved" is a named outcome, not a fallback.** Per **4.1b**, a margin within
+**1.5x** its floor is UNRESOLVED — a stop-and-ask, reported as neither confirmed
+nor falsified. Given the floor's own sampling spread is roughly 40% of its value
+at three draws, **prediction 1 landing between 1x and 1.5x is the single most
+likely outcome**, and it is recorded in advance as *unresolved and needing more
+draws*, not as a weak pass. It will not be read as a pass.
+
+**What is not claimed.** The branch is present on 41.1% of rows and on no Kepler
+or K2 row at all, so a null on the pooled statistics is uninformative about the
+branch and must not be reported as evidence against it. **Every prediction above
+is on the TESS slice**, which is where the branch exists.
+
+**Nothing promotes on any of this.** `models/registry.json` is untouched,
+`ca906040` stays served, and neither arm is written into `models/cv/` under a
+name the weekly gate could select — the gate takes the newest
+`models/cv/*/cv_summary.json` that is not the control lane, and the Saturday
+09:00 job must not pick up an experimental arm.
+
+#### Built 2026-08-17 — the branch exists, neither arm has run
+
+`f0dccf0`. `preprocess/diffimage.py` re-grids; `difference_view`
+`(8, 17, 17, 3)` and `difference_quality_view` `(8, 2)` join `VIEW_SHAPES`; the
+branch is a 2-D tower under `TimeDistributed` pooled by attention whose logits
+read both the encoded stamp and DV's quality for it.
+
+Three things worth having written down:
+
+- **The pool is masked, and the mask is why.** The number of measured sectors is
+  how many times TESS looked at the star, so an unmasked pool would make this
+  branch's output scale with observation baseline — the confound the label work
+  exists to remove, re-entering through the branch built to attack it.
+- **A textbook masked softmax returns NaN here.** Masking with `-inf` gives NaN
+  when every slot is absent, which is **58.9% of rows**, and a NaN reaching the
+  presence gate multiplies to NaN rather than to nothing. A finite offset plus an
+  explicit zeroing keeps every row finite; there is a test for it.
+- **Sectors are capped at 8, kept highest-quality first.** The count runs 1–43,
+  median 3; eight covers 86.0% of present targets whole. Keeping the *best* eight
+  rather than the earliest means a 40-sector target's retained quality is higher
+  than an 8-sector target's — recorded as a known cost of the cap, and preferred
+  to feeding the branch images DV itself flags as untrustworthy.
+
+**The rebuild is cheaper than costed, for a reason worth keeping.** The two new
+views come from the DV report, so they depend on neither the bin resolution nor
+the ephemeris the per-target cache is keyed on. They are built at assemble time
+and the light-curve cache is untouched, turning "rebuild every folded view from
+the FITS files" into "re-parse the DV archive". **Against a warm cache that is
+minutes rather than ~95 min.**
+
+**The cache on disk is not warm, and that is pre-existing.** Only 18 of the
+current labels table's 5,705 rows hit the interim cache: `t0` or `duration` moved
+for nearly every row in the 2026-08-14 labels refresh, and the cache is keyed on
+the ephemeris. So the first stage-9 rebuild pays the full light-curve cost
+anyway. Unrelated to this branch, and recorded because it makes the next rebuild
+after any labels refresh cost 95 min rather than the minutes the key implies.
+
+**Stops if.** Unchanged, and neither condition fired.
+
 
 ### 4.3 Stage 10 — Optuna re-tune · 2 h build · 10–13 h compute
 
