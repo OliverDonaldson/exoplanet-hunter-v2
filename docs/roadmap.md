@@ -3986,6 +3986,31 @@ the ephemeris. So the first stage-9 rebuild pays the full light-curve cost
 anyway. Unrelated to this branch, and recorded because it makes the next rebuild
 after any labels refresh cost 95 min rather than the minutes the key implies.
 
+#### Amendment — recorded 2026-08-20, before either arm was launched
+
+**The shard set is the existing view set plus the two DV views, not a cold
+rebuild.** The DV-sourced views depend on neither the bin resolution nor the
+ephemeris, so `build_viewset.py --views-from` adds them to
+`data/processed` and passes the eleven light-curve views through **byte for
+byte** — verified, all eleven arrays equal and the scalars frame identical.
+
+**Why this is a better measurement and not a shortcut.** Arms C and D were always
+going to share one shard set, so the D−C contrast was valid either way. What
+changes is the *anchor*: rebuilding from the light curves would have folded a
+rebuild into the comparison against `stage105-control`, which is the confound the
+anchor exists to detect. Now arm C's inputs differ from that run's in the two new
+arrays and in nothing else.
+
+**Said against my own interest: prediction 4 is now close to tautological** and
+must be read that way. It asked whether the rebuild moved the baseline; there is
+no rebuild, so a pass tells us almost nothing and only a *failure* would be
+informative — it would mean something non-obvious moved. It stays on the list
+rather than being quietly dropped, with its weakened status recorded here.
+
+It also cost **47 s** against the ~95 min the item was costed at, and the
+2,232 rows carrying a stamp (41.1%) reproduce the independent measurement above
+exactly.
+
 **Stops if.** Unchanged, and neither condition fired.
 
 

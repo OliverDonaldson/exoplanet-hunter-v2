@@ -158,6 +158,52 @@ def _difference_views(
     return build_difference_views(result.difference_images)
 
 
+def _add_dv_views(root: Path, source: Path, out: Path) -> None:
+    """Copy an existing view set and add only the views built from the DV report.
+
+    The DV-sourced views depend on neither the bin resolution nor the ephemeris
+    the light-curve views are folded on, so they can be added to an existing set
+    without re-deriving anything from the FITS files.
+
+    Worth having as a declared mode rather than a one-off script, because it is
+    what makes a branch comparison clean: the light-curve views come through
+    **byte for byte**, so a model trained here and one trained on the source set
+    differ in the new branch and in nothing else. Rebuilding from the light
+    curves instead would fold a rebuild into the same margin.
+    """
+    arrays = ViewSetArrays.load(source)
+    dv, _ruwe = _side_tables(root)
+    dv_files: dict[int, str] = (
+        dict(zip(dv["tic_id"].astype(int), dv["dv_file"], strict=True))
+        if "dv_file" in dv.columns
+        else {}
+    )
+    scalars = arrays.scalars
+    stamps, quality = [], []
+    for row in scalars.itertuples(index=False):
+        tic = int(row.tic_id)
+        stamp, q = _difference_views(root, tic, dv_files.get(tic), float(row.period))
+        stamps.append(stamp)
+        quality.append(q)
+
+    views = dict(arrays.views)
+    views["difference_view"] = np.stack(stamps).astype(np.float32)
+    views["difference_quality_view"] = np.stack(quality).astype(np.float32)
+    rebuilt = ViewSetArrays(views=views, scalars=scalars)
+    if problems := rebuilt.validate():
+        raise SystemExit(f"view set is malformed: {problems}")
+    rebuilt.save(out)
+    present = int((views["difference_quality_view"][..., 1].sum(axis=1) > 0).sum())
+    log.info(
+        "[viewset] %d rows from %s + difference views -> %s  (%d carry a stamp, %.1f%%)",
+        len(scalars),
+        source,
+        out,
+        present,
+        100.0 * present / max(len(scalars), 1),
+    )
+
+
 def _ephemeris_key(row: pd.Series) -> str:
     """Digest of the ephemeris a target's views are folded on.
 
@@ -211,6 +257,15 @@ def main() -> None:
     parser.add_argument("--cache", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument(
+        "--views-from",
+        type=Path,
+        default=None,
+        help=(
+            "add only the DV-sourced views to an existing ViewSetArrays directory, "
+            "reusing its light-curve views byte for byte"
+        ),
+    )
+    parser.add_argument(
         "--include-candidates",
         action="store_true",
         help="Also build label -1 rows (candidates) — for scoring, not training",
@@ -246,6 +301,10 @@ def main() -> None:
         df = df.head(args.limit)
     _assert_missions_resolve(df, catalogue)
     log.info("[viewset] %d targets from %s", len(df), catalogue)
+
+    if args.views_from is not None:
+        _add_dv_views(args.root, args.views_from, out)
+        return
 
     skips = {"missing_fits": 0, "missing_ephemeris": 0, "preprocess_error": 0}
     built = 0
