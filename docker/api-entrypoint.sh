@@ -22,8 +22,15 @@ else
         echo "[entrypoint] FATAL: dvc pull failed — check AWS_* secrets and R2 access"
         exit 1
     }
+    # Non-fatal: the API degrades honestly without these. No labels means
+    # /model reports no per-mission split; no scores means the catalogue's
+    # P(planet) column reads "not scored". Both are better than refusing to
+    # boot, because /score and /healthz do not depend on either.
+    dvc pull -v data/tables/labels.dvc results/candidates_scored.parquet.dvc || \
+        echo "[entrypoint] WARNING: optional artefacts unavailable — per-mission metrics and catalogue scores will be absent"
 fi
 echo "[entrypoint] artefacts ready:"
 ls models/cv/ data/tables/catalogue/
+ls data/tables/labels/ results/ 2>/dev/null || true
 
 exec uvicorn app.main:app --app-dir api --host 0.0.0.0 --port "${PORT:-8000}"

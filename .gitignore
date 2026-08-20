@@ -44,7 +44,14 @@ mlflow.db
 optuna.db
 
 # Training-run outputs (plots, tier tables) — MLflow/DVC territory
-results/
+# `results/*` rather than `results/`: git cannot re-include a path whose parent
+# directory is itself excluded, and the pointer below has to be re-includable.
+results/*
+# ...except DVC pointers. The serving API reads candidates_scored.parquet for
+# the catalogue's P(planet) column, so that artefact has to reach the container
+# the same way the catalogue and the CV runs do: a tiny pointer in git, the
+# bytes pulled from R2 at boot.
+!results/*.dvc
 .claude/
 
 # TRICERATOPS writes <TIC>_TRILEGAL.csv into the cwd (vendor funcs.py:331).

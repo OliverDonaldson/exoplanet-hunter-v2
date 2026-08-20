@@ -13,7 +13,11 @@ data/csv/exofop/
 models/cv/*/
 !models/cv/*.dvc
 mlruns/
-results/
+# Same trailing-slash trick as models/cv: exclude the bulk, re-include the
+# pointer. results/candidates_scored.parquet is the catalogue's P(planet)
+# column and the API reads it at request time.
+results/*
+!results/*.dvc
 outputs/
 multirun/
 node_modules/

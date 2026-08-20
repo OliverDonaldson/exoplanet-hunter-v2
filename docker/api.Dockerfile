@@ -33,6 +33,11 @@ COPY .dvcignore ./
 # repo-relative path, so a pointer copied to a different directory produces a
 # clean build and a container that dies at boot.
 COPY data/tables/catalogue.dvc data/tables/
+# labels.dvc backs /model's per-mission split: predictions carry tic_id but not
+# mission, so the join needs this table or every mission card disappears.
+COPY data/tables/labels.dvc data/tables/
+# The bulk scores behind the catalogue's P(planet) column.
+COPY results/candidates_scored.parquet.dvc results/
 COPY models/ models/
 COPY docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 RUN chmod +x /usr/local/bin/api-entrypoint.sh
