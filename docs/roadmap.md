@@ -105,7 +105,7 @@ for the stage 8 result and W13's for the frontend work having landed.
 
 | # | weakness | evidence | owner |
 |---|---|---|---|
-| **W1** | **Ranking is driven by observation baseline, and the signal is in the labels** | corr(baseline, label) **+0.278 all, +0.387 TESS**. TESS confirmed planets median 1,495 d vs 430 d for FPs | **stage 8 — done 2026-08-14, half delivered** |
+| **W1** | **Ranking is driven by observation baseline, and the signal is in the labels** | corr(baseline, label) **+0.387 TESS** — TESS confirmed planets median 1,495 d vs 430 d for FPs. **The pooled "+0.278 all" is stale and was withdrawn 2026-08-20**: re-measured on `viewset_scalars.parquet` it is **+0.2136**, and pooling hides opposite signs — Kepler **+0.1025**, K2 **−0.1490**. **W1 is a TESS defect, not a global one**, and every pooled reading of it in this file is to be read against that | **stage 8 — done 2026-08-14, half delivered** |
 | **W2** | **The model scores the star, not the transit** | **26.4%** of hosts pass with no injection — 46.7% planet hosts vs 12.3% FP hosts | **stage 7i** measured, **stage 8 did not move it**, **stage 9** attacks |
 | **W3** | **No branch model has ever beaten the champion where it is used** — *as a replacement. As a complement it now does* | five arms rejected, all on shortlist recall: 0.238 / 0.126 / 0.145 / 0.236 / 0.220 against **0.307**. But the **ensemble** reaches **0.4362**, 3.9x its floor (3.11c) | **stage 10.5 answered it 2026-08-15**; stage 10, then a written decision |
 
@@ -4143,8 +4143,14 @@ of Kepler and K2. An unstratified leave-one-out on that family therefore measure
 a population in which the majority of rows are unaffected *by construction*: the
 effect is diluted below the floor before the pass starts, and the null it returns
 is uninformative rather than evidence of redundancy. The same trap cost stage 9
-its primary criterion. Report the family on `dv_usable == True` rows, with the
-gated rows reported separately as the arithmetic zero they are.
+its primary criterion. Stratify on **stamp presence** (`n_difference_images` non-null),
+not on `dv_usable` — the gate reads the view's own presence channel, and the two
+differ: stamp-absent is **3,191 rows (58.8%)** while `dv_usable == False` is
+**3,333 (61.4%)**. Verified 2026-08-20 against
+`data/processed/viewset_scalars.parquet`. TESS itself carries 164 stamp-absent
+rows (6.8%), so mission is not a proxy for it either. Report the family on
+stamp-present rows, with the gated rows reported separately as the arithmetic
+zero they are.
 
 **Why here and not earlier.** Attribution describes a **finished** branch set.
 Run before stages 8, 9 and 10 it measures something about to change — which the all-null
