@@ -12,14 +12,21 @@ from __future__ import annotations
 import contextlib
 import os
 import threading
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.candidates import router as candidates_router
+from app.routes.model import router as model_router
 from app.routes.reliability import router as reliability_router
+from app.routes.runs import router as runs_router
 from app.routes.score import router as score_router
 from app.schemas import HealthResponse
+
+#: Process start, for /healthz uptime. monotonic so a clock change during a
+#: cold start cannot make the warmup bar jump backwards.
+_STARTED_MONOTONIC = time.monotonic()
 
 
 @contextlib.asynccontextmanager
@@ -63,16 +70,28 @@ app.add_middleware(
 app.include_router(score_router)
 app.include_router(candidates_router)
 app.include_router(reliability_router)
+app.include_router(model_router)
+app.include_router(runs_router)
 
 
 @app.get("/healthz", response_model=HealthResponse)
 def healthz() -> HealthResponse:
     """Servable = a promoted run exists in the registry (loaded lazily on
-    first /score request), so this stays cheap — a JSON stat, no TF."""
+    first /score request), so this stays cheap — a JSON stat, no TF.
+
+    `ensemble_ready` is the separate question of whether the five folds are
+    resident yet. The console shows a determinate bar against `uptime_s` while
+    it is false, and browsing is never gated on it — the catalogue and
+    reliability views are parquet reads that answer regardless.
+    """
     import json
     import os
+    import time
     from pathlib import Path
 
+    from app.routes.score import ensemble_ready
+
+    uptime = time.monotonic() - _STARTED_MONOTONIC
     root = Path(__file__).resolve().parents[2]
     registry = Path(os.environ.get("MODEL_DIR", root / "models")) / "registry.json"
     if registry.exists():
@@ -81,5 +100,13 @@ def healthz() -> HealthResponse:
             status="ok",
             model_loaded=True,
             model_version=f"cnn_dualview-cv-{run_id[:8]}",
+            ensemble_ready=ensemble_ready(),
+            uptime_s=round(uptime, 1),
         )
-    return HealthResponse(status="degraded", model_loaded=False, model_version=None)
+    return HealthResponse(
+        status="degraded",
+        model_loaded=False,
+        model_version=None,
+        ensemble_ready=False,
+        uptime_s=round(uptime, 1),
+    )

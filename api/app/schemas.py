@@ -160,9 +160,22 @@ class ScoreResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """`GET /healthz`.
+
+    `model_loaded` means a promoted run exists in the registry. It is NOT the
+    same as the ensemble being usable: five folds of TensorFlow are loaded off
+    the request path and take ~90 s on a cold machine, during which the
+    registry has always been present. The console's warmup loader needs to
+    tell those apart, so `ensemble_ready` reports the loader's actual state and
+    `uptime_s` drives its determinate bar. Both are additive — an older client
+    that ignores them still sees the same three original fields.
+    """
+
     status: Literal["ok", "degraded"]
     model_loaded: bool
     model_version: str | None
+    ensemble_ready: bool = False
+    uptime_s: float = 0.0
 
 
 class ReliabilityBin(BaseModel):
@@ -232,3 +245,88 @@ class CandidatesPage(BaseModel):
     total: int
     offset: int
     rows: list[CandidateRow]
+
+
+class MetricSummary(BaseModel):
+    """One metric across the promoted run's folds.
+
+    `std` is the spread across fold members, not a confidence interval. It is
+    carried beside every mean because the project measured its own noise floor
+    and a bare figure invites reading noise as improvement.
+    """
+
+    mean: float
+    std: float
+
+
+class MissionMetrics(BaseModel):
+    """One mission's slice of the promoted run's out-of-fold predictions.
+
+    Every metric is nullable because a slice can legitimately fail to produce
+    one — recall @ 1% FPR is undefined without negatives, and a fold spread
+    needs at least two folds that produced the metric. Null travels to the
+    console as "not measured" rather than as a zero.
+    """
+
+    mission: str
+    role: str
+    evaluation: str
+    n: int
+    auc: float | None = None
+    aucErr: float | None = None
+    recall: float | None = None
+    recallErr: float | None = None
+    brier: float | None = None
+    brierErr: float | None = None
+    ece: float | None = None
+    eceErr: float | None = None
+
+
+class NoiseFloor(BaseModel):
+    """Seed-to-seed spread. A margin under it is not a decision."""
+
+    auc: float | None = None
+    recall: float | None = None
+
+
+class ModelSummaryResponse(BaseModel):
+    """`GET /model` — what the served run actually measured.
+
+    Exists so the console follows the registry instead of carrying its own copy
+    of the numbers: on promotion, or after a weekly refresh, every figure the
+    console shows changes with the run rather than going quietly stale.
+
+    `per_mission` is null when no mission slice could be computed, and omits
+    any mission this run never evaluated. The console builds its cards from
+    whatever the list holds, so an absent mission has no card rather than an
+    empty one.
+    """
+
+    run_id: str
+    model_version: str
+    promoted_at: str | None = None
+    n_folds: int | None = None
+    metrics: dict[str, MetricSummary]
+    per_mission: list[MissionMetrics] | None = None
+    noise_floor: NoiseFloor | None = None
+    n_scored: int = 0
+    n_high_confidence: int = 0
+
+
+class RunRecord(BaseModel):
+    """One CV run on disk. `verdict`/`reason` are null — see routes/runs.py."""
+
+    run_id: str
+    short_id: str
+    date: str
+    auc: float | None = None
+    aucErr: float | None = None
+    brier: float | None = None
+    status: str
+    verdict: str | None = None
+    reason: str | None = None
+
+
+class RunsResponse(BaseModel):
+    active_run_id: str
+    runs: list[RunRecord]

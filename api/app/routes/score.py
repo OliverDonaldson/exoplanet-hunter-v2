@@ -48,6 +48,17 @@ _lock = threading.Lock()
 _score_lock = threading.Lock()
 _scorer = None
 
+
+def ensemble_ready() -> bool:
+    """True once the five-fold TF ensemble is resident.
+
+    Read without taking the load lock: /healthz is polled once a second by
+    every open console, and blocking it behind a 90 s model load would turn
+    the readiness probe into the thing it is reporting on.
+    """
+    return _scorer is not None
+
+
 # Process-lifetime response cache — a score is deterministic given the
 # ephemeris and n_mc, and the console re-requests a target on every click.
 # Every read and write goes through _cache_lock: the check-then-pop and the
