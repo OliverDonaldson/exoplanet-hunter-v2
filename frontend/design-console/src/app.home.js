@@ -296,7 +296,7 @@ function Catalogue() {
         <span class="txt">
           <b style="color:rgba(240,238,232,0.8);font-weight:500">TSM / ESM</b> are Kempton (2018) follow-up metrics — sort on them to rank targets for telescope time rather than by score alone.
           <b style="color:rgba(240,238,232,0.8);font-weight:500">Baseline</b> is the observed span for the host; long baselines inflate detectability, so scores are not comparable across very different baselines.
-          Per-row score σ is pending — <span style="font-family:'JetBrains Mono';font-size:0.68rem">score_std</span> is not yet persisted to the catalogue table.
+          <b style="color:rgba(240,238,232,0.8);font-weight:500">Per-row σ</b> is the spread across the five folds. Catalogue scores are ensemble means from the bulk scorer, not the Platt-calibrated figure the vetting page returns, so the two can differ for the same target.
         </span>
       </div>
 
