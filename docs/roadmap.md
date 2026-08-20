@@ -192,7 +192,7 @@ One table, kept current. Detail for each row is in the stage sections below.
 | **9** *(old 2(d))* difference-image branch | **BUILT and measured 2026-08-20** — costs nothing, and its primary criterion **could not be measured** | the stamps were never sparse: the pixel list fills its bounding box exactly, so the re-grid is a placement not an interpolation. Branch built at 17x17 with attention over DV's per-sector quality. Recall −0.0169 (**0.20x** its floor), mission split +0.0066 (0.21x), rebuild anchor −0.0515 (0.70x) — all inside their floors. **Prediction 1, the falsification test, is unrunnable**: the stage 7i harness zeroes every DV input by its own pre-registered limit, so the branch contributes exactly 0.0 on control-arm hosts. Whether to change that limit is Ollie's call |
 | **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
 | **11** *(old 4)* serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
-| **12** *(old 5)* UI redesign | locked last | |
+| **12** *(old 5)* UI redesign | **moved FIRST as Phase 0, 2026-08-20** — see 4.2c | it is the only work here decoupled from every open model question: it reads a pinned API contract that already exists, so no later stage can invalidate it, and it makes the project demonstrable at every point instead of only at the end. ExoMiner's own public vetting catalog is 270 lines of Dash with no plots (4.2b finding 7), so the product gap runs in our favour |
 
 Two rows the old table carried separately are gone by absorption, not by
 cancellation: **old 2(b)** (unfolded-flux branch, rebuilt 2026-08-08) and **old
@@ -4108,6 +4108,142 @@ Both arms are written to `models/stage9/` — deliberately outside
 **Stops if.** Unchanged, and neither condition fired.
 
 
+### 4.2b The ExoMiner++ readout — measured against the real repository and the paper (2026-08-20)
+
+The NASA ExoMiner repository (`ExoMiner-main`, ExoMiner++ / the 2025 TESS paper
+build) was read directly, together with Valizadegan et al. 2025, *AJ* **170**:287.
+Everything below is quoted from that code or that paper, not from a summary of
+either. Their code is **not vendored** — NASA NOSA licence, and
+`models/cnn_branches.py:5` already records that decision.
+
+**1. ExoMiner does not detect. It vets.** `exominer_pipeline/run_pipeline.py`
+takes TIC IDs, downloads light-curve FITS **and DV XML** from MAST, and reads its
+TCEs out of SPOC's DV XML. There is no period search anywhere in the repository.
+"Validates 301 new exoplanets" is *classification of existing candidates*, not
+detection. **This project already has `search/bls.py`, which ExoMiner has no
+equivalent of.** Detection-plus-vetting is therefore not a gap to close but a
+capability the reference implementation does not have, and it is the honest
+differentiator for this work.
+
+**2. The difference-image branch was built without its reference frame, and that
+is the mechanism behind stage 9's null.** ExoMiner++ feeds its difference branch
+**three** `[33, 33, 5]` tensors plus quality; ours feeds **one** `(8, 17, 17, 3)`.
+
+| input | ExoMiner++ | ours |
+|---|---|---|
+| difference image | `diff_imgs_std_trainset` | channel 0 |
+| out-of-transit image | `oot_imgs_std_trainset` | channel 1 |
+| **target pixel position** | `target_imgs`, one-hot at the star's pixel with sub-pixel offsets — `src_preprocessing/diff_img/preprocessing/utils_diff_img.py:183` | **absent** |
+| **neighbouring TIC positions + magnitudes** | `neighbors_imgs`, built by `diff_img/search_neighbors/` | **absent** |
+
+We carry the difference and the reference image. What is missing is the
+**origin**. `diffimage.py::_centred_slice` centres the *bounding box*, which puts
+the star near the middle as a placement artefact rather than a measurement, so a
+centroid offset is not computable from what the branch is given. This explains
+stage 9 without needing prediction 1, which remains unrunnable for the reason
+4.2 records.
+
+**3. Their training set is 27x ours, and the unit of analysis differs.** The
+paper reports **147,568 unlabeled TCEs** over TESS SPOC 2-min S1–S67, of which
+ExoMiner++ calls **7,330** planet candidates. One ExoMiner row is a **TCE from
+SPOC's DV XML**; one of ours is a **catalogue disposition**
+(`data/catalog.py:35`), with Kepler additionally hard-capped at 1250/1250 in
+`conf/data/full.yaml:15`. Their negatives are pipeline detections that vetting
+rejected; ours are false positives somebody adjudicated. That difference is W1
+and W2 at source, and no architecture reaches it.
+
+**4. Multisource Kepler+TESS training is a deliberate fix for exactly our
+defect.** The paper trains on Kepler *and* TESS jointly "to mitigate the impact
+of TESS's noisier and more ambiguous labels". W1 was re-measured on 2026-08-20 as
+a **TESS** defect (+0.3874 TESS, +0.1025 Kepler, **−0.1490 K2**), so the
+published remedy for our largest measured defect is a training-set composition we
+do not use.
+
+**5. Where we already agree, and it is not by accident.** Savitzky–Golay
+detrending: the paper records replacing a spline filter with SG for TESS, and
+`build_viewset.py:43` has used SG at window 401 / polyorder 2 throughout. A
+per-bin variance channel: they added one, we carry it as the third channel.
+Focal loss: `exominer_plusplus.yaml` ships `loss: crossentropy` with
+`focal_class_balancing: false` — configured and not used, which is the conclusion
+our own campaign reached independently.
+
+**6. Two inputs they have and we do not, beyond the difference-image tensors.**
+A `momentum_dump` branch — spacecraft reaction-wheel desaturation, a TESS-specific
+systematic, and per their Table 1 the only model of eleven that uses it. And,
+for TESS only, they **removed** the flux-weighted centroid statistics and the
+difference-image centroid offset because both are *"not reliable for TESS ...
+due to substantial crowding in the photometric apertures"*, replacing them with
+target magnitude and RUWE. Our `centroid_view` is scoped to `mean_sky_offset`,
+`control_sky_offset` and `ruwe` (`cnn_branches.py`), so we are feeding on TESS
+two scalars the reference implementation deliberately dropped for TESS. **Not
+acted on here; recorded as a finding with a citation.**
+
+**7. Their public vetting catalog is a spreadsheet.**
+`exominer_vetting_pc_catalog_dash-render-web-app/` is **270 lines of Dash**: one
+`dash_table.DataTable`, a regex filter, a CSV export button and a logo. No plots,
+no light curves, no difference images, no explainability. Our `/score/{tic_id}`
+already returns phase-folded global/local/odd/even views, a centroid track, a
+periodogram, five diagnostic suites, and a calibrated probability with its
+MC-dropout band and per-fold members. **The product gap runs in our favour and
+it is large.**
+
+
+### 4.2c Pre-registered — the four phases, and what each is allowed to claim (pre-registered 2026-08-20)
+
+Recorded before any of it is built. Phase ordering is by *what unblocks what*,
+not by appetite.
+
+**Phase 0 — the console, brought forward · ~8 h · no compute.** Stage 12 was
+"locked last"; it moves first. It is the only work in this file that is
+**entirely decoupled from every open model question** — it reads a pinned API
+contract that already exists, so nothing it does can be invalidated by stages 9b,
+10, or the data work. It makes the project demonstrable at every later point
+rather than only at the end.
+*Claims allowed*: none about model quality. Phase 0 is presentation of numbers
+measured elsewhere, and any screenshot of it must carry `model_version`.
+*Stops if*: it starts requiring API changes. The contract in `api/app/schemas.py`
+and `frontend/src/api/types.ts` is pinned and changes to it are a different piece
+of work.
+
+**Phase 1 — the target-position channel and momentum dump · ~15 h · 3–4 h
+compute.** `difference_view` gains a fourth channel carrying DV's target pixel
+position; a `momentum_dump` branch is added. Re-run as the same paired
+model-level drop stage 9 used, on the same fold artefact.
+*Pre-registered reading*: this is a **mechanism test of finding 2 above**, not a
+performance bid. If TESS recall @1% FPR on `dv_usable` rows does not move beyond
+its floor, the reference-frame explanation is **falsified** and is to be recorded
+as such — the branch is then simply not carrying signal, and no third stamp
+variant is commissioned.
+*Floors*: from the Phase 1a seed sweep below, not from stage 6's 2026-08-09
+figure, which predates stage 8's labels.
+
+**Phase 1a — the seed sweep · ~6–9 h compute.** Three seeds, current winning
+config, pinned `stage10_5.json` folds, nothing else varied. Delivers a current
+seed sd for recall @1% FPR, TESS AUC **and host-AUC**, the last of which has never
+had a floor. It also settles the RNG limit recorded in 4.2: if the spread
+contains stage 9's −0.0515 anchor gap, that explanation stands.
+*Runs before Phase 1 is read, and before stage 10 is started.*
+
+**Phase 2 — the data fix · ~40 h, mostly download and preprocessing.** Tier 1:
+lift the Kepler cap to the full DR25 KOI set — the certified-FP path already
+exists at `data/catalog.py:287`. Tier 2: move the unit of analysis to the **TCE**,
+ingested from DV XML as ExoMiner does.
+*Pre-registered reading*: Tier 2 is the only intervention in this file aimed at
+W1/W2 **at source**. If Spearman(baseline, label) on TESS does not fall below
++0.30 after it, the selection-effect account of W1 is wrong and the defect is
+something else.
+*Limit*: this changes the distribution, so every metric measured before it is
+re-based, and stage 3's re-baselined summary must be regenerated.
+
+**Phase 3 — stage 10, then 7ii, then stage 11.** Unchanged in content, and all
+three read better after Phases 1–2. Stage 10 explicitly **does not start** before
+Phase 1a delivers its floors.
+
+**What none of this promotes.** `models/registry.json` stays untouched, and
+`ca906040` stays served, until a stage asks for a promotion in writing and it is
+granted.
+
+
 ### 4.3 Stage 10 — Optuna re-tune · 2 h build · 10–13 h compute
 
 **Stage 10 *(old G)* — Optuna re-tune.** On the winner, after the distribution is
@@ -4208,7 +4344,7 @@ Small, and each one closes a named weakness rather than polishing:
 before it.
 
 
-### 4.7 Stage 12 — UI redesign · locked last
+### 4.7 Stage 12 — UI redesign · **moved first as Phase 0 on 2026-08-20, see 4.2c**
 
 **Stage 12 *(old 5)* — the UI redesign.** Unchanged and last. Mission Control aesthetic,
 manus north star. It will have per-branch vetting evidence to display.
