@@ -186,7 +186,7 @@ One table, kept current. Detail for each row is in the stage sections below.
 | **5** *(old C)* leakage key + candidate rebuild | **done** 2026-08-08 | `_cache_path` keyed on the ephemeris; candidate set rebuilt cold at 2001/201 — **5,346 rows, 309 MB, 95 min**. Run 3's checkpoint scores it, so the control arm and the candidate-bias measurement are unblocked |
 | **6** recall variance + re-baseline | **done** 2026-08-09 | `pooled_gate_recall_seed_sd` **0.0292** → **a recall @1% FPR margin under ~0.034 is not a decision**. Run 3's rejection is sound at 4.8× the floor; the capacity arm's 0.145 → 0.236 was **real, not noise**, and stays unactionable. `models/cv/branches-20260808-rebaseline` is the control for every stage after it |
 | **7i** *(old D)* offline control-arm harness | **done** 2026-08-12 — criterion **NOT met**; the branch line has no measured advantage on either criterion | the instrument: `clean`/`flatten` → `inject_box_transit` → `build_view_set` → `write_viewset_shards` → `make_viewset_dataset` → a run directory's fold members and calibrator. It is **stage 8's measuring instrument**, which is why it leads |
-| **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving |
+| **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving. **The `difference` family must be read stratified by `dv_usable`** — 58.9% of rows have it gated off by construction, so an unstratified pass returns a diluted null (added 2026-08-20, from stage 9) |
 | **8** *(old 3)* labels and negatives | **done** 2026-08-14 — four arms measured 2026-08-13, prediction 4 on 2026-08-14; **all four pre-registered predictions falsified** | **propensity weighting eliminated the architecture's amplification of the baseline confound at no measurable cost** (gap +0.1265 → −0.0071, 3.3× its bar). Synthetic negatives null; arm S unreadable by construction. The control-arm split also fell (−0.0966, 1.3× its bar) but **threshold-free host-scoring did not move**, so that second win is recorded as *qualified*. Group (a), external catalogue negatives, deliberately not done |
 | **10.5** the ensemble arm | **CLOSED 2026-08-15 — BOTH ARMS CLEAR**; the control-arm pass landed the same day (3.11e) | **the branch line's value is as a complement, not a replacement.** Mean-of-logits recall @1% FPR **0.4362** (E-C) and **0.4223** (E-P) against the common-fold dual-view member's 0.3046 — **3.9x and 4.1x** their own floors. Reopens nothing about stage 4, whose rejections were about replacement. Nothing promotes |
 | **9** *(old 2(d))* difference-image branch | **BUILT and measured 2026-08-20** — costs nothing, and its primary criterion **could not be measured** | the stamps were never sparse: the pixel list fills its bounding box exactly, so the re-grid is a placement not an interpolation. Branch built at 17x17 with attention over DV's per-sector quality. Recall −0.0169 (**0.20x** its floor), mission split +0.0066 (0.21x), rebuild anchor −0.0515 (0.70x) — all inside their floors. **Prediction 1, the falsification test, is unrunnable**: the stage 7i harness zeroes every DV input by its own pre-registered limit, so the branch contributes exactly 0.0 on control-arm hosts. Whether to change that limit is Ollie's call |
@@ -4074,6 +4074,21 @@ over shard sets differing only by an added view are therefore **independent
 draws, not replicates**. Not isolated, so it is offered as the probable cause
 rather than a finding.
 
+**Recorded as a standing limit on every cross-run comparison, not only this
+one.** The shared fold artefact was built on 2026-08-14 against exactly this
+problem — 3.11a records it as the blocking build, *"reusable — stages 9 and 7ii
+face the same cross-run comparability problem."* It fixes **which rows land in
+which fold**. It does not touch the RNG stream, and the stream is the half that
+moves when the view count changes. Cross-run comparability was therefore only
+ever half-closed, and the open half was not visible until a run added a view.
+Two consequences, both unclosed at the time of writing: any cross-shard-set
+reading in this file is **one draw from an unmeasured distribution**, and the
+max-pairing floors may be calibrated only for paired reruns, in which case they
+are too tight for the cross-set case they are being read against. The structural
+fix is `tf.random.stateless_*` keyed on `(example_id, epoch)`, which would make
+such runs genuine replicates; it changes augmentation behaviour and so carries
+its own rebaseline, and is **not** taken here.
+
 **That is also why the paired design was the right one.** The drop is applied at
 the *model*, not the shard set: every `Input` stays in the signature and the
 stream yields all thirteen views to both arms, so C and D consume the identical
@@ -4120,6 +4135,16 @@ re-litigate it without a new reason.
 
 **What.** Leave-one-out over the branch families on the final architecture and
 the settled distribution, at `--n-models-per-fold 3`. One pass.
+
+**The `difference` family must be read stratified by `dv_usable`, added
+2026-08-20.** Stage 9 established that the presence gate zeroes the difference
+branch wherever the DV report is absent, which is **58.9%** of this set and 100%
+of Kepler and K2. An unstratified leave-one-out on that family therefore measures
+a population in which the majority of rows are unaffected *by construction*: the
+effect is diluted below the floor before the pass starts, and the null it returns
+is uninformative rather than evidence of redundancy. The same trap cost stage 9
+its primary criterion. Report the family on `dv_usable == True` rows, with the
+gated rows reported separately as the arithmetic zero they are.
 
 **Why here and not earlier.** Attribution describes a **finished** branch set.
 Run before stages 8, 9 and 10 it measures something about to change — which the all-null
