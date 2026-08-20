@@ -1,50 +1,31 @@
 /* ═══════════════════════════════════════════════════════════
-   API — the live service, and the seam the prototype falls back through
+   API — the live service, and the seam the prototype falls through
    ═══════════════════════════════════════════════════════════
 
-   The design console was built as a self-contained file with mock data so it
-   could be opened from disk and clicked through. This module is the seam that
-   lets the same file talk to the real service when one is reachable, without
-   losing the offline behaviour that makes it reviewable.
+   Base URL, first hit wins: ?api= > window.EH_API_BASE > <meta
+   name="eh-api-base"> > '/api'. Live vs mock is decided once by probing
+   /healthz, not by a build flag — the same file is opened from disk with no
+   service and served from a host that has one.
 
-   Resolution order for the base URL, first hit wins:
+   Anything without an endpoint degrades to an explicit "not measured", never
+   to a mock number: on a screen of measured figures a fabricated one is
+   indistinguishable from the rest.
 
-     1. ?api=<url>                     — per-visit override, for pointing a
-                                         built file at a deployed API
-     2. window.EH_API_BASE             — set by a host page before the module
-     3. <meta name="eh-api-base">      — set at build or deploy time
-     4. '/api'                         — the vite dev proxy and the Fly route
-
-   MODE is decided once, by probing /healthz. It is not a build flag, because
-   the same artifact is opened both from disk (no service) and from the
-   deployed host (service present), and a build flag cannot be right for both.
-
-   WHAT IS AND IS NOT AVAILABLE. Anything without an endpoint behind it
-   degrades to an explicit "not measured" rather than to a mock number — the
-   same rule the diagnostics follow, and for the same reason: a fabricated
-   figure on a screen that otherwise shows measured ones is indistinguishable
-   from a measured one.
-
-     per-row P(planet)   present, from scripts/score_candidates.py via
-                         /candidates. An ENSEMBLE MEAN, not the Platt-
-                         calibrated figure /score returns, so a row's
-                         catalogue number and its vetting number are computed
-                         differently. Rows the bulk scorer has not reached
-                         carry `prob: null` and read as not scored.
-     per-mission metrics present, computed by /model from the promoted run's
-                         predictions. Missions the run never evaluated are
-                         absent from the list rather than empty, so they get
-                         no card at all.
-     branch evidence     ABSENT. Per-branch occlusion is stage 11 and is not
-                         built. The tab carries the page's in-progress
-                         treatment and lists what each view feeds, with no
-                         contribution attached.
-     run verdicts        ABSENT. registry.json records only what is served, so
-                         no promotion log exists to say why a run was
-                         rejected. Archived runs also carry no date: nothing
-                         records a run's completion time, and the summary's
-                         mtime is the DVC pull time in the container.
+     prob         present, from scripts/score_candidates.py via /candidates.
+                  An ENSEMBLE MEAN, not the Platt-calibrated figure /score
+                  returns, so a row's catalogue and vetting numbers differ.
+                  Rows the scorer has not reached stay null.
+     per_mission  present, computed by /model. Missions the run never
+                  evaluated are absent, so they get no card.
+     branches     ABSENT — occlusion is stage 11. The tab carries the page's
+                  in-progress treatment.
+     verdicts     ABSENT — no promotion log exists. Archived runs also carry
+                  no date; nothing records a run's completion time.
 */
+
+/** Present = neither null nor undefined. `== null` says this in one operator
+    but is loose equality, which the repo's slop gate rejects on sight. */
+const has = v => v !== null && v !== undefined;
 
 const API = {
   base: '/api',
@@ -63,9 +44,14 @@ const API = {
 })();
 
 /** fetch with a deadline — a hung request must not leave the console spinning. */
-async function apiFetch(path, { timeoutMs = API.timeoutMs } = {}) {
+async function apiFetch(path, { timeoutMs = API.timeoutMs, signal } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  // A caller's signal is chained onto the deadline's controller rather than
+  // passed to fetch directly, so whichever fires first wins and there is still
+  // exactly one abort path to clean up.
+  const relay = () => ctrl.abort();
+  if (signal) signal.addEventListener('abort', relay, { once: true });
   try {
     const res = await fetch(`${API.base}${path}`, { signal: ctrl.signal, cache: 'no-store' });
     if (!res.ok) {
@@ -75,6 +61,7 @@ async function apiFetch(path, { timeoutMs = API.timeoutMs } = {}) {
     return await res.json();
   } finally {
     clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', relay);
   }
 }
 
@@ -106,7 +93,7 @@ function mapCandidate(row) {
     // ephemerisFor() sends this as t0; without it /score has no epoch and
     // falls back to a BLS period search, which is minutes rather than seconds.
     epochBjd: row.epoch_bjd ?? null,
-    depth: row.depth_ppm != null ? row.depth_ppm / 1e6 : 0,
+    depth: has(row.depth_ppm) ? row.depth_ppm / 1e6 : 0,
     // Bulk-scored offline by scripts/score_candidates.py. An ENSEMBLE MEAN,
     // not the Platt-calibrated figure /score returns, so this row's number and
     // the one on its vetting page are computed differently and can differ.
@@ -183,14 +170,14 @@ async function loadCandidates({ limit = 500 } = {}) {
 
 /** Score one target. Slow by nature: a target with no catalogue ephemeris
     runs a BLS search first, which is minutes rather than seconds. */
-async function loadScore(ticId, opts = {}) {
+async function loadScore(ticId, opts = {}, { signal } = {}) {
   const p = new URLSearchParams();
-  if (opts.periodDays != null) p.set('period_days', String(opts.periodDays));
-  if (opts.t0Btjd != null) p.set('t0_btjd', String(opts.t0Btjd));
-  if (opts.durationHours != null) p.set('duration_hours', String(opts.durationHours));
+  if (has(opts.periodDays)) p.set('period_days', String(opts.periodDays));
+  if (has(opts.t0Btjd)) p.set('t0_btjd', String(opts.t0Btjd));
+  if (has(opts.durationHours)) p.set('duration_hours', String(opts.durationHours));
   if (opts.includePeriodogram) p.set('include_periodogram', 'true');
   const qs = p.size ? `?${p}` : '';
-  const body = await apiFetch(`/score/${ticId}${qs}`, { timeoutMs: API.scoreTimeoutMs });
+  const body = await apiFetch(`/score/${ticId}${qs}`, { timeoutMs: API.scoreTimeoutMs, signal });
   return mapScore(body);
 }
 
@@ -213,7 +200,7 @@ function candidatesCsvUrl({ search, disposition, source } = {}) {
 function ephemerisFor(c) {
   if (!c || !c.period || c.period <= 0 || !c.duration || c.duration <= 0) return {};
   const opts = { periodDays: c.period, durationHours: c.duration };
-  if (c.epochBjd != null) {
+  if (has(c.epochBjd)) {
     opts.t0Btjd = c.epochBjd > 2440000 ? c.epochBjd - 2457000 : c.epochBjd;
   }
   return opts;

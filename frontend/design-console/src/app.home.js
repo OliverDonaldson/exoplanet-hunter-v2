@@ -18,11 +18,11 @@ function missionStats() {
       accent:true,  count:SERVED.nHighConfidence || 146,  dur:1500 },
     // the pooled 0.955 is gone: the gating mission is the number that decides promotion
     { label:`${g.mission || 'TESS'} ROC-AUC`,
-      value: g.auc != null ? g.auc.toFixed(4) : NOT_MEASURED, accent:false,
-      sub: g.aucErr != null ? `±${g.aucErr.toFixed(4)} · gating mission` : 'not measured for this run' },
+      value: has(g.auc) ? g.auc.toFixed(4) : NOT_MEASURED, accent:false,
+      sub: has(g.aucErr) ? `±${g.aucErr.toFixed(4)} · gating mission` : 'not measured for this run' },
     { label:`${g.mission || 'TESS'} Recall @1% FPR`,
-      value: g.recall != null ? g.recall.toFixed(4) : NOT_MEASURED, accent:false,
-      sub: g.recallErr != null ? `±${g.recallErr.toFixed(4)} · shortlist criterion` : 'not measured for this run' },
+      value: has(g.recall) ? g.recall.toFixed(4) : NOT_MEASURED, accent:false,
+      sub: has(g.recallErr) ? `±${g.recallErr.toFixed(4)} · shortlist criterion` : 'not measured for this run' },
     { label:'TESS Sectors',      value:'63',    accent:false, count:63,   dur:1200 },
     // 9,564 is the full public KOI catalogue; this is what was actually trained on
     { label:'Kepler KOIs Trained', value:(kepler ? kepler.n : 2500).toLocaleString(),
@@ -229,13 +229,13 @@ function Catalogue() {
     }
     if (state.disposition !== 'All') data = data.filter(c => c.disposition === state.disposition);
     if (state.source !== 'All') data = data.filter(c => c.source === state.source);
-    if (state.minProb > 0) data = data.filter(c => c.prob != null && c.prob >= state.minProb / 100);
+    if (state.minProb > 0) data = data.filter(c => has(c.prob) && c.prob >= state.minProb / 100);
     data.sort((a, b) => {
       const av = a[state.sortKey], bv = b[state.sortKey];
       // Nulls sink to the bottom in either direction: an unscored row is not
       // the lowest-scoring row, and sorting it there would read as one.
-      const an = av == null || (typeof av === 'number' && !Number.isFinite(av));
-      const bn = bv == null || (typeof bv === 'number' && !Number.isFinite(bv));
+      const an = !has(av) || (typeof av === 'number' && !Number.isFinite(av));
+      const bn = !has(bv) || (typeof bv === 'number' && !Number.isFinite(bv));
       if (an && bn) return 0;
       if (an) return 1;
       if (bn) return -1;
@@ -331,23 +331,23 @@ function Catalogue() {
       const td = 'padding:0.85rem 1rem';
       const mono = "font-family:'JetBrains Mono';font-size:0.75rem;color:#F0EEE8;font-variant-numeric:tabular-nums";
       const dim = "font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8;font-variant-numeric:tabular-nums";
-      const n = (v, d) => (v == null || !Number.isFinite(v) || v === 0 ? '—' : v.toFixed(d));
+      const n = (v, d) => (!has(v) || !Number.isFinite(v) || v === 0 ? '—' : v.toFixed(d));
       return `<tr class="data-row" data-id="${esc(c.id)}" style="cursor:pointer">
         <td style="${td}"><span style="${mono};font-weight:500">${esc(c.id)}</span></td>
         <td style="${td}"><span style="${dim}">${esc(c.ticId)}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.period, 1)}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.depth, 4)}</span></td>
-        <td style="${td}">${c.prob == null
+        <td style="${td}">${!has(c.prob)
             ? `<span style="${dim};color:rgba(138,143,168,0.5)" title="/candidates carries no score — open to vet">not scored</span>`
             : `<span class="${getProbClass(c.prob)}">${c.prob.toFixed(3)}</span>`}</td>
-        <td style="${td}"><span style="${dim}${c.probStd == null ? ';color:rgba(138,143,168,0.5)' : ''}" title="${c.probStd == null ? 'not scored' : 'ensemble spread over the five folds'}">${c.probStd == null ? '—' : c.probStd.toFixed(3)}</span></td>
+        <td style="${td}"><span style="${dim}${!has(c.probStd) ? ';color:rgba(138,143,168,0.5)' : ''}" title="${!has(c.probStd) ? 'not scored' : 'ensemble spread over the five folds'}">${!has(c.probStd) ? '—' : c.probStd.toFixed(3)}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;font-weight:600;color:${dc};background:${dc}18;border:1px solid ${dc}44;padding:0.15rem 0.5rem;border-radius:2px">${c.disposition}</span></td>
         <td style="${td}"><span style="font-family:'Space Grotesk';font-size:0.65rem;font-weight:600;letter-spacing:0.08em;color:#8A8FA8">${c.source}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.tmag, 1)}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.snr, 1)}</span></td>
         <td style="${td}"><span style="${mono};color:${fu.tsmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.tsm, 1)}</span></td>
         <td style="${td}"><span style="${mono};color:${fu.esmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.esm, 2)}</span></td>
-        <td style="${td}"><span style="${mono};color:${c.baselineDays >= 1000 ? '#F5A623' : '#F0EEE8'}">${c.baselineDays == null ? '—' : c.baselineDays.toLocaleString()}</span></td>
+        <td style="${td}"><span style="${mono};color:${c.baselineDays >= 1000 ? '#F5A623' : '#F0EEE8'}">${!has(c.baselineDays) ? '—' : c.baselineDays.toLocaleString()}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${c.lastScored}</span></td>
         <td style="${td}"><span style="font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;color:#4DFFD2;text-transform:uppercase">Vet →</span></td>
       </tr>`;

@@ -15,7 +15,7 @@ function generateViews(c) {
       const out = [];
       for (let i = 0; i < v.phase.length; i++) {
         const f = v.flux[i];
-        if (f == null || !isFinite(f)) continue;
+        if (!has(f) || !isFinite(f)) continue;
         // The score contract carries no per-bin scatter, so the band collapses
         // onto the line rather than being invented around it.
         out.push({ phase: v.phase[i], flux: f, hi: f, lo: f });
@@ -125,7 +125,7 @@ function Vetting(candidateId) {
     { label:'Last Scored', value:c.lastScored },
   ];
 
-  const longBaseline = c.baselineDays != null && c.baselineDays >= 1000;
+  const longBaseline = has(c.baselineDays) && c.baselineDays >= 1000;
   const fuVerdict =
     fu.tsmPass && fu.esmPass ? 'High priority — viable for both transmission and emission spectroscopy'
     : fu.tsmPass ? 'Transmission target — TSM clears the Kempton threshold for this radius bin'
@@ -153,14 +153,14 @@ function Vetting(candidateId) {
         </div>
         <div class="prob-big" style="text-align:right;display:flex;flex-direction:column;align-items:flex-end">
           <div class="stat-label" style="margin-bottom:0.4rem">P(planet)</div>
-          <div style="font-family:'JetBrains Mono';font-size:3.5rem;font-weight:500;color:${c.prob == null ? '#8A8FA8' : probColor(c.prob)};line-height:1;letter-spacing:-0.02em;font-variant-numeric:tabular-nums">${c.prob == null ? (c.scoring ? '···' : '—') : c.prob.toFixed(3)}</div>
+          <div style="font-family:'JetBrains Mono';font-size:3.5rem;font-weight:500;color:${!has(c.prob) ? '#8A8FA8' : probColor(c.prob)};line-height:1;letter-spacing:-0.02em;font-variant-numeric:tabular-nums">${!has(c.prob) ? (c.scoring ? '···' : '—') : c.prob.toFixed(3)}</div>
           <div style="font-family:'JetBrains Mono';font-size:0.68rem;color:#8A8FA8;margin-top:0.35rem">${
-            c.prob == null
+            !has(c.prob)
               ? (c.scoring ? 'scoring — light curve → 5-fold ensemble' : (c.scoreError ? esc(c.scoreError) : 'not scored'))
               : `± ${agree.probStd.toFixed(3)} MC-dropout · Platt-calibrated`}</div>
           <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.65rem;border:1px solid ${longBaseline ? 'rgba(245,166,35,0.35)' : 'rgba(255,255,255,0.10)'};background:${longBaseline ? 'rgba(245,166,35,0.05)' : 'transparent'}">
             <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${longBaseline ? '#F5A623' : '#8A8FA8'}">
-              ${c.baselineDays == null
+              ${!has(c.baselineDays)
                 ? 'baseline not published for this row'
                 : `${c.baselineDays.toLocaleString()} d baseline${longBaseline ? ' · well-observed targets may score high' : ''}`}
             </span>
@@ -273,7 +273,7 @@ function Vetting(candidateId) {
           catalogue mean ${BASE_RATE.toFixed(3)} <span style="color:rgba(255,255,255,0.25)">+</span>
           <span style="color:${sum >= 0 ? '#4DFFD2' : '#FF4D4D'}">${signed(sum, 3)}</span>
           <span style="color:rgba(255,255,255,0.25)">=</span>
-          <span style="color:${c.prob == null ? '#8A8FA8' : probColor(c.prob)}">${c.prob == null ? '—' : c.prob.toFixed(3)}</span>
+          <span style="color:${!has(c.prob) ? '#8A8FA8' : probColor(c.prob)}">${!has(c.prob) ? '—' : c.prob.toFixed(3)}</span>
         </div>
       </div>
 
@@ -309,7 +309,7 @@ function Vetting(candidateId) {
   };
 
   const agreementPanel = () => {
-    if (c.prob == null) {
+    if (!has(c.prob)) {
       return `<div style="padding:3rem;text-align:center;font-family:'JetBrains Mono';font-size:0.75rem;color:#8A8FA8">
         ${c.scoring ? 'Scoring — the ensemble members arrive with the score.' : 'Not scored — no fold members to compare.'}
       </div>`;
@@ -351,7 +351,7 @@ function Vetting(candidateId) {
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:0;border:1px solid rgba(255,255,255,0.08);border-top:none">
         ${[
-          { k:'Calibrated score', v:c.prob == null ? '—' : c.prob.toFixed(3), accent:true },
+          { k:'Calibrated score', v:!has(c.prob) ? '—' : c.prob.toFixed(3), accent:true },
           { k:'MC-dropout σ',     v:agree.probStd.toFixed(4) },
           { k:'Fold σ',           v:agree.foldStd.toFixed(4) },
           { k:'Fold range',       v:`${agree.range[0].toFixed(3)} – ${agree.range[1].toFixed(3)}` },
@@ -489,7 +489,7 @@ const normInv = p => {
 
 /* binormal ROC with the mission's measured AUC */
 function rocFor(auc) {
-  if (auc == null || !Number.isFinite(auc)) return [{ fpr: 0, tpr: 0 }, { fpr: 1, tpr: 1 }];
+  if (!has(auc) || !Number.isFinite(auc)) return [{ fpr: 0, tpr: 0 }, { fpr: 1, tpr: 1 }];
   const a = Math.SQRT2 * normInv(auc);
   const pts = [{ fpr: 0, tpr: 0 }];
   for (let i = 1; i < 80; i++) {
@@ -540,7 +540,7 @@ function metricBlock(label, value, err, accent) {
   // A metric the run did not record renders as not-measured. Formatting null
   // through toFixed would print 0.0000, which reads as a measured zero — for
   // ECE that is perfect calibration, the most flattering possible misreading.
-  if (value == null || err == null) {
+  if (!has(value) || !has(err)) {
     return `
     <div>
       <div class="stat-label" style="margin-bottom:0.4rem">${label}</div>
@@ -574,7 +574,7 @@ function ModelPerformance() {
 
       <div style="margin-bottom:2.5rem">
         <div class="section-label" style="margin-bottom:0.75rem">Model Performance</div>
-        <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">${GATING.auc != null ? GATING.auc.toFixed(4) : '—'} ON ${GATING.mission}.</h1>
+        <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">${has(GATING.auc) ? GATING.auc.toFixed(4) : '—'} ON ${GATING.mission}.</h1>
         <h2 style="font-family:'Space Grotesk';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.6rem">THE MISSION THAT GATES</h2>
         <p style="font-family:'Inter';font-size:0.85rem;color:rgba(240,238,232,0.45)">
           Serving <span style="font-family:'JetBrains Mono';color:#4DFFD2">${SERVED.runId}</span> since ${SERVED.promotedAt} · ${SERVED.arch}
@@ -595,8 +595,8 @@ function ModelPerformance() {
             <div style="height:1.25rem"></div>
             ${metricBlock('Recall @ 1% FPR', m.recall, m.recallErr, m.role === 'gating')}
             <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1.25rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.06)">
-              <div><div class="stat-label" style="margin-bottom:0.2rem">Brier</div><div class="stat-value" style="font-size:0.85rem">${m.brier != null ? m.brier.toFixed(4) : '—'} <span style="color:#8A8FA8;font-size:0.7rem">${m.brierErr != null ? '±' + m.brierErr.toFixed(4) : ''}</span></div></div>
-              <div><div class="stat-label" style="margin-bottom:0.2rem">ECE</div><div class="stat-value" style="font-size:0.85rem">${m.ece != null ? m.ece.toFixed(4) : '—'} <span style="color:#8A8FA8;font-size:0.7rem">${m.eceErr != null ? '±' + m.eceErr.toFixed(4) : ''}</span></div></div>
+              <div><div class="stat-label" style="margin-bottom:0.2rem">Brier</div><div class="stat-value" style="font-size:0.85rem">${has(m.brier) ? m.brier.toFixed(4) : '—'} <span style="color:#8A8FA8;font-size:0.7rem">${has(m.brierErr) ? '±' + m.brierErr.toFixed(4) : ''}</span></div></div>
+              <div><div class="stat-label" style="margin-bottom:0.2rem">ECE</div><div class="stat-value" style="font-size:0.85rem">${has(m.ece) ? m.ece.toFixed(4) : '—'} <span style="color:#8A8FA8;font-size:0.7rem">${has(m.eceErr) ? '±' + m.eceErr.toFixed(4) : ''}</span></div></div>
               <div><div class="stat-label" style="margin-bottom:0.2rem">n</div><div class="stat-value" style="font-size:0.85rem">${m.n.toLocaleString()}</div></div>
             </div>
           </div>`).join('')}
@@ -608,7 +608,7 @@ function ModelPerformance() {
           There is no pooled headline: the missions have different label provenance and different class balance, so a single averaged figure would not mean anything.
           <b style="color:rgba(240,238,232,0.85);font-weight:500">${SERVED.missions.filter(m => m.evaluation === 'zero-shot').map(m => m.mission).join(', ') || 'None'}</b>
           ${SERVED.missions.some(m => m.evaluation === 'zero-shot') ? 'has no out-of-fold evaluation for this run — its numbers are zero-shot transfer and are not comparable with the out-of-fold columns.' : 'runs are all out-of-fold.'}
-          Measured noise floor: AUC ±${SERVED.noiseFloor.auc != null ? SERVED.noiseFloor.auc.toFixed(4) : '—'}, shortlist recall ±${SERVED.noiseFloor.recall != null ? SERVED.noiseFloor.recall.toFixed(4) : '—'} — differences smaller than these are not differences.
+          Measured noise floor: AUC ±${has(SERVED.noiseFloor.auc) ? SERVED.noiseFloor.auc.toFixed(4) : '—'}, shortlist recall ±${has(SERVED.noiseFloor.recall) ? SERVED.noiseFloor.recall.toFixed(4) : '—'} — differences smaller than these are not differences.
         </span>
       </div>
 
@@ -648,9 +648,9 @@ function ModelPerformance() {
                 <tr class="data-row" style="cursor:default">
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:${v.status === 'active' ? '#4DFFD2' : '#8A8FA8'}">${v.runId}</span>${v.status === 'active' ? '<div class="tag-chip tag-oof" style="display:inline-block;margin-left:0.4rem">served</div>' : ''}</td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${v.date || '—'}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.auc != null ? v.auc.toFixed(4) : '—'} <span style="color:#8A8FA8">±${v.aucErr != null ? v.aucErr.toFixed(4) : '—'}</span></span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.recall != null ? v.recall.toFixed(4) : '—'}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.brier != null ? v.brier.toFixed(4) : '—'}</span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.auc) ? v.auc.toFixed(4) : '—'} <span style="color:#8A8FA8">±${has(v.aucErr) ? v.aucErr.toFixed(4) : '—'}</span></span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.recall) ? v.recall.toFixed(4) : '—'}</span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.brier) ? v.brier.toFixed(4) : '—'}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top">${v.verdict ? `<span class="tag-chip ${v.verdict === 'PROMOTE' ? 'tag-promote' : 'tag-reject'}">${v.verdict}</span>` : `<span style="color:#8A8FA8;font-family:'JetBrains Mono';font-size:0.65rem">—</span>`}</td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top;max-width:30rem"><span style="font-family:'Inter';font-size:0.75rem;line-height:1.5;color:rgba(240,238,232,0.55)">${esc(v.reason || 'No promotion log is written yet, so no reason is on record.')}</span></td>
                 </tr>`).join('')}
@@ -681,12 +681,12 @@ function ModelPerformance() {
       <div class="charts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-bottom:2rem">
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.5rem">ROC Curve — ${m.mission}</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">AUC = ${m.auc != null ? m.auc.toFixed(4) : '—'} ± ${m.aucErr != null ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">AUC = ${has(m.auc) ? m.auc.toFixed(4) : '—'} ± ${has(m.aucErr) ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
           <div class="chart-wrap" id="chart-roc"></div>
         </div>
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.5rem">Calibration — ${m.mission}</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">Brier ${m.brier != null ? m.brier.toFixed(4) : '—'} ± ${m.brierErr != null ? m.brierErr.toFixed(4) : '—'} · ECE ${m.ece != null ? m.ece.toFixed(4) : '—'}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">Brier ${has(m.brier) ? m.brier.toFixed(4) : '—'} ± ${has(m.brierErr) ? m.brierErr.toFixed(4) : '—'} · ECE ${has(m.ece) ? m.ece.toFixed(4) : '—'}</div>
           <div class="chart-wrap" id="chart-calib"></div>
         </div>
       </div>
@@ -897,7 +897,8 @@ function Upload() {
             </div>
             <div style="display:flex;gap:1rem;align-items:baseline">
               <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8">${state.elapsed.toFixed(1)}s elapsed</span>
-              <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;font-variant-numeric:tabular-nums">${state.progress}%</span>
+              <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;font-variant-numeric:tabular-nums">${state.awaiting ? 'waiting on MAST' : state.progress + '%'}</span>
+              <button class="btn-ghost" id="up-cancel" style="font-size:0.6rem;padding:0.3rem 0.7rem">Cancel</button>
             </div>
           </div>
           <div style="height:2px;background:rgba(255,255,255,0.08);position:relative;overflow:hidden">
@@ -916,6 +917,17 @@ function Upload() {
             Holding the connection open while MAST serves the light curve. This is the slow step and it is not cached for this target.
           </div>
         </div>`;
+      const cancel = document.getElementById('up-cancel');
+      if (cancel) cancel.addEventListener('click', () => {
+        state.cancelled = true;
+        if (state.controller) state.controller.abort();
+        clearInterval(timer);
+        state.status = 'idle';
+        state.awaiting = false;
+        state.pending = null;
+        state.error = null;
+        paintAction();
+      });
       return;
     }
 
@@ -999,8 +1011,12 @@ function Upload() {
        readable account of what the server is doing, not a measurement of it,
        so the bar is allowed to finish first and then wait. */
     const tic = Number(String(state.ticId).replace(/[^0-9]/g, ''));
-    state.pending = API.mode === 'live' && tic
-      ? loadScore(tic, {}).then(sc => ({ sc })).catch(e => ({ err: e.message }))
+    state.cancelled = false;
+    state.controller = API.mode === 'live' && tic ? new AbortController() : null;
+    state.pending = state.controller
+      ? loadScore(tic, {}, { signal: state.controller.signal })
+          .then(sc => ({ sc }))
+          .catch(e => ({ err: e.name === 'AbortError' ? null : e.message }))
       : null;
     state.awaiting = false;
 
@@ -1020,11 +1036,16 @@ function Upload() {
           const pending = state.pending;
           state.pending = null;
           state.awaiting = true;
-          state.progress = 99;
           pending.then(out => {
             clearInterval(timer);
-            lastScoreAt = Date.now();
             state.awaiting = false;
+            // A cancelled run never happened: it must not start the rate-limit
+            // cooldown, and it has nothing to report.
+            if (state.cancelled || !has(out.err) && !has(out.sc)) {
+              state.status = 'idle';
+              return;
+            }
+            lastScoreAt = Date.now();
             if (out.err) {
               state.status = 'idle';
               state.error = out.err;
@@ -1086,4 +1107,92 @@ function mockScore(ticId, seconds) {
     prob: stub.prob, probStd: agree.probStd, folds: agree.folds,
     diags, unmeasured: diags.filter(d => d.state === 'unmeasured').length,
   };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DISCOVERY — placeholder. The search exists; serving it does not.
+   ═══════════════════════════════════════════════════════════ */
+function Discovery() {
+  app.innerHTML = `
+  <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
+    <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0">
+      <div class="section-label" style="margin-bottom:0.75rem">Discovery</div>
+      <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">SEARCH A LIGHT CURVE.</h1>
+      <div style="font-family:'Space Grotesk';font-size:clamp(1.4rem, 2.6vw, 2.2rem);font-weight:600;color:rgba(240,238,232,0.30);letter-spacing:-0.02em;margin-bottom:1.25rem">FIND THE SIGNAL YOURSELF</div>
+      <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin-bottom:2.5rem">
+        Every other page on this console vets a signal somebody else detected — a
+        TOI, a KOI, a SPOC threshold-crossing event. Discovery is the other half:
+        take a raw light curve with no ephemeris and search it for a periodic
+        transit, then score whatever it finds.
+      </p>
+
+      <div class="soon" style="margin-bottom:2.5rem">
+        <div class="h">Not yet served <span class="tag-chip tag-soon" style="margin-left:0.4rem">coming</span></div>
+        <div class="d">
+          The search itself is built — a box-least-squares period search over a
+          configurable grid, the same one the scoring path falls back to when a
+          target has no catalogue ephemeris. What is missing is the serving side:
+          a survey-scale search is minutes of CPU per target, and the API has no
+          job queue to run one outside a request.
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr));gap:1.25rem">
+        ${[
+          ['What exists', 'A BLS period search with a configurable grid, and a scoring path that already uses it whenever a target arrives without an ephemeris.'],
+          ['What is missing', 'A job queue. A search is minutes of CPU, so it cannot be held open inside an HTTP request the way a score with a known ephemeris can.'],
+          ['Why it matters', 'ExoMiner and the SPOC pipeline vet events that were already detected. Detection plus vetting in one place is the thing neither of them offers.'],
+        ].map(([h, d]) => `
+          <div class="panel" style="padding:1.5rem">
+            <div class="stat-label" style="margin-bottom:0.6rem">${h}</div>
+            <div style="font-family:'Inter';font-size:0.78rem;line-height:1.65;color:#8A8FA8">${d}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ABOUT — scaffold. Sections are placeholders to be written.
+   ═══════════════════════════════════════════════════════════ */
+const ABOUT_SECTIONS = [
+  ['What this is', 'A one-paragraph statement of the project: what it classifies, for whom, and what it does not do.'],
+  ['How it works', 'The pipeline end to end — catalogue refresh, validation gates, the eleven input views, the five-fold ensemble, calibration, the promotion gate.'],
+  ['How to read a score', 'What a calibrated probability means here, what the MC-dropout band is, and why a margin under the noise floor is not a difference.'],
+  ['Known limits', 'The measured defects, stated plainly: observation baseline correlates with the label on TESS, and the model scores the star as well as the transit.'],
+  ['Data and provenance', 'Where every input comes from — MAST, ExoFOP, the NASA archive, Gaia — and which model version served any given number.'],
+  ['Credits and licence', 'Attribution, the ExoMiner work this builds on, and the licence this is released under.'],
+];
+
+function About() {
+  app.innerHTML = `
+  <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
+    <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0">
+      <div class="section-label" style="margin-bottom:0.75rem">About</div>
+      <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:1.25rem">EXOPLANET HUNTER.</h1>
+      <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin-bottom:2.5rem">
+        A calibrated deep-learning pipeline for vetting transit candidates in NASA
+        TESS, Kepler and K2 photometry.
+      </p>
+
+      <div class="soon" style="margin-bottom:2.5rem">
+        <div class="h">Scaffold <span class="tag-chip tag-soon" style="margin-left:0.4rem">to write</span></div>
+        <div class="d">
+          The sections below are placeholders. Each one is a heading that needs
+          its prose written; nothing here is a claim yet.
+        </div>
+      </div>
+
+      <div style="display:grid;gap:1.25rem">
+        ${ABOUT_SECTIONS.map(([h, d], i) => `
+          <div class="panel" style="padding:1.75rem">
+            <div style="display:flex;align-items:baseline;gap:0.9rem;margin-bottom:0.6rem">
+              <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2">${String(i + 1).padStart(2, '0')}</span>
+              <span style="font-family:'Space Grotesk';font-size:1rem;font-weight:600;color:#F0EEE8">${h}</span>
+            </div>
+            <div style="font-family:'Inter';font-size:0.8rem;line-height:1.7;color:rgba(138,143,168,0.75);padding-left:2.1rem">${d}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+  </div>`;
 }

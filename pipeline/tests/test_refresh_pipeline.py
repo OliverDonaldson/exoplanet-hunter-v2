@@ -21,6 +21,14 @@ from pathlib import Path
 
 import pytest
 
+# The flow is a Prefect flow and imports `prefect` at module scope. Prefect
+# lives in the optional `orchestration` extra — deliberately out of the core
+# install, since nothing but this flow needs it — so a plain `pipeline[dev]`
+# environment cannot import the module at all. Same treatment the vendored
+# TRICERATOPS tests get for `pipeline[validation]`: skip, rather than fail a
+# whole collection run on an extra that was never meant to be present.
+pytest.importorskip("prefect", reason="pipeline[orchestration] not installed")
+
 
 def _flow():
     """The flow as a module. It is not importable as a package path."""

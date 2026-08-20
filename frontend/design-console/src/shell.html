@@ -84,7 +84,7 @@ table{border-collapse:collapse;}
 .page-content{position:relative;z-index:1;}
 
 @keyframes ticker-scroll{0%{transform:translateX(0);}100%{transform:translateX(-50%);}}
-.ticker-track{animation:ticker-scroll 40s linear infinite;display:flex;width:max-content;}
+.ticker-track{animation:ticker-scroll 150s linear infinite;display:flex;width:max-content;}
 .ticker-track:hover{animation-play-state:paused;}
 
 .data-row{transition:background 150ms ease;border-bottom:1px solid rgba(255,255,255,0.06);}
@@ -355,7 +355,7 @@ select option{background:#0A0C10;color:#F0EEE8;}
 <main id="app" class="page-content"></main>
 
 <div id="ticker" aria-hidden="true">
-  <div class="tag"><div class="live-dot"></div><span>Scoring Live</span></div>
+  <div class="tag"><div class="live-dot"></div><span>Ranked Candidates</span></div>
   <div class="feed"><div class="ticker-track" id="ticker-track"></div></div>
 </div>
 

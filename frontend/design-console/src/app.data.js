@@ -319,7 +319,7 @@ function diagnosticsFor(c) {
 
 function diagValue(d) {
   if (d.state === 'unmeasured') return 'not measured';
-  if (d.value == null || !Number.isFinite(d.value)) return 'not measured';
+  if (!has(d.value) || !Number.isFinite(d.value)) return 'not measured';
   if (d.key === 'bootstrap') return d.value.toExponential(1);
   if (d.key === 'ghost') return `${d.value.toFixed(2)} / ${(d.value * 0.75).toFixed(2)}`;
   return d.value.toFixed(d.dp) + (d.unit ? ` ${d.unit}` : '');
@@ -359,8 +359,8 @@ function followUp(c) {
   return { rp: outRp, a, teq: outTeq, insol, tsm: outTsm, esm: outEsm, tsmCut, hz,
            estimated: !Number.isFinite(c.tsm),
            inHz: a >= hz.inner && a <= hz.outer,
-           tsmPass: outTsm != null && outTsm >= tsmCut,
-           esmPass: outEsm != null && outEsm >= 7.5 };
+           tsmPass: has(outTsm) && outTsm >= tsmCut,
+           esmPass: has(outEsm) && outEsm >= 7.5 };
 }
 
 /* Ran at module level against the mock array. Now a function, called after
@@ -502,7 +502,7 @@ function mountTicker() {
   if (!el || !CANDIDATES.length) return;
   const cell = c => {
     const bits = [`<b>${esc(c.id)}</b>`];
-    if (c.prob != null) bits.push(`<i style="color:${probColor(c.prob)}">P=${c.prob.toFixed(3)}</i>`);
+    if (has(c.prob)) bits.push(`<i style="color:${probColor(c.prob)}">P=${c.prob.toFixed(3)}</i>`);
     else if (c.disposition && c.disposition !== '—') bits.push(`<i style="color:${getDispositionColor(c.disposition)}">${esc(c.disposition)}</i>`);
     if (c.period) bits.push(`<span>${c.period.toFixed(1)}d</span>`);
     if (c.depth) bits.push(`<span>${(c.depth * 1e6).toFixed(0)} ppm</span>`);
@@ -511,6 +511,7 @@ function mountTicker() {
   };
   const feed = CANDIDATES.slice(0, 40).map(cell).join('');
   el.innerHTML = feed + feed;
+  el.title = 'Highest-scoring catalogue rows. Bulk ensemble means, not live scores.';
 }
 
 /* ── charts ──────────────────────────────────────────────── */
@@ -631,7 +632,9 @@ const NAV_LINKS = [
   { label:'Catalogue', href:'#/catalogue' },
   { label:'Vetting',   href:'#/vetting' },
   { label:'Model',     href:'#/model' },
+  { label:'Discovery', href:'#/discovery' },
   { label:'Upload',    href:'#/upload' },
+  { label:'About',     href:'#/about' },
 ];
 
 function renderNav(path) {
@@ -657,7 +660,7 @@ function bindNavButtons() {
    period search first and takes minutes. Falls back to the first row, then to
    the prototype id when there is no catalogue at all. */
 function defaultVettingId() {
-  const usable = CANDIDATES.find(c => c.period && c.duration && c.epochBjd != null)
+  const usable = CANDIDATES.find(c => c.period && c.duration && has(c.epochBjd))
     || CANDIDATES.find(c => c.period && c.duration)
     || CANDIDATES[0];
   return usable ? usable.id : 'TOI-4328.01';
@@ -674,6 +677,8 @@ function route() {
   if (path === '/vetting') return Vetting(defaultVettingId());
   if (path === '/model') return ModelPerformance();
   if (path === '/upload') return Upload();
+  if (path === '/discovery') return Discovery();
+  if (path === '/about') return About();
   return Home();
 }
 

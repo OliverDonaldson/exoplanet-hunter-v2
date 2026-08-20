@@ -1,22 +1,12 @@
-"""`GET /runs` — the CV runs on disk, newest first.
+"""`GET /runs` — the CV runs on disk, active first, so the history table
+follows the registry instead of a hardcoded list.
 
-The Model Performance page shows a run history so a reader can see what the
-current champion was promoted over. Serving it means the table follows the
-registry: promote a new run and it becomes `active` here without an edit.
+`verdict` and `reason` are always null: nothing on disk records why a run was
+rejected, and synthesising it from the metrics would fabricate an audit trail.
+A `promotion_log.json` written by the gate is the fix.
 
-**The verdict column has no source and is returned null.** `registry.json`
-records only the run being served — there is no promotion log, so nothing on
-disk says why any earlier run was rejected. Those sentences existed in the
-design prototype as hand-written narrative. Synthesising them here by
-comparing metrics would manufacture a decision record the project never kept,
-and a fabricated audit trail is worse than an absent one. Writing a real
-`promotion_log.json` on each gate run is the fix; until then the column is
-honestly empty.
-
-Only runs whose `cv_summary.json` carries a pooled ROC-AUC are listed. The
-directory also holds branch-architecture experiments and tuning trials that
-were never promotion candidates; a table that mixed them with champions would
-misrepresent what was actually in contention.
+Only runs with a pooled ROC-AUC are listed — the directory also holds branch
+experiments and tuning trials that were never promotion candidates.
 """
 
 from __future__ import annotations
@@ -37,11 +27,8 @@ _ROOT = Path(__file__).resolve().parents[3]
 
 
 def _num(value: object) -> float | None:
-    """A summary field that exists but is null is absent, not zero.
-
-    Single-fold runs write `std: null`, and coercing that to 0.0 would publish
-    a run with no measured spread as one with perfect agreement.
-    """
+    """Null is absent, not zero: single-fold runs write `std: null`, and 0.0
+    would publish no measured spread as perfect agreement."""
     return float(value) if isinstance(value, (int, float)) else None
 
 
@@ -70,14 +57,9 @@ def runs(limit: int = 12) -> RunsResponse:
     lookup = _mission_lookup(models_dir)
 
     def tess_slice(run_dir: Path) -> tuple[float | None, float | None]:
-        """TESS AUC and recall @ 1% FPR for one run.
-
-        The history table's columns are labelled TESS, because TESS is the
-        gating mission. `cv_summary.json` only holds pooled figures, so the
-        slice is recomputed from the run's own predictions. A run without a
-        predictions file, or without a resolvable TESS slice, returns nulls
-        and the cells read as not measured.
-        """
+        """TESS AUC and recall @ 1% FPR for one run — the columns are labelled
+        TESS because TESS gates, and `cv_summary.json` holds only pooled
+        figures. Nulls where no predictions or no TESS slice resolve."""
         path = run_dir / "predictions.parquet"
         if lookup is None or not path.is_file():
             return None, None
@@ -107,20 +89,16 @@ def runs(limit: int = 12) -> RunsResponse:
             continue
         brier, _ = _metric(summary, "test_brier")
         tess_auc, tess_recall = tess_slice(run_dir)
-        # Truncating a run id to eight characters is right for a 32-hex digest
-        # and wrong for a named directory, where it cuts mid-word.
+        # An eight-character truncation suits a hex digest, not a named dir.
         name = run_dir.name
         short = name[:8] if len(name) == 32 and all(c in "0123456789abcdef" for c in name) else name
         records.append(
             RunRecord(
                 run_id=name,
                 short_id=short,
-                # Only the promoted run has a recorded date. No run writes its
-                # own completion time, and the summary's mtime is the DVC pull
-                # time inside the serving container -- identical for every run
-                # and equal to the last deploy, which would read as a real date
-                # and be wrong. Archived runs therefore carry no date until the
-                # trainer records one.
+                # No run records its completion time, and the summary's mtime
+                # is the DVC pull time in the container — identical across runs
+                # and equal to the last deploy. Only the registry date is real.
                 date=promoted_date if name == active else None,
                 auc=tess_auc if tess_auc is not None else auc,
                 aucErr=auc_err if tess_auc is None else None,
@@ -132,9 +110,8 @@ def runs(limit: int = 12) -> RunsResponse:
             )
         )
 
-    # Active first, then the rest by id — with no trustworthy timestamp there
-    # is nothing to order archived runs by, and a fabricated order would imply
-    # a chronology that is not recorded.
+    # By id, not date: with no trustworthy timestamp any order would imply a
+    # chronology nobody recorded.
     records = [r for r in records if r.status == "active"] + sorted(
         [r for r in records if r.status != "active"], key=lambda r: r.short_id
     )

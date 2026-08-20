@@ -160,16 +160,10 @@ class ScoreResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """`GET /healthz`.
-
-    `model_loaded` means a promoted run exists in the registry. It is NOT the
-    same as the ensemble being usable: five folds of TensorFlow are loaded off
-    the request path and take ~90 s on a cold machine, during which the
-    registry has always been present. The console's warmup loader needs to
-    tell those apart, so `ensemble_ready` reports the loader's actual state and
-    `uptime_s` drives its determinate bar. Both are additive — an older client
-    that ignores them still sees the same three original fields.
-    """
+    """`GET /healthz`. `model_loaded` means a promoted run is in the registry —
+    not that the ensemble is usable, since five TF folds load off the request
+    path over ~90 s. `ensemble_ready` and `uptime_s` let the console's warmup
+    loader tell those apart and drive its determinate bar."""
 
     status: Literal["ok", "degraded"]
     model_loaded: bool
@@ -239,8 +233,8 @@ class CandidateRow(BaseModel):
     promoted_to_toi: str | None = None
     comments: str | None = None
     date_modified: str | None = None
-    # Bulk-scored offline by scripts/score_candidates.py. An ENSEMBLE MEAN, not
-    # the Platt-calibrated figure /score returns — see _attach_scores.
+    # Bulk-scored offline. An ENSEMBLE MEAN, not the Platt-calibrated figure
+    # /score returns — see _attach_scores.
     prob_mean: float | None = None
     prob_std: float | None = None
     scored_at: str | None = None
@@ -254,25 +248,18 @@ class CandidatesPage(BaseModel):
 
 
 class MetricSummary(BaseModel):
-    """One metric across the promoted run's folds.
-
-    `std` is the spread across fold members, not a confidence interval. It is
-    carried beside every mean because the project measured its own noise floor
-    and a bare figure invites reading noise as improvement.
-    """
+    """One metric across the run's folds. `std` is the fold spread, not a
+    confidence interval — carried beside every mean because a bare figure
+    invites reading noise as improvement."""
 
     mean: float
     std: float
 
 
 class MissionMetrics(BaseModel):
-    """One mission's slice of the promoted run's out-of-fold predictions.
-
-    Every metric is nullable because a slice can legitimately fail to produce
-    one — recall @ 1% FPR is undefined without negatives, and a fold spread
-    needs at least two folds that produced the metric. Null travels to the
-    console as "not measured" rather than as a zero.
-    """
+    """One mission's slice of the run's out-of-fold predictions. Every metric
+    is nullable — recall is undefined without negatives, a spread needs two
+    folds — and null reaches the console as "not measured", never as zero."""
 
     mission: str
     role: str
@@ -296,17 +283,12 @@ class NoiseFloor(BaseModel):
 
 
 class ModelSummaryResponse(BaseModel):
-    """`GET /model` — what the served run actually measured.
+    """`GET /model` — what the served run measured, so the console follows the
+    registry rather than going stale after a promotion or weekly refresh.
 
-    Exists so the console follows the registry instead of carrying its own copy
-    of the numbers: on promotion, or after a weekly refresh, every figure the
-    console shows changes with the run rather than going quietly stale.
-
-    `per_mission` is null when no mission slice could be computed, and omits
-    any mission this run never evaluated. The console builds its cards from
-    whatever the list holds, so an absent mission has no card rather than an
-    empty one.
-    """
+    `per_mission` omits any mission the run never evaluated; the console builds
+    cards from the list, so an absent mission has no card rather than an empty
+    one."""
 
     run_id: str
     model_version: str
