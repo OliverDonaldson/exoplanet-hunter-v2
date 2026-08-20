@@ -189,7 +189,7 @@ One table, kept current. Detail for each row is in the stage sections below.
 | **7ii** *(old D)* branch attribution | **deferred behind 8, 9 and 10** — 3-family sweep done 2026-08-09, **all arms null** | branch-drop mechanism built and declared in `run_config`. `unfolded`, `periodogram`, `scalar_only` all read null against the re-baseline; the one nominal PASS clears its bar by 0.23% and is an artefact of a 3-draw sd. Runs **once**, late, on a branch set and a distribution that have stopped moving |
 | **8** *(old 3)* labels and negatives | **done** 2026-08-14 — four arms measured 2026-08-13, prediction 4 on 2026-08-14; **all four pre-registered predictions falsified** | **propensity weighting eliminated the architecture's amplification of the baseline confound at no measurable cost** (gap +0.1265 → −0.0071, 3.3× its bar). Synthetic negatives null; arm S unreadable by construction. The control-arm split also fell (−0.0966, 1.3× its bar) but **threshold-free host-scoring did not move**, so that second win is recorded as *qualified*. Group (a), external catalogue negatives, deliberately not done |
 | **10.5** the ensemble arm | **CLOSED 2026-08-15 — BOTH ARMS CLEAR**; the control-arm pass landed the same day (3.11e) | **the branch line's value is as a complement, not a replacement.** Mean-of-logits recall @1% FPR **0.4362** (E-C) and **0.4223** (E-P) against the common-fold dual-view member's 0.3046 — **3.9x and 4.1x** their own floors. Reopens nothing about stage 4, whose rejections were about replacement. Nothing promotes |
-| **9** *(old 2(d))* difference-image branch | not started | the only genuine *build* left in the model; needs the 11–17 px stamps re-gridded to a fixed size |
+| **9** *(old 2(d))* difference-image branch | **BUILT and measured 2026-08-20** — costs nothing, and its primary criterion **could not be measured** | the stamps were never sparse: the pixel list fills its bounding box exactly, so the re-grid is a placement not an interpolation. Branch built at 17x17 with attention over DV's per-sector quality. Recall −0.0169 (**0.20x** its floor), mission split +0.0066 (0.21x), rebuild anchor −0.0515 (0.70x) — all inside their floors. **Prediction 1, the falsification test, is unrunnable**: the stage 7i harness zeroes every DV input by its own pre-registered limit, so the branch contributes exactly 0.0 on control-arm hosts. Whether to change that limit is Ollie's call |
 | **10** *(old G)* Optuna re-tune | not started | on the winner, after the distribution is settled |
 | **11** *(old 4)* serving parity + explainability | not started | branch-occlusion contributions through `/score`; carries `score_std`, provenance headers, precision@k |
 | **12** *(old 5)* UI redesign | locked last | |
@@ -4010,6 +4010,85 @@ rather than being quietly dropped, with its weakened status recorded here.
 It also cost **47 s** against the ~95 min the item was costed at, and the
 2,232 rows carrying a stamp (41.1%) reproduce the independent measurement above
 exactly.
+
+**Stops if.** Unchanged, and neither condition fired.
+
+#### Result — the branch is built and measured, and its own falsification test cannot be run (2026-08-20)
+
+Arm C 2 h 02, arm D 2 h 57, both on `models/fold_assignments/stage10_5.json` at
+`n_models_per_fold: 3`, both over the same **5,375** groups (51 of 5,426 dropped
+by the artefact, as intended). Identical TIC sets across C, D and the anchor,
+confirmed before any metric was read.
+
+| TESS, pooled out-of-fold, n=2,367 (1,300 positive) | arm C — branch dropped | **arm D — with branch** | anchor `stage105-control` |
+|---|---:|---:|---:|
+| ROC-AUC | 0.9215 | 0.9156 | 0.9250 |
+| recall @1% FPR | 0.2315 | 0.2146 | 0.2831 |
+| Brier | 0.1120 | 0.1135 | 0.1091 |
+| ECE | 0.0416 | 0.0250 | 0.0396 |
+
+*Outcomes, read against the pre-registration and nothing else.*
+
+| # | prediction | outcome |
+|---|---|---|
+| **1** | control-arm **host-AUC** falls from C to D beyond the max-pairing floor | **UNMEASURABLE** — see below. Neither confirmed nor falsified |
+| **2** | TESS recall @1% FPR **not** moved beyond its own max-pairing floor | **confirmed** — −0.0169 at **0.20x** the 0.0843 max floor |
+| **3** | arm D does not separate the missions more than arm C | **confirmed** — split +0.0342 → +0.0407, a +0.0066 change at **0.21x** the 0.0305 max floor |
+| **4** | arm C's TESS recall within its floor of the anchor's 0.2831 | **confirmed** — −0.0515 at **0.70x** the 0.0740 max floor |
+
+**Prediction 1 cannot be evaluated, and the reason predates this stage by eleven
+days.** The stage 7i harness sets **every DV-derived column to NaN and
+`dv_usable` to False** for every control-arm row — its *limit 1*, pre-registered
+2026-08-09, on the ground that no DV report exists at a synthetic ephemeris. A
+control-arm host therefore carries an all-absent `difference_view`, the presence
+gate zeroes the branch, and its contribution is **exactly 0.0** — measured on the
+built model, not argued. Arms C and D are consequently the *same model* on
+control-arm inputs, and any host-AUC difference between them would measure
+training history rather than the branch.
+
+**So the stage's own falsification test is unrunnable on the instrument it
+named, and that is the headline.** Stage 9 was justified as the direct instrument
+against **W2**; predictions 2–4 confirm only that the branch **costs nothing** —
+it does not degrade recall, does not worsen mission separation, and the rebuild
+did not move the baseline. **Nothing here establishes that it delivers anything.**
+Reporting the three confirmations without this sentence would be reporting a
+stage as successful on its secondary criteria while its primary one was never
+measured.
+
+**What is *not* being done.** The harness will not be modified to feed real DV
+stamps so that prediction 1 becomes measurable. Changing a pre-registered limit
+*after* discovering it blocks a prediction is re-specification, which this
+project does not do. It is a legitimate design question — a stamp taken at the
+real TCE, shown beside a light curve with no transit in it, is arguably the
+sharpest W2 test available — and it is **Ollie's call**, recorded here rather
+than taken.
+
+**The amendment's reasoning was wrong, and prediction 4 was informative after
+all.** It was recorded as near-tautological on the ground that no rebuild
+happened. But arm C lands **−0.0515** from the anchor on TESS recall despite
+byte-identical light-curve views — 0.70x its floor, inside, but most of the way
+there. The likely mechanism is RNG: `augment_viewset` draws
+`tf.random.normal` per view, so adding one noised view shifts the consumption
+order and every later draw — augmentation and dropout alike — differs. Two runs
+over shard sets differing only by an added view are therefore **independent
+draws, not replicates**. Not isolated, so it is offered as the probable cause
+rather than a finding.
+
+**That is also why the paired design was the right one.** The drop is applied at
+the *model*, not the shard set: every `Input` stays in the signature and the
+stream yields all thirteen views to both arms, so C and D consume the identical
+augmented batches. Only the C-versus-anchor comparison crosses shard sets, and
+only it is affected.
+
+**One post-hoc number, labelled as such and not a test.** TESS ECE improves
+0.0416 → 0.0250, but at **0.64x** its own max-pairing floor that is not a
+measured difference, and no ECE floor was pre-registered. It is recorded because
+it is the only cell where arm D leads, and suppressing it would be as selective
+as banking it.
+
+**Nothing promotes.** `models/registry.json` untouched, `ca906040` still served.
+Both arms are written to `models/stage9/` — deliberately outside
+`models/cv/`, which is the glob the weekly gate draws its candidate from.
 
 **Stops if.** Unchanged, and neither condition fired.
 
