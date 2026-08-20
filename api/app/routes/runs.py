@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -59,7 +58,10 @@ def runs(limit: int = 12) -> RunsResponse:
     registry_path = models_dir / "registry.json"
     if not registry_path.exists():
         raise HTTPException(503, detail="No promoted model in the registry yet.")
-    active = str(json.loads(registry_path.read_text())["run_id"])
+    registry = json.loads(registry_path.read_text())
+    active = str(registry["run_id"])
+    promoted_at = registry.get("promoted_at")
+    promoted_date = str(promoted_at)[:10] if promoted_at else None
 
     cv_root = models_dir / "cv"
     if not cv_root.is_dir():
@@ -104,10 +106,6 @@ def runs(limit: int = 12) -> RunsResponse:
         if auc is None:
             continue
         brier, _ = _metric(summary, "test_brier")
-        # No run records its own completion time, so the summary's mtime is the
-        # closest honest stand-in. Labelled `date` rather than `promoted_at`
-        # because for every archived run those are different things.
-        stamp = datetime.fromtimestamp(summary_path.stat().st_mtime, tz=UTC)
         tess_auc, tess_recall = tess_slice(run_dir)
         # Truncating a run id to eight characters is right for a 32-hex digest
         # and wrong for a named directory, where it cuts mid-word.
@@ -117,7 +115,13 @@ def runs(limit: int = 12) -> RunsResponse:
             RunRecord(
                 run_id=name,
                 short_id=short,
-                date=stamp.date().isoformat(),
+                # Only the promoted run has a recorded date. No run writes its
+                # own completion time, and the summary's mtime is the DVC pull
+                # time inside the serving container -- identical for every run
+                # and equal to the last deploy, which would read as a real date
+                # and be wrong. Archived runs therefore carry no date until the
+                # trainer records one.
+                date=promoted_date if name == active else None,
                 auc=tess_auc if tess_auc is not None else auc,
                 aucErr=auc_err if tess_auc is None else None,
                 recall=tess_recall,
@@ -128,8 +132,10 @@ def runs(limit: int = 12) -> RunsResponse:
             )
         )
 
-    records.sort(key=lambda r: (r.status != "active", r.date), reverse=False)
+    # Active first, then the rest by id — with no trustworthy timestamp there
+    # is nothing to order archived runs by, and a fabricated order would imply
+    # a chronology that is not recorded.
     records = [r for r in records if r.status == "active"] + sorted(
-        [r for r in records if r.status != "active"], key=lambda r: r.date, reverse=True
+        [r for r in records if r.status != "active"], key=lambda r: r.short_id
     )
     return RunsResponse(active_run_id=active, runs=records[:limit])

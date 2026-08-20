@@ -324,7 +324,7 @@ class RunRecord(BaseModel):
 
     run_id: str
     short_id: str
-    date: str
+    date: str | None = None
     auc: float | None = None
     aucErr: float | None = None
     recall: float | None = None

@@ -19,22 +19,31 @@
    the same artifact is opened both from disk (no service) and from the
    deployed host (service present), and a build flag cannot be right for both.
 
-   WHAT IS AND IS NOT AVAILABLE. Three things the console renders have no
-   endpoint behind them, and each degrades to an explicit "not measured"
-   rather than to a mock number — the same rule the diagnostics follow, and
-   for the same reason: a fabricated figure on a screen that otherwise shows
-   measured ones is indistinguishable from a measured one.
+   WHAT IS AND IS NOT AVAILABLE. Anything without an endpoint behind it
+   degrades to an explicit "not measured" rather than to a mock number — the
+   same rule the diagnostics follow, and for the same reason: a fabricated
+   figure on a screen that otherwise shows measured ones is indistinguishable
+   from a measured one.
 
-     per-row P(planet)   /candidates returns catalogue facts only. Scoring is
-                         per-request through /score/{tic_id} and takes seconds
-                         to minutes, so scoring a page of rows on load is not
-                         available. Rows carry `prob: null` until opened.
-     branch evidence     Per-branch occlusion contributions are stage 11 and
-                         are not built. BRANCHES stays a description of what
-                         each view sees, with no contribution attached.
-     per-mission metrics /reliability returns one pooled reliability curve for
-                         the promoted run. The per-mission split the Model
-                         Performance page wants does not exist yet.
+     per-row P(planet)   present, from scripts/score_candidates.py via
+                         /candidates. An ENSEMBLE MEAN, not the Platt-
+                         calibrated figure /score returns, so a row's
+                         catalogue number and its vetting number are computed
+                         differently. Rows the bulk scorer has not reached
+                         carry `prob: null` and read as not scored.
+     per-mission metrics present, computed by /model from the promoted run's
+                         predictions. Missions the run never evaluated are
+                         absent from the list rather than empty, so they get
+                         no card at all.
+     branch evidence     ABSENT. Per-branch occlusion is stage 11 and is not
+                         built. The tab carries the page's in-progress
+                         treatment and lists what each view feeds, with no
+                         contribution attached.
+     run verdicts        ABSENT. registry.json records only what is served, so
+                         no promotion log exists to say why a run was
+                         rejected. Archived runs also carry no date: nothing
+                         records a run's completion time, and the summary's
+                         mtime is the DVC pull time in the container.
 */
 
 const API = {
