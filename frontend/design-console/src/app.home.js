@@ -43,7 +43,7 @@ const PIPELINE = [
   { step:'04', title:'Live Scoring',     desc:'Calibrated probability with per-fold agreement and MC-dropout spread. Every candidate scored in <2s.' },
 ];
 
-const H1 = 'font-family:\'Space Grotesk\', sans-serif;font-size:clamp(3.5rem, 7vw, 6rem);line-height:1.0;letter-spacing:-0.03em;margin-bottom:0';
+const H1 = 'font-family:\'Anurati\', sans-serif;font-size:clamp(3.5rem, 7vw, 6rem);line-height:1.0;letter-spacing:-0.03em;margin-bottom:0';
 
 function Home() {
   app.innerHTML = `
@@ -80,7 +80,7 @@ function Home() {
             </div>
             <div class="rv" style="margin-top:4rem;display:flex;align-items:center;gap:0.75rem;transition:opacity 1s ease 1.2s" data-visible-opacity="0.5">
               <div style="width:1px;height:40px;background:linear-gradient(to bottom, transparent, rgba(77,255,210,0.6))"></div>
-              <span style="font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#8A8FA8">Scroll to explore</span>
+              <span style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#8A8FA8">Scroll to explore</span>
             </div>
           </div>
           <div class="hero-orbit rv" style="display:flex;justify-content:center;align-items:center;transition:opacity 1.2s ease 0.7s">
@@ -120,7 +120,7 @@ function Home() {
       <div class="about-grid" style="max-width:1440px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:8rem;align-items:start">
         <div>
           <div class="section-label" style="margin-bottom:1.5rem">What Is This</div>
-          <h2 style="font-family:'Space Grotesk', sans-serif;font-size:clamp(2rem, 4vw, 3rem);font-weight:600;line-height:1.1;letter-spacing:-0.02em;color:#F0EEE8;margin-bottom:1.5rem">
+          <h2 style="font-family:'Ailerons', sans-serif;font-size:clamp(2rem, 4vw, 3rem);font-weight:600;line-height:1.1;letter-spacing:-0.02em;color:#F0EEE8;margin-bottom:1.5rem">
             Every component must outperform the simplest baseline.
           </h2>
           <p style="font-family:'Inter';font-size:0.95rem;line-height:1.8;color:rgba(240,238,232,0.55);margin-bottom:1rem">
@@ -136,7 +136,7 @@ function Home() {
             <div style="display:flex;gap:1.5rem;margin-bottom:2rem;padding-bottom:2rem;border-bottom:${i < 3 ? '1px solid rgba(255,255,255,0.06)' : 'none'}">
               <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#4DFFD2;padding-top:2px;min-width:20px">${item.step}</div>
               <div>
-                <div style="font-family:'Space Grotesk';font-size:0.85rem;font-weight:600;color:#F0EEE8;margin-bottom:0.4rem;letter-spacing:0.02em">${item.title}</div>
+                <div style="font-family:'Ailerons';font-size:0.85rem;font-weight:600;color:#F0EEE8;margin-bottom:0.4rem;letter-spacing:0.02em">${item.title}</div>
                 <div style="font-family:'Inter';font-size:0.8rem;line-height:1.7;color:rgba(240,238,232,0.5)">${esc(item.desc)}</div>
               </div>
             </div>`).join('')}
@@ -149,7 +149,7 @@ function Home() {
     <section class="page-pad" style="padding:8rem 3rem 10rem;background:#050608;position:relative;z-index:1;text-align:center">
       <div style="max-width:600px;margin:0 auto">
         <div class="section-label" style="margin-bottom:1.5rem">Begin Analysis</div>
-        <h2 style="font-family:'Space Grotesk', sans-serif;font-size:clamp(2rem, 4vw, 2.5rem);font-weight:600;line-height:1.2;letter-spacing:-0.02em;color:#F0EEE8;margin-bottom:1rem">
+        <h2 style="font-family:'Ailerons', sans-serif;font-size:clamp(2rem, 4vw, 2.5rem);font-weight:600;line-height:1.2;letter-spacing:-0.02em;color:#F0EEE8;margin-bottom:1rem">
           Submit a light curve.<br>Get a calibrated answer.
         </h2>
         <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:rgba(240,238,232,0.5);margin-bottom:2.5rem">
@@ -260,8 +260,8 @@ function Catalogue() {
       <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-bottom:2.5rem">
         <div>
           <div class="section-label" style="margin-bottom:0.75rem">Candidate Catalogue</div>
-          <h1 id="cat-count" style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem"></h1>
-          <h2 style="font-family:'Space Grotesk';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.5rem">UNDER INVESTIGATION</h2>
+          <h1 id="cat-count" style="font-family:'Ailerons';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem"></h1>
+          <h2 style="font-family:'Ailerons';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.5rem">UNDER INVESTIGATION</h2>
           <p id="cat-sub" style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8"></p>
         </div>
         <button class="btn-ghost" id="cat-export" style="display:flex;align-items:center;gap:0.5rem">
@@ -279,10 +279,10 @@ function Catalogue() {
             style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#F0EEE8;font-family:'JetBrains Mono';font-size:0.75rem;padding:0.6rem 0.75rem 0.6rem 2rem">
         </div>
         <div style="display:flex;gap:0.4rem" id="cat-disp">
-          ${DISPOSITIONS.map(d => `<button data-d="${d}" style="font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:all 150ms ease">${d}</button>`).join('')}
+          ${DISPOSITIONS.map(d => `<button data-d="${d}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:all 150ms ease">${d}</button>`).join('')}
         </div>
         <div style="display:flex;gap:0.4rem" id="cat-src">
-          ${SOURCES.map(s => `<button data-s="${s}" style="font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:all 150ms ease">${s}</button>`).join('')}
+          ${SOURCES.map(s => `<button data-s="${s}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:all 150ms ease">${s}</button>`).join('')}
         </div>
         <div style="display:flex;align-items:center;gap:0.75rem">
           <span class="stat-label">Min P(planet)</span>
@@ -322,7 +322,7 @@ function Catalogue() {
       const sortable = col !== 'score_std';
       const on = state.sortKey === col;
       const icon = !sortable ? '' : on ? (state.sortDir === 'asc' ? '↑' : '↓') : '↕';
-      return `<th ${sortable ? `data-col="${col}"` : ''} style="padding:0.75rem 1rem;text-align:left;font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${on ? '#4DFFD2' : '#8A8FA8'};cursor:${sortable ? 'pointer' : 'default'};white-space:nowrap;user-select:none;border-bottom:1px solid rgba(255,255,255,0.08)">${label}<span style="margin-left:4px;color:${on ? '#4DFFD2' : 'rgba(138,143,168,0.4)'};font-size:0.6rem">${icon}</span></th>`;
+      return `<th ${sortable ? `data-col="${col}"` : ''} style="padding:0.75rem 1rem;text-align:left;font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${on ? '#4DFFD2' : '#8A8FA8'};cursor:${sortable ? 'pointer' : 'default'};white-space:nowrap;user-select:none;border-bottom:1px solid rgba(255,255,255,0.08)">${label}<span style="margin-left:4px;color:${on ? '#4DFFD2' : 'rgba(138,143,168,0.4)'};font-size:0.6rem">${icon}</span></th>`;
     }).join('') + `<th style="padding:0.75rem 1rem;border-bottom:1px solid rgba(255,255,255,0.08)"></th>`;
 
     bodyEl.innerHTML = data.map(c => {
@@ -342,14 +342,14 @@ function Catalogue() {
             : `<span class="${getProbClass(c.prob)}">${c.prob.toFixed(3)}</span>`}</td>
         <td style="${td}"><span style="${dim}${!has(c.probStd) ? ';color:rgba(138,143,168,0.5)' : ''}" title="${!has(c.probStd) ? 'not scored' : 'ensemble spread over the five folds'}">${!has(c.probStd) ? '—' : c.probStd.toFixed(3)}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;font-weight:600;color:${dc};background:${dc}18;border:1px solid ${dc}44;padding:0.15rem 0.5rem;border-radius:2px">${c.disposition}</span></td>
-        <td style="${td}"><span style="font-family:'Space Grotesk';font-size:0.65rem;font-weight:600;letter-spacing:0.08em;color:#8A8FA8">${c.source}</span></td>
+        <td style="${td}"><span style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.08em;color:#8A8FA8">${c.source}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.tmag, 1)}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.snr, 1)}</span></td>
         <td style="${td}"><span style="${mono};color:${fu.tsmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.tsm, 1)}</span></td>
         <td style="${td}"><span style="${mono};color:${fu.esmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.esm, 2)}</span></td>
         <td style="${td}"><span style="${mono};color:${c.baselineDays >= 1000 ? '#F5A623' : '#F0EEE8'}">${!has(c.baselineDays) ? '—' : c.baselineDays.toLocaleString()}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${c.lastScored}</span></td>
-        <td style="${td}"><span style="font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;color:#4DFFD2;text-transform:uppercase">Vet →</span></td>
+        <td style="${td}"><span style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;color:#4DFFD2;text-transform:uppercase">Vet →</span></td>
       </tr>`;
     }).join('');
 

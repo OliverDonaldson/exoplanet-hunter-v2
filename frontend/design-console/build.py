@@ -42,7 +42,8 @@ SRC_ORDER = [
 FONTS = {
     "__FONT_INTER__": "inter-latin.woff2",
     "__FONT_JBM__": "jetbrains-mono-latin.woff2",
-    "__FONT_SG__": "space-grotesk-latin.woff2",
+    "__FONT_ANURATI__": "anurati-regular.woff2",
+    "__FONT_AILERONS__": "ailerons-trial.woff2",
 }
 
 

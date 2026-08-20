@@ -15,7 +15,11 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
+        # Vendored font licences are supplied text; reformatting a licence is
+        # not ours to do.
+        exclude: ^frontend/design-console/assets/fonts/.*LICENCE\.txt$
       - id: end-of-file-fixer
+        exclude: ^frontend/design-console/assets/fonts/.*LICENCE\.txt$
       - id: check-yaml
       - id: check-added-large-files
         args: ["--maxkb=1000"]  # data/model artefacts live in DVC/R2, not git

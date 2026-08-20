@@ -137,7 +137,7 @@ function Vetting(candidateId) {
     <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0">
 
       <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:2rem">
-        <button class="crumb" data-nav="#/catalogue" style="font-family:'Space Grotesk';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;background:none;border:none;transition:color 150ms ease">← Catalogue</button>
+        <button class="crumb" data-nav="#/catalogue" style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;background:none;border:none;transition:color 150ms ease">← Catalogue</button>
         <span style="color:rgba(255,255,255,0.2);font-size:0.6rem">/</span>
         <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2">${c.id}</span>
       </div>
@@ -146,7 +146,7 @@ function Vetting(candidateId) {
         <div>
           <div class="section-label" style="margin-bottom:0.75rem">Vetting Console</div>
           <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.25rem;flex-wrap:wrap">
-            <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0">${c.id}</h1>
+            <h1 style="font-family:'Ailerons';font-size:clamp(2rem, 4vw, 3rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0">${c.id}</h1>
             <span style="font-family:'JetBrains Mono';font-size:0.7rem;font-weight:600;color:${dispColor};background:${dispColor}18;border:1px solid ${dispColor}44;padding:0.25rem 0.75rem;border-radius:2px">${c.disposition}</span>
           </div>
           <div style="font-family:'JetBrains Mono';font-size:0.75rem;color:#8A8FA8">${c.ticId} · ${c.source} · Sectors ${c.sectors} · scored by <span style="color:#4DFFD2">${SERVED.runId}</span></div>
@@ -211,7 +211,7 @@ function Vetting(candidateId) {
       </div>
 
       <div style="display:flex;gap:0;margin-bottom:2rem;border-bottom:1px solid rgba(255,255,255,0.08);flex-wrap:wrap" id="vet-tabs">
-        ${TABS.map(([k, label]) => `<button data-tab="${k}" style="font-family:'Space Grotesk';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.75rem 1.5rem;background:none;border:none;transition:all 150ms ease;margin-bottom:-1px">${label}</button>`).join('')}
+        ${TABS.map(([k, label]) => `<button data-tab="${k}" style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.75rem 1.5rem;background:none;border:none;transition:all 150ms ease;margin-bottom:-1px">${label}</button>`).join('')}
       </div>
 
       <div id="vet-panel" style="margin-bottom:3rem"></div>
@@ -574,8 +574,8 @@ function ModelPerformance() {
 
       <div style="margin-bottom:2.5rem">
         <div class="section-label" style="margin-bottom:0.75rem">Model Performance</div>
-        <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">${has(GATING.auc) ? GATING.auc.toFixed(4) : '—'} ON ${GATING.mission}.</h1>
-        <h2 style="font-family:'Space Grotesk';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.6rem">THE MISSION THAT GATES</h2>
+        <h1 style="font-family:'Ailerons';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">${has(GATING.auc) ? GATING.auc.toFixed(4) : '—'} ON ${GATING.mission}.</h1>
+        <h2 style="font-family:'Ailerons';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.6rem">THE MISSION THAT GATES</h2>
         <p style="font-family:'Inter';font-size:0.85rem;color:rgba(240,238,232,0.45)">
           Serving <span style="font-family:'JetBrains Mono';color:#4DFFD2">${SERVED.runId}</span> since ${SERVED.promotedAt} · ${SERVED.arch}
         </p>
@@ -586,7 +586,7 @@ function ModelPerformance() {
           <div class="mission-card">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:1.25rem;flex-wrap:wrap">
               <div style="display:flex;align-items:baseline;gap:0.6rem">
-                <span style="font-family:'Space Grotesk';font-size:1.05rem;font-weight:700;letter-spacing:0.04em;color:#F0EEE8">${m.mission}</span>
+                <span style="font-family:'Ailerons';font-size:1.05rem;font-weight:700;letter-spacing:0.04em;color:#F0EEE8">${m.mission}</span>
                 <span class="tag-chip tag-gate">${m.role}</span>
               </div>
               <span class="tag-chip ${m.evaluation === 'zero-shot' ? 'tag-zeroshot' : 'tag-oof'}">${m.evaluation}</span>
@@ -641,7 +641,7 @@ function ModelPerformance() {
           <table style="width:100%;border-collapse:collapse;min-width:820px">
             <thead><tr>
               ${['Run','Date','TESS AUC','Recall @1% FPR','Brier','Verdict','Reason'].map(h =>
-                `<th style="padding:0.5rem 0.75rem;text-align:left;font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;border-bottom:1px solid rgba(255,255,255,0.08);white-space:nowrap">${h}</th>`).join('')}
+                `<th style="padding:0.5rem 0.75rem;text-align:left;font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;border-bottom:1px solid rgba(255,255,255,0.08);white-space:nowrap">${h}</th>`).join('')}
             </tr></thead>
             <tbody>
               ${RUNS.map(v => `
@@ -784,8 +784,8 @@ function Upload() {
 
       <div style="margin-bottom:2.5rem">
         <div class="section-label" style="margin-bottom:0.75rem">Data Submission</div>
-        <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">NAME A TARGET.</h1>
-        <h2 style="font-family:'Space Grotesk';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.6rem">GET A CALIBRATED ANSWER.</h2>
+        <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">NAME A TARGET.</h1>
+        <h2 style="font-family:'Ailerons';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.6rem">GET A CALIBRATED ANSWER.</h2>
         <p style="font-family:'Inter';font-size:0.85rem;color:rgba(240,238,232,0.45);line-height:1.7">
           Give the pipeline a TIC or KIC identifier. It pulls the photometry from MAST, rebuilds the eleven input views, and scores the target against the promoted model.
         </p>
@@ -793,7 +793,7 @@ function Upload() {
 
       <div style="display:flex;gap:0;margin-bottom:2rem;border:1px solid rgba(255,255,255,0.1);flex-wrap:wrap" id="up-modes">
         ${UPLOAD_MODES.map((m, i) => `
-          <button data-m="${m.key}" style="flex:1;min-width:11rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;font-family:'Space Grotesk';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.875rem;border:none;border-right:${i < UPLOAD_MODES.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none'};transition:all 150ms ease">
+          <button data-m="${m.key}" style="flex:1;min-width:11rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.875rem;border:none;border-right:${i < UPLOAD_MODES.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none'};transition:all 150ms ease">
             ${m.label}${m.live ? '' : '<span class="tag-chip tag-soon">coming</span>'}
           </button>`).join('')}
       </div>
@@ -845,7 +845,7 @@ function Upload() {
     }
     inputEl.innerHTML = `
       <div style="margin-bottom:1.5rem">
-        <label for="up-tic" style="font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;display:block;margin-bottom:0.5rem">TIC ID or KIC ID</label>
+        <label for="up-tic" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;display:block;margin-bottom:0.5rem">TIC ID or KIC ID</label>
         <input type="text" id="up-tic" placeholder="e.g. TIC 43288669 or KIC 8120608" value="${esc(state.ticId)}"
           style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:#F0EEE8;font-family:'JetBrains Mono';font-size:0.9rem;padding:1rem 1.25rem;outline:none;box-sizing:border-box">
         <div style="font-family:'Inter';font-size:0.75rem;color:#8A8FA8;margin-top:0.5rem">
@@ -962,7 +962,7 @@ function Upload() {
             ${r.diags.map(d => `
               <div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
                 <div class="diag-marker ${d.state}" style="margin-top:0"></div>
-                <span style="font-family:'Space Grotesk';font-size:0.75rem;font-weight:500;color:${d.state === 'unmeasured' ? 'rgba(240,238,232,0.45)' : '#F0EEE8'};flex:1">${d.name}</span>
+                <span style="font-family:'Ailerons';font-size:0.75rem;font-weight:500;color:${d.state === 'unmeasured' ? 'rgba(240,238,232,0.45)' : '#F0EEE8'};flex:1">${d.name}</span>
                 <span style="font-family:'JetBrains Mono';font-size:0.68rem;color:${d.state === 'pass' ? '#4DFFD2' : d.state === 'fail' ? '#FF4D4D' : 'rgba(138,143,168,0.7)'}">${esc(diagValue(d))}</span>
               </div>`).join('')}
           </div>
@@ -1117,8 +1117,8 @@ function Discovery() {
   <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
     <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0">
       <div class="section-label" style="margin-bottom:0.75rem">Discovery</div>
-      <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">SEARCH A LIGHT CURVE.</h1>
-      <div style="font-family:'Space Grotesk';font-size:clamp(1.4rem, 2.6vw, 2.2rem);font-weight:600;color:rgba(240,238,232,0.30);letter-spacing:-0.02em;margin-bottom:1.25rem">FIND THE SIGNAL YOURSELF</div>
+      <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">SEARCH A LIGHT CURVE.</h1>
+      <div style="font-family:'Ailerons';font-size:clamp(1.4rem, 2.6vw, 2.2rem);font-weight:600;color:rgba(240,238,232,0.30);letter-spacing:-0.02em;margin-bottom:1.25rem">FIND THE SIGNAL YOURSELF</div>
       <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin-bottom:2.5rem">
         Every other page on this console vets a signal somebody else detected — a
         TOI, a KOI, a SPOC threshold-crossing event. Discovery is the other half:
@@ -1169,7 +1169,7 @@ function About() {
   <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
     <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0">
       <div class="section-label" style="margin-bottom:0.75rem">About</div>
-      <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:1.25rem">EXOPLANET HUNTER.</h1>
+      <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:1.25rem">EXOPLANET HUNTER.</h1>
       <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin-bottom:2.5rem">
         A calibrated deep-learning pipeline for vetting transit candidates in NASA
         TESS, Kepler and K2 photometry.
@@ -1188,7 +1188,7 @@ function About() {
           <div class="panel" style="padding:1.75rem">
             <div style="display:flex;align-items:baseline;gap:0.9rem;margin-bottom:0.6rem">
               <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2">${String(i + 1).padStart(2, '0')}</span>
-              <span style="font-family:'Space Grotesk';font-size:1rem;font-weight:600;color:#F0EEE8">${h}</span>
+              <span style="font-family:'Ailerons';font-size:1rem;font-weight:600;color:#F0EEE8">${h}</span>
             </div>
             <div style="font-family:'Inter';font-size:0.8rem;line-height:1.7;color:rgba(138,143,168,0.75);padding-left:2.1rem">${d}</div>
           </div>`).join('')}
