@@ -55,7 +55,10 @@ _SORTABLE = {
     "stellar_distance_pc",
 }
 
-_cache: dict[str, tuple[float, pd.DataFrame]] = {}
+# Keyed on (catalogue mtime, scores mtime): the frame is a join of the two, so
+# either changing on disk has to invalidate it. Re-running the bulk scorer
+# therefore shows up without a restart.
+_cache: dict[str, tuple[tuple[float, float], pd.DataFrame]] = {}
 
 
 def _load_catalogue() -> pd.DataFrame:
