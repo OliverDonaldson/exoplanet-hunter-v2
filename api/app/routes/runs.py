@@ -26,8 +26,10 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException
 
+from app.routes.model import _mission_lookup, _recall_at_fpr, _roc_auc
 from app.schemas import RunRecord, RunsResponse
 
 router = APIRouter()
@@ -63,6 +65,32 @@ def runs(limit: int = 12) -> RunsResponse:
     if not cv_root.is_dir():
         return RunsResponse(active_run_id=active, runs=[])
 
+    lookup = _mission_lookup(models_dir)
+
+    def tess_slice(run_dir: Path) -> tuple[float | None, float | None]:
+        """TESS AUC and recall @ 1% FPR for one run.
+
+        The history table's columns are labelled TESS, because TESS is the
+        gating mission. `cv_summary.json` only holds pooled figures, so the
+        slice is recomputed from the run's own predictions. A run without a
+        predictions file, or without a resolvable TESS slice, returns nulls
+        and the cells read as not measured.
+        """
+        path = run_dir / "predictions.parquet"
+        if lookup is None or not path.is_file():
+            return None, None
+        try:
+            preds = pd.read_parquet(path, columns=["tic_id", "y_true", "prob_calibrated"])
+        except (OSError, ValueError, KeyError):
+            return None, None
+        tess = preds.merge(lookup, on="tic_id", how="left")
+        tess = tess[tess["mission"] == "TESS"]
+        if tess.empty or tess["y_true"].min() == tess["y_true"].max():
+            return None, None
+        y = tess["y_true"].to_numpy(dtype=int)
+        p = tess["prob_calibrated"].to_numpy(dtype=float)
+        return _roc_auc(y, p), _recall_at_fpr(y, p)
+
     records: list[RunRecord] = []
     for run_dir in cv_root.iterdir():
         summary_path = run_dir / "cv_summary.json"
@@ -80,15 +108,21 @@ def runs(limit: int = 12) -> RunsResponse:
         # closest honest stand-in. Labelled `date` rather than `promoted_at`
         # because for every archived run those are different things.
         stamp = datetime.fromtimestamp(summary_path.stat().st_mtime, tz=UTC)
+        tess_auc, tess_recall = tess_slice(run_dir)
+        # Truncating a run id to eight characters is right for a 32-hex digest
+        # and wrong for a named directory, where it cuts mid-word.
+        name = run_dir.name
+        short = name[:8] if len(name) == 32 and all(c in "0123456789abcdef" for c in name) else name
         records.append(
             RunRecord(
-                run_id=run_dir.name,
-                short_id=run_dir.name[:8],
+                run_id=name,
+                short_id=short,
                 date=stamp.date().isoformat(),
-                auc=auc,
-                aucErr=auc_err,
+                auc=tess_auc if tess_auc is not None else auc,
+                aucErr=auc_err if tess_auc is None else None,
+                recall=tess_recall,
                 brier=brier,
-                status="active" if run_dir.name == active else "archived",
+                status="active" if name == active else "archived",
                 verdict=None,  # see the module docstring
                 reason=None,
             )

@@ -21,6 +21,7 @@ it is what gets published as the Claude artifact.
 """
 
 import base64
+import os
 import pathlib
 import re
 import sys
@@ -30,6 +31,7 @@ FRONTEND = HERE.parent
 ANIME_BUNDLE = FRONTEND / "node_modules/animejs/dist/bundles/anime.esm.min.js"
 
 SRC_ORDER = [
+    "app.api.js",  # API base resolution, endpoint calls, hydrate()
     "app.data.js",  # data model, shared components, charts, router
     "app.health.js",  # /healthz state machine
     "app.home.js",  # Home + Catalogue
@@ -49,7 +51,14 @@ def main() -> int:
         print(f"error: {ANIME_BUNDLE} not found — run `npm install` in {FRONTEND}", file=sys.stderr)
         return 1
 
-    shell = (HERE / "src/shell.html").read_text()
+    # The deployed console is a static file on one origin and the API is on
+    # another, so "/api" cannot be the default there. EH_API_BASE is baked in
+    # as a meta tag at build time; app.api.js reads it and a ?api= query
+    # parameter still overrides it for one-off testing.
+    api_base = os.environ.get("EH_API_BASE", "").strip()
+    meta = f'<meta name="eh-api-base" content="{api_base}">\n' if api_base else ""
+
+    shell = meta + (HERE / "src/shell.html").read_text()
     for token, filename in FONTS.items():
         blob = (HERE / "assets/fonts" / filename).read_bytes()
         shell = shell.replace(token, base64.b64encode(blob).decode())
@@ -81,15 +90,20 @@ def main() -> int:
 
     # standalone wrapper: the artifact host supplies <html>/<head>/<body>,
     # so the published file omits them and this adds them back for local viewing
-    (dist / "preview.html").write_text(
-        "<!doctype html><html><head><meta charset=utf-8>"
+    standalone = (
+        "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width,initial-scale=1">'
+        "<title>Exoplanet Hunter — Vetting Console</title>"
         "<style>body{margin:0;padding:0}</style></head><body>" + out + "</body></html>"
     )
+    (dist / "preview.html").write_text(standalone)
+    # index.html is what a static host serves at /. Same bytes as preview.html
+    # — one file, two names, so opening from disk and deploying cannot diverge.
+    (dist / "index.html").write_text(standalone)
 
     print(f"anime.js inlined — {len(pairs)} exports")
     print(f"dist/exoplanet-hunter.html — {len(out) / 1024:.0f} KB")
-    print("dist/preview.html — open this one directly in a browser")
+    print(f"dist/index.html + dist/preview.html — API base {api_base or '/api (default)'}")
     return 0
 
 

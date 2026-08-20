@@ -189,4 +189,16 @@ const bootReady = new Promise(r => { resolveBoot = r; });
 /* ── go ──────────────────────────────────────────────────── */
 // replaceState, not `location.hash = …`, so the initial route renders once
 if (!location.hash) history.replaceState(null, '', '#/');
-route();
+
+/* hydrate() fills SERVED and CANDIDATES from the API before the first render,
+   which keeps every page function synchronous. It never rejects — an
+   unreachable service resolves to mock mode — so route() is not guarded. The
+   boot overlay covers this; on a warm service it is ~0.3 s, and the overlay
+   runs 4 s regardless. */
+hydrate().then(({ mode, notes }) => {
+  API.notes = notes;
+  if (mode !== 'live') console.info('[eh] no API reachable — prototype data');
+  else console.info(`[eh] live against ${API.base}`, notes);
+  mountTicker();
+  route();
+});

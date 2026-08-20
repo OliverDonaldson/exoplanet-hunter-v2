@@ -29,7 +29,13 @@ _DEFAULT_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "tables" / "catalogue" / "candidates.parquet"
 )
 
+#: repo-root/results/candidates_scored.parquet — written by
+#: pipeline/scripts/score_candidates.py. Absent on a fresh checkout, in which
+#: case every row is simply unscored.
+_DEFAULT_SCORES = Path(__file__).resolve().parents[3] / "results" / "candidates_scored.parquet"
+
 _SORTABLE = {
+    "prob_mean",
     "name",
     "tic_id",
     "disposition",
@@ -64,10 +70,56 @@ def _load_catalogue() -> pd.DataFrame:
         )
     mtime = path.stat().st_mtime
     key = str(path)
+    scores_path = Path(os.environ.get("SCORES_PATH", _DEFAULT_SCORES))
+    scores_mtime = scores_path.stat().st_mtime if scores_path.exists() else 0.0
     cached = _cache.get(key)
-    if cached is None or cached[0] != mtime:
-        _cache[key] = (mtime, pd.read_parquet(path))
+    if cached is None or cached[0] != (mtime, scores_mtime):
+        frame = pd.read_parquet(path)
+        _cache[key] = ((mtime, scores_mtime), _attach_scores(frame, scores_path))
     return _cache[key][1]
+
+
+def _attach_scores(catalogue: pd.DataFrame, scores_path: Path) -> pd.DataFrame:
+    """Join the bulk-scored candidates onto the catalogue.
+
+    `scripts/score_candidates.py` scores the held-out pool offline, because a
+    live score is a MAST fetch plus five model passes and cannot be done for a
+    page of rows on load. Rows it has not reached keep a null score and the
+    console renders them as not scored.
+
+    **These are ensemble means, not the Platt-calibrated number `/score`
+    returns.** The calibrators live inside the fold bundle and cannot be
+    applied to a stored mean after the fact, so the same target can show a
+    different figure here and on the vetting page. `score_source` and
+    `scored_at` travel with every row so a reader can tell which is which, and
+    re-running the scorer is what closes the gap.
+    """
+    catalogue = catalogue.copy()
+    for column in ("prob_mean", "prob_std", "scored_at", "score_source"):
+        catalogue[column] = None
+    if not scores_path.exists():
+        return catalogue
+    try:
+        scored = pd.read_parquet(
+            scores_path, columns=["tic_id", "status", "prob_mean", "prob_std", "scored_at"]
+        )
+    except (OSError, ValueError, KeyError):
+        log.warning("[candidates] could not read scores at %s", scores_path)
+        return catalogue
+    # Only rows the scorer actually completed. `no_fits` and `preprocess_fail`
+    # carry no probability and must not read as a low one.
+    scored = scored[(scored["status"] == "ok") & scored["prob_mean"].notna()]
+    scored = scored.drop_duplicates("tic_id")
+    merged = catalogue.drop(columns=["prob_mean", "prob_std", "scored_at"]).merge(
+        scored.drop(columns=["status"]), on="tic_id", how="left"
+    )
+    merged["scored_at"] = (
+        merged["scored_at"].astype(object).where(merged["scored_at"].notna(), None)
+    )
+    merged["score_source"] = (
+        merged["prob_mean"].notna().map({True: "bulk-ensemble-mean", False: None})
+    )
+    return merged
 
 
 def _apply_filters(

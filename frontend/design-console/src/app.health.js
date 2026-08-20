@@ -29,8 +29,10 @@
 */
 
 const HEALTH = {
-  live: false,                 // flip to true to poll the real endpoint
-  endpoint: '/healthz',
+  // Live whenever probeApi() reached the service. Opened from disk with no
+  // API the probe fails, and the scripted clock still demonstrates the states.
+  get live() { return API.mode === 'live'; },
+  get endpoint() { return `${API.base}/healthz`; },
   pollMs: 1000,
   wakingAfterMs: 2000,         // an in-flight request older than this is a resume
   ensembleLoadS: 90,           // documented cold-start ensemble load

@@ -5,8 +5,33 @@
 /* The views the pipeline actually returns. No fitted transit model:
    this project classifies, it does not solve for orbital parameters. */
 function generateViews(c) {
+  // A live score returns the very arrays the model was fed. The simulation
+  // below is a plausible transit drawn from depth and duration; showing it
+  // beside a real calibrated probability would caption invented curves with a
+  // measured number.
+  if (c.live && c.live.views && c.live.views.global) {
+    const pack = v => {
+      if (!v || !v.phase) return [];
+      const out = [];
+      for (let i = 0; i < v.phase.length; i++) {
+        const f = v.flux[i];
+        if (f == null || !isFinite(f)) continue;
+        // The score contract carries no per-bin scatter, so the band collapses
+        // onto the line rather than being invented around it.
+        out.push({ phase: v.phase[i], flux: f, hi: f, lo: f });
+      }
+      return out;
+    };
+    const g = pack(c.live.views.global);
+    const l = pack(c.live.views.local);
+    const lSpan = l.length ? Math.max(Math.abs(l[0].phase), Math.abs(l[l.length - 1].phase)) : 0.02;
+    const eph = c.live.ephemeris;
+    const durPhaseLive = eph && eph.period_days ? (eph.duration_days / eph.period_days) : 0.02;
+    return { durPhase: durPhaseLive, localSpan: lSpan, global: g, local: l };
+  }
   const r = rngFor(c.id + '|views');
-  const durPhase = Math.min(0.45, (c.duration / 24) / c.period);
+  // A catalogue row with no published period would divide by zero here.
+  const durPhase = c.period ? Math.min(0.45, (c.duration / 24) / c.period) : 0.02;
   const half = durPhase / 2;
 
   const shape = ph => {
@@ -58,6 +83,24 @@ function viewChart(el, data, label, span) {
 
 function Vetting(candidateId) {
   const c = CANDIDATES.find(x => x.id === candidateId) || CANDIDATES[0];
+  if (!c) return;
+
+  /* Score once per candidate, then re-enter to paint the same page with real
+     values. The row arrives from /candidates with no score — that endpoint has
+     no score column — so P(planet), the fold dots and every diagnostic are
+     absent until this resolves. Re-entry is guarded on the hash so a score
+     landing after the user has navigated away does not repaint over them. */
+  if (API.mode === 'live' && !c.live && !c.scoring && !c.scoreError) {
+    c.scoring = true;
+    const wanted = location.hash;
+    loadScore(c.ticNumeric, ephemerisFor(c))
+      .then(s => { c.live = s; c.prob = s.prob; })
+      .catch(e => { c.scoreError = e.message; })
+      .finally(() => {
+        c.scoring = false;
+        if (location.hash === wanted) Vetting(candidateId);
+      });
+  }
   const views = generateViews(c);
   const branches = branchEvidence(c);
   const agree = foldAgreement(c);
@@ -68,7 +111,7 @@ function Vetting(candidateId) {
 
   const TABS = [
     ['lightcurve',  'Phase-Folded Views'],
-    ['branches',    'Branch Evidence'],
+    ['branches',    'Branch Evidence <span class="tag-chip tag-soon" style="margin-left:0.4rem">in progress</span>'],
     ['agreement',   'Model Agreement'],
     ['diagnostics', 'Diagnostic Flags'],
   ];
@@ -82,7 +125,7 @@ function Vetting(candidateId) {
     { label:'Last Scored', value:c.lastScored },
   ];
 
-  const longBaseline = c.baselineDays >= 1000;
+  const longBaseline = c.baselineDays != null && c.baselineDays >= 1000;
   const fuVerdict =
     fu.tsmPass && fu.esmPass ? 'High priority — viable for both transmission and emission spectroscopy'
     : fu.tsmPass ? 'Transmission target — TSM clears the Kempton threshold for this radius bin'
@@ -110,11 +153,16 @@ function Vetting(candidateId) {
         </div>
         <div class="prob-big" style="text-align:right;display:flex;flex-direction:column;align-items:flex-end">
           <div class="stat-label" style="margin-bottom:0.4rem">P(planet)</div>
-          <div style="font-family:'JetBrains Mono';font-size:3.5rem;font-weight:500;color:${probColor(c.prob)};line-height:1;letter-spacing:-0.02em;font-variant-numeric:tabular-nums">${c.prob.toFixed(3)}</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.68rem;color:#8A8FA8;margin-top:0.35rem">± ${agree.probStd.toFixed(3)} MC-dropout · Platt-calibrated</div>
+          <div style="font-family:'JetBrains Mono';font-size:3.5rem;font-weight:500;color:${c.prob == null ? '#8A8FA8' : probColor(c.prob)};line-height:1;letter-spacing:-0.02em;font-variant-numeric:tabular-nums">${c.prob == null ? (c.scoring ? '···' : '—') : c.prob.toFixed(3)}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.68rem;color:#8A8FA8;margin-top:0.35rem">${
+            c.prob == null
+              ? (c.scoring ? 'scoring — light curve → 5-fold ensemble' : (c.scoreError ? esc(c.scoreError) : 'not scored'))
+              : `± ${agree.probStd.toFixed(3)} MC-dropout · Platt-calibrated`}</div>
           <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.65rem;border:1px solid ${longBaseline ? 'rgba(245,166,35,0.35)' : 'rgba(255,255,255,0.10)'};background:${longBaseline ? 'rgba(245,166,35,0.05)' : 'transparent'}">
             <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${longBaseline ? '#F5A623' : '#8A8FA8'}">
-              ${c.baselineDays.toLocaleString()} d baseline${longBaseline ? ' · well-observed targets may score high' : ''}
+              ${c.baselineDays == null
+                ? 'baseline not published for this row'
+                : `${c.baselineDays.toLocaleString()} d baseline${longBaseline ? ' · well-observed targets may score high' : ''}`}
             </span>
           </div>
         </div>
@@ -189,6 +237,28 @@ function Vetting(candidateId) {
   };
 
   const branchPanel = () => {
+    if (API.mode === 'live') {
+      return `
+      <div class="soon" style="margin-bottom:1.5rem">
+        <div class="h">Per-branch contributions not measured yet <span class="tag-chip tag-soon" style="margin-left:0.4rem">in progress</span></div>
+        <div class="d">
+          The score on this page is real. Attributing it across the eleven input
+          views needs branch-occlusion at serving time, which is not built — so
+          rather than show a plausible split, this tab shows none. What each view
+          feeds the model is listed below.
+        </div>
+      </div>
+      <div style="display:grid;gap:0.5rem">
+        ${BRANCHES.map(b => `
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;padding:0.7rem 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+            <div>
+              <div style="font-family:'JetBrains Mono';font-size:0.72rem;color:#F0EEE8">${esc(b.key)}</div>
+              <div style="font-family:'Inter';font-size:0.72rem;color:rgba(240,238,232,0.5);margin-top:0.15rem">${esc(b.sees)}</div>
+            </div>
+            <div style="font-family:'JetBrains Mono';font-size:0.68rem;color:#8A8FA8;white-space:nowrap">not measured</div>
+          </div>`).join('')}
+      </div>`;
+    }
     const max = Math.max(...branches.map(b => Math.abs(b.value)));
     const sum = branches.reduce((s, b) => s + b.value, 0);
     return `
@@ -203,7 +273,7 @@ function Vetting(candidateId) {
           catalogue mean ${BASE_RATE.toFixed(3)} <span style="color:rgba(255,255,255,0.25)">+</span>
           <span style="color:${sum >= 0 ? '#4DFFD2' : '#FF4D4D'}">${signed(sum, 3)}</span>
           <span style="color:rgba(255,255,255,0.25)">=</span>
-          <span style="color:${probColor(c.prob)}">${c.prob.toFixed(3)}</span>
+          <span style="color:${c.prob == null ? '#8A8FA8' : probColor(c.prob)}">${c.prob == null ? '—' : c.prob.toFixed(3)}</span>
         </div>
       </div>
 
@@ -239,6 +309,11 @@ function Vetting(candidateId) {
   };
 
   const agreementPanel = () => {
+    if (c.prob == null) {
+      return `<div style="padding:3rem;text-align:center;font-family:'JetBrains Mono';font-size:0.75rem;color:#8A8FA8">
+        ${c.scoring ? 'Scoring — the ensemble members arrive with the score.' : 'Not scored — no fold members to compare.'}
+      </div>`;
+    }
     const lo = Math.max(0, Math.min(agree.range[0], c.prob - agree.probStd) - 0.05);
     const hi = Math.min(1, Math.max(agree.range[1], c.prob + agree.probStd) + 0.05);
     const pct = v => ((v - lo) / (hi - lo)) * 100;
@@ -276,7 +351,7 @@ function Vetting(candidateId) {
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:0;border:1px solid rgba(255,255,255,0.08);border-top:none">
         ${[
-          { k:'Calibrated score', v:c.prob.toFixed(3), accent:true },
+          { k:'Calibrated score', v:c.prob == null ? '—' : c.prob.toFixed(3), accent:true },
           { k:'MC-dropout σ',     v:agree.probStd.toFixed(4) },
           { k:'Fold σ',           v:agree.foldStd.toFixed(4) },
           { k:'Fold range',       v:`${agree.range[0].toFixed(3)} – ${agree.range[1].toFixed(3)}` },
@@ -414,6 +489,7 @@ const normInv = p => {
 
 /* binormal ROC with the mission's measured AUC */
 function rocFor(auc) {
+  if (auc == null || !Number.isFinite(auc)) return [{ fpr: 0, tpr: 0 }, { fpr: 1, tpr: 1 }];
   const a = Math.SQRT2 * normInv(auc);
   const pts = [{ fpr: 0, tpr: 0 }];
   for (let i = 1; i < 80; i++) {
@@ -425,10 +501,25 @@ function rocFor(auc) {
 }
 
 function calibrationFor(m) {
+  // /reliability returns the promoted run's actual reliability diagram: mean
+  // predicted probability against observed positive fraction, per bin, over
+  // its out-of-fold predictions. Scattering points around the diagonal by ECE
+  // draws a curve with the right summary statistic and the wrong shape, which
+  // is the one chart on this page whose whole purpose is its shape.
+  const live = SERVED.reliability;
+  if (live && Array.isArray(live.bins) && live.bins.length) {
+    return live.bins.map(b => ({
+      predicted: b.prob_mean,
+      actual: b.frac_positive,
+      perfect: b.prob_mean,
+      count: b.count,
+    }));
+  }
   const r = rngFor(m.mission + '|calib');
+  const ece = m.ece || 0;
   return [0.05,0.15,0.25,0.35,0.45,0.55,0.65,0.75,0.85,0.95].map(p => ({
     predicted: p,
-    actual: +Math.min(1, Math.max(0, p + (r() - 0.5) * m.ece * 6)).toFixed(3),
+    actual: +Math.min(1, Math.max(0, p + (r() - 0.5) * ece * 6)).toFixed(3),
     perfect: p,
   }));
 }
@@ -446,6 +537,19 @@ function confusionFor(m) {
 }
 
 function metricBlock(label, value, err, accent) {
+  // A metric the run did not record renders as not-measured. Formatting null
+  // through toFixed would print 0.0000, which reads as a measured zero — for
+  // ECE that is perfect calibration, the most flattering possible misreading.
+  if (value == null || err == null) {
+    return `
+    <div>
+      <div class="stat-label" style="margin-bottom:0.4rem">${label}</div>
+      <div style="display:flex;align-items:baseline;gap:0.4rem">
+        <span class="stat-value" style="font-size:1.6rem;color:#8A8FA8">—</span>
+        <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8">not measured for this run</span>
+      </div>
+    </div>`;
+  }
   const lo = value - err, hi = value + err;
   return `
     <div>
@@ -470,7 +574,7 @@ function ModelPerformance() {
 
       <div style="margin-bottom:2.5rem">
         <div class="section-label" style="margin-bottom:0.75rem">Model Performance</div>
-        <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">${GATING.auc.toFixed(4)} ON ${GATING.mission}.</h1>
+        <h1 style="font-family:'Space Grotesk';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">${GATING.auc != null ? GATING.auc.toFixed(4) : '—'} ON ${GATING.mission}.</h1>
         <h2 style="font-family:'Space Grotesk';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.6rem">THE MISSION THAT GATES</h2>
         <p style="font-family:'Inter';font-size:0.85rem;color:rgba(240,238,232,0.45)">
           Serving <span style="font-family:'JetBrains Mono';color:#4DFFD2">${SERVED.runId}</span> since ${SERVED.promotedAt} · ${SERVED.arch}
@@ -491,8 +595,8 @@ function ModelPerformance() {
             <div style="height:1.25rem"></div>
             ${metricBlock('Recall @ 1% FPR', m.recall, m.recallErr, m.role === 'gating')}
             <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1.25rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,0.06)">
-              <div><div class="stat-label" style="margin-bottom:0.2rem">Brier</div><div class="stat-value" style="font-size:0.85rem">${m.brier.toFixed(4)} <span style="color:#8A8FA8;font-size:0.7rem">±${m.brierErr.toFixed(4)}</span></div></div>
-              <div><div class="stat-label" style="margin-bottom:0.2rem">ECE</div><div class="stat-value" style="font-size:0.85rem">${m.ece.toFixed(4)} <span style="color:#8A8FA8;font-size:0.7rem">±${m.eceErr.toFixed(4)}</span></div></div>
+              <div><div class="stat-label" style="margin-bottom:0.2rem">Brier</div><div class="stat-value" style="font-size:0.85rem">${m.brier != null ? m.brier.toFixed(4) : '—'} <span style="color:#8A8FA8;font-size:0.7rem">${m.brierErr != null ? '±' + m.brierErr.toFixed(4) : ''}</span></div></div>
+              <div><div class="stat-label" style="margin-bottom:0.2rem">ECE</div><div class="stat-value" style="font-size:0.85rem">${m.ece != null ? m.ece.toFixed(4) : '—'} <span style="color:#8A8FA8;font-size:0.7rem">${m.eceErr != null ? '±' + m.eceErr.toFixed(4) : ''}</span></div></div>
               <div><div class="stat-label" style="margin-bottom:0.2rem">n</div><div class="stat-value" style="font-size:0.85rem">${m.n.toLocaleString()}</div></div>
             </div>
           </div>`).join('')}
@@ -504,7 +608,7 @@ function ModelPerformance() {
           There is no pooled headline: the missions have different label provenance and different class balance, so a single averaged figure would not mean anything.
           <b style="color:rgba(240,238,232,0.85);font-weight:500">${SERVED.missions.filter(m => m.evaluation === 'zero-shot').map(m => m.mission).join(', ') || 'None'}</b>
           ${SERVED.missions.some(m => m.evaluation === 'zero-shot') ? 'has no out-of-fold evaluation for this run — its numbers are zero-shot transfer and are not comparable with the out-of-fold columns.' : 'runs are all out-of-fold.'}
-          Measured noise floor: AUC ±${SERVED.noiseFloor.auc.toFixed(4)}, shortlist recall ±${SERVED.noiseFloor.recall.toFixed(4)} — differences smaller than these are not differences.
+          Measured noise floor: AUC ±${SERVED.noiseFloor.auc != null ? SERVED.noiseFloor.auc.toFixed(4) : '—'}, shortlist recall ±${SERVED.noiseFloor.recall != null ? SERVED.noiseFloor.recall.toFixed(4) : '—'} — differences smaller than these are not differences.
         </span>
       </div>
 
@@ -544,11 +648,11 @@ function ModelPerformance() {
                 <tr class="data-row" style="cursor:default">
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:${v.status === 'active' ? '#4DFFD2' : '#8A8FA8'}">${v.runId}</span>${v.status === 'active' ? '<div class="tag-chip tag-oof" style="display:inline-block;margin-left:0.4rem">served</div>' : ''}</td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${v.date}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.auc.toFixed(4)} <span style="color:#8A8FA8">±${v.aucErr.toFixed(4)}</span></span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.recall.toFixed(4)}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.brier.toFixed(4)}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span class="tag-chip ${v.verdict === 'PROMOTE' ? 'tag-promote' : 'tag-reject'}">${v.verdict}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top;max-width:30rem"><span style="font-family:'Inter';font-size:0.75rem;line-height:1.5;color:rgba(240,238,232,0.55)">${esc(v.reason)}</span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.auc != null ? v.auc.toFixed(4) : '—'} <span style="color:#8A8FA8">±${v.aucErr != null ? v.aucErr.toFixed(4) : '—'}</span></span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.recall != null ? v.recall.toFixed(4) : '—'}</span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${v.brier != null ? v.brier.toFixed(4) : '—'}</span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top">${v.verdict ? `<span class="tag-chip ${v.verdict === 'PROMOTE' ? 'tag-promote' : 'tag-reject'}">${v.verdict}</span>` : `<span style="color:#8A8FA8;font-family:'JetBrains Mono';font-size:0.65rem">—</span>`}</td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top;max-width:30rem"><span style="font-family:'Inter';font-size:0.75rem;line-height:1.5;color:rgba(240,238,232,0.55)">${esc(v.reason || 'No promotion log is written yet, so no reason is on record.')}</span></td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -577,12 +681,12 @@ function ModelPerformance() {
       <div class="charts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-bottom:2rem">
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.5rem">ROC Curve — ${m.mission}</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">AUC = ${m.auc.toFixed(4)} ± ${m.aucErr.toFixed(4)} · ${m.evaluation}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">AUC = ${m.auc != null ? m.auc.toFixed(4) : '—'} ± ${m.aucErr != null ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
           <div class="chart-wrap" id="chart-roc"></div>
         </div>
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.5rem">Calibration — ${m.mission}</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">Brier ${m.brier.toFixed(4)} ± ${m.brierErr.toFixed(4)} · ECE ${m.ece.toFixed(4)}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">Brier ${m.brier != null ? m.brier.toFixed(4) : '—'} ± ${m.brierErr != null ? m.brierErr.toFixed(4) : '—'} · ECE ${m.ece != null ? m.ece.toFixed(4) : '—'}</div>
           <div class="chart-wrap" id="chart-calib"></div>
         </div>
       </div>
@@ -768,6 +872,16 @@ function Upload() {
 
     if (state.status === 'idle') {
       const ok = state.ticId.trim().length > 3;
+      if (state.error) {
+        actionEl.innerHTML = `
+          <div class="note" style="margin-bottom:1rem;border-color:rgba(255,77,77,0.35)">
+            <span class="ico" style="color:#FF4D4D">▲</span>
+            <span class="txt">Scoring failed — ${esc(state.error)}</span>
+          </div>
+          <button class="btn-teal" id="up-go" ${ok ? '' : 'disabled'} style="font-size:0.75rem;padding:0.875rem 2rem">Try again →</button>`;
+        if (ok) document.getElementById('up-go').addEventListener('click', run);
+        return;
+      }
       actionEl.innerHTML = `<button class="btn-teal" id="up-go" ${ok ? '' : 'disabled'} style="font-size:0.75rem;padding:0.875rem 2rem">Score this target →</button>`;
       if (ok) document.getElementById('up-go').addEventListener('click', run);
       return;
@@ -880,6 +994,16 @@ function Upload() {
 
     const t0 = performance.now();
     clearInterval(timer);
+
+    /* The staged bar and the real request run together. The stages are a
+       readable account of what the server is doing, not a measurement of it,
+       so the bar is allowed to finish first and then wait. */
+    const tic = Number(String(state.ticId).replace(/[^0-9]/g, ''));
+    state.pending = API.mode === 'live' && tic
+      ? loadScore(tic, {}).then(sc => ({ sc })).catch(e => ({ err: e.message }))
+      : null;
+    state.awaiting = false;
+
     timer = setInterval(() => {
       state.elapsed = (performance.now() - t0) / 1000;
       const total = STAGES.slice(0, state.stage + 1).reduce((s, x) => s + x.ms, 0);
@@ -889,10 +1013,34 @@ function Upload() {
       state.progress = Math.round(from + (STAGES[state.stage].to - from) * f);
       if (state.elapsed * 1000 >= total && state.stage < STAGES.length - 1) state.stage++;
       if (state.elapsed * 1000 >= STAGES.reduce((s, x) => s + x.ms, 0)) {
-        clearInterval(timer);
-        lastScoreAt = Date.now();
-        state.status = 'complete';
-        state.result = mockScore(state.ticId, state.elapsed);
+        if (state.pending) {
+          // Hold the last stage until the real score lands. MAST fetches run
+          // 20-60 s cold, well past the animation, and completing the bar
+          // before the answer exists would show a finished run with no result.
+          const pending = state.pending;
+          state.pending = null;
+          state.awaiting = true;
+          state.progress = 99;
+          pending.then(out => {
+            clearInterval(timer);
+            lastScoreAt = Date.now();
+            state.awaiting = false;
+            if (out.err) {
+              state.status = 'idle';
+              state.error = out.err;
+            } else {
+              state.status = 'complete';
+              state.error = null;
+              state.result = liveScoreResult(state.ticId, state.elapsed, out.sc);
+            }
+            if (location.hash.replace(/^#/, '') === '/upload') paintAction();
+          });
+        } else if (!state.awaiting) {
+          clearInterval(timer);
+          lastScoreAt = Date.now();
+          state.status = 'complete';
+          state.result = mockScore(state.ticId, state.elapsed);
+        }
       }
       if (location.hash.replace(/^#/, '') === '/upload') paintAction();
       else clearInterval(timer);
@@ -904,6 +1052,27 @@ function Upload() {
   }));
 
   paintModes(); paintInput(); paintAction();
+}
+
+/* The live equivalent of mockScore: the same shape, filled from /score.
+
+   The Data Validation flags come from the score's own diagnostic suites, so a
+   suite the contract does not carry reads as unmeasured rather than as a pass —
+   the panel already counts those and says so underneath. */
+function liveScoreResult(ticId, seconds, score) {
+  const c = { id: ticId, live: score };
+  const diags = diagnosticsFor(c).slice(0, 4);
+  const eph = score.ephemeris || {};
+  return {
+    target: String(ticId).trim().toUpperCase(),
+    seconds,
+    sectors: `P = ${eph.period_days ? eph.period_days.toFixed(4) : '—'} d · ephemeris from ${eph.source || 'catalogue'}`,
+    prob: score.prob,
+    probStd: score.probStd,
+    folds: (score.perFold || []).map(f => ({ fold: f.fold, score: f.prob })),
+    diags,
+    unmeasured: diags.filter(d => d.state === 'unmeasured').length,
+  };
 }
 
 function mockScore(ticId, seconds) {

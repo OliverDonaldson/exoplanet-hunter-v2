@@ -2,16 +2,33 @@
    HOME + CATALOGUE
    ═══════════════════════════════════════════════════════════ */
 
-const MISSION_STATS = [
-  { label:'Candidates Scored', value:'5,388', accent:false, count:5388, dur:2000 },
-  { label:'High Confidence',   value:'146',   accent:true,  count:146,  dur:1500 },
-  // the pooled 0.955 is gone: the gating mission is the number that decides promotion
-  { label:'TESS ROC-AUC',      value:GATING.auc.toFixed(4), accent:false, sub:`±${GATING.aucErr.toFixed(4)} · gating mission` },
-  { label:'TESS Recall @1% FPR', value:GATING.recall.toFixed(4), accent:false, sub:`±${GATING.recallErr.toFixed(4)} · shortlist criterion` },
-  { label:'TESS Sectors',      value:'63',    accent:false, count:63,   dur:1200 },
-  // 9,564 is the full public KOI catalogue; this is what was actually trained on
-  { label:'Kepler KOIs Trained', value:'2,500', accent:false, count:2500, dur:2200 },
-];
+/* A function, not a const array: hydrate() replaces SERVED and GATING after
+   this file is parsed, and an array literal here would freeze the served run's
+   numbers at whatever they were when the bundle was built. The six tiles,
+   their labels, their order and their counters are exactly as designed — only
+   the values behind them now come from /model, so a promotion moves them. */
+const NOT_MEASURED = '—';
+function missionStats() {
+  const g = GATING || {};
+  const kepler = (SERVED.missions || []).find(m => m.mission === 'Kepler');
+  return [
+    { label:'Candidates Scored', value:(SERVED.nScored || 5388).toLocaleString(),
+      accent:false, count:SERVED.nScored || 5388, dur:2000 },
+    { label:'High Confidence',   value:(SERVED.nHighConfidence || 146).toLocaleString(),
+      accent:true,  count:SERVED.nHighConfidence || 146,  dur:1500 },
+    // the pooled 0.955 is gone: the gating mission is the number that decides promotion
+    { label:`${g.mission || 'TESS'} ROC-AUC`,
+      value: g.auc != null ? g.auc.toFixed(4) : NOT_MEASURED, accent:false,
+      sub: g.aucErr != null ? `±${g.aucErr.toFixed(4)} · gating mission` : 'not measured for this run' },
+    { label:`${g.mission || 'TESS'} Recall @1% FPR`,
+      value: g.recall != null ? g.recall.toFixed(4) : NOT_MEASURED, accent:false,
+      sub: g.recallErr != null ? `±${g.recallErr.toFixed(4)} · shortlist criterion` : 'not measured for this run' },
+    { label:'TESS Sectors',      value:'63',    accent:false, count:63,   dur:1200 },
+    // 9,564 is the full public KOI catalogue; this is what was actually trained on
+    { label:'Kepler KOIs Trained', value:(kepler ? kepler.n : 2500).toLocaleString(),
+      accent:false, count: kepler ? kepler.n : 2500, dur:2200 },
+  ];
+}
 
 const FLOATING_CANDIDATES = [
   { id:'TOI-4328.01',  period:'P=703.8d', prob:'0.989', x:'62%', y:'22%' },
@@ -86,7 +103,7 @@ function Home() {
           </div>
         </div>
         <div class="six-up" style="display:grid;grid-template-columns:repeat(6, 1fr);gap:2rem">
-          ${MISSION_STATS.map(s => `
+          ${missionStats().map(s => `
             <div style="border-top:1px solid ${s.accent ? 'rgba(77,255,210,0.3)' : 'rgba(255,255,255,0.1)'};padding-top:1.25rem">
               <div class="stat-label" style="margin-bottom:0.5rem">${s.label}</div>
               <div class="stat-value" style="font-size:1.75rem;font-weight:500;color:${s.accent ? '#4DFFD2' : '#F0EEE8'}"
@@ -212,9 +229,16 @@ function Catalogue() {
     }
     if (state.disposition !== 'All') data = data.filter(c => c.disposition === state.disposition);
     if (state.source !== 'All') data = data.filter(c => c.source === state.source);
-    data = data.filter(c => c.prob >= state.minProb / 100);
+    if (state.minProb > 0) data = data.filter(c => c.prob != null && c.prob >= state.minProb / 100);
     data.sort((a, b) => {
       const av = a[state.sortKey], bv = b[state.sortKey];
+      // Nulls sink to the bottom in either direction: an unscored row is not
+      // the lowest-scoring row, and sorting it there would read as one.
+      const an = av == null || (typeof av === 'number' && !Number.isFinite(av));
+      const bn = bv == null || (typeof bv === 'number' && !Number.isFinite(bv));
+      if (an && bn) return 0;
+      if (an) return 1;
+      if (bn) return -1;
       if (typeof av === 'number' && typeof bv === 'number') return state.sortDir === 'asc' ? av - bv : bv - av;
       return state.sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
     });
@@ -307,20 +331,23 @@ function Catalogue() {
       const td = 'padding:0.85rem 1rem';
       const mono = "font-family:'JetBrains Mono';font-size:0.75rem;color:#F0EEE8;font-variant-numeric:tabular-nums";
       const dim = "font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8;font-variant-numeric:tabular-nums";
+      const n = (v, d) => (v == null || !Number.isFinite(v) || v === 0 ? '—' : v.toFixed(d));
       return `<tr class="data-row" data-id="${esc(c.id)}" style="cursor:pointer">
-        <td style="${td}"><span style="${mono};font-weight:500">${c.id}</span></td>
-        <td style="${td}"><span style="${dim}">${c.ticId}</span></td>
-        <td style="${td}"><span style="${mono}">${c.period.toFixed(1)}</span></td>
-        <td style="${td}"><span style="${mono}">${c.depth.toFixed(4)}</span></td>
-        <td style="${td}"><span class="${getProbClass(c.prob)}">${c.prob.toFixed(3)}</span></td>
-        <td style="${td}"><span style="${dim};color:rgba(138,143,168,0.5)" title="score_std not yet persisted">—</span></td>
+        <td style="${td}"><span style="${mono};font-weight:500">${esc(c.id)}</span></td>
+        <td style="${td}"><span style="${dim}">${esc(c.ticId)}</span></td>
+        <td style="${td}"><span style="${mono}">${n(c.period, 1)}</span></td>
+        <td style="${td}"><span style="${mono}">${n(c.depth, 4)}</span></td>
+        <td style="${td}">${c.prob == null
+            ? `<span style="${dim};color:rgba(138,143,168,0.5)" title="/candidates carries no score — open to vet">not scored</span>`
+            : `<span class="${getProbClass(c.prob)}">${c.prob.toFixed(3)}</span>`}</td>
+        <td style="${td}"><span style="${dim}${c.probStd == null ? ';color:rgba(138,143,168,0.5)' : ''}" title="${c.probStd == null ? 'not scored' : 'ensemble spread over the five folds'}">${c.probStd == null ? '—' : c.probStd.toFixed(3)}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;font-weight:600;color:${dc};background:${dc}18;border:1px solid ${dc}44;padding:0.15rem 0.5rem;border-radius:2px">${c.disposition}</span></td>
         <td style="${td}"><span style="font-family:'Space Grotesk';font-size:0.65rem;font-weight:600;letter-spacing:0.08em;color:#8A8FA8">${c.source}</span></td>
-        <td style="${td}"><span style="${mono}">${c.tmag.toFixed(1)}</span></td>
-        <td style="${td}"><span style="${mono}">${c.snr.toFixed(1)}</span></td>
-        <td style="${td}"><span style="${mono};color:${fu.tsmPass ? '#4DFFD2' : '#F0EEE8'}">${fu.tsm.toFixed(1)}</span></td>
-        <td style="${td}"><span style="${mono};color:${fu.esmPass ? '#4DFFD2' : '#F0EEE8'}">${fu.esm.toFixed(2)}</span></td>
-        <td style="${td}"><span style="${mono};color:${c.baselineDays >= 1000 ? '#F5A623' : '#F0EEE8'}">${c.baselineDays.toLocaleString()}</span></td>
+        <td style="${td}"><span style="${mono}">${n(c.tmag, 1)}</span></td>
+        <td style="${td}"><span style="${mono}">${n(c.snr, 1)}</span></td>
+        <td style="${td}"><span style="${mono};color:${fu.tsmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.tsm, 1)}</span></td>
+        <td style="${td}"><span style="${mono};color:${fu.esmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.esm, 2)}</span></td>
+        <td style="${td}"><span style="${mono};color:${c.baselineDays >= 1000 ? '#F5A623' : '#F0EEE8'}">${c.baselineDays == null ? '—' : c.baselineDays.toLocaleString()}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${c.lastScored}</span></td>
         <td style="${td}"><span style="font-family:'Space Grotesk';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;color:#4DFFD2;text-transform:uppercase">Vet →</span></td>
       </tr>`;

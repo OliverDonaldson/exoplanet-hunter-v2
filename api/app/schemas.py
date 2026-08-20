@@ -239,6 +239,12 @@ class CandidateRow(BaseModel):
     promoted_to_toi: str | None = None
     comments: str | None = None
     date_modified: str | None = None
+    # Bulk-scored offline by scripts/score_candidates.py. An ENSEMBLE MEAN, not
+    # the Platt-calibrated figure /score returns — see _attach_scores.
+    prob_mean: float | None = None
+    prob_std: float | None = None
+    scored_at: str | None = None
+    score_source: str | None = None
 
 
 class CandidatesPage(BaseModel):
@@ -321,6 +327,7 @@ class RunRecord(BaseModel):
     date: str
     auc: float | None = None
     aucErr: float | None = None
+    recall: float | None = None
     brier: float | None = None
     status: str
     verdict: str | None = None

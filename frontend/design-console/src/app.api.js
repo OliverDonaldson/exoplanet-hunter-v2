@@ -1,0 +1,319 @@
+/* ═══════════════════════════════════════════════════════════
+   API — the live service, and the seam the prototype falls back through
+   ═══════════════════════════════════════════════════════════
+
+   The design console was built as a self-contained file with mock data so it
+   could be opened from disk and clicked through. This module is the seam that
+   lets the same file talk to the real service when one is reachable, without
+   losing the offline behaviour that makes it reviewable.
+
+   Resolution order for the base URL, first hit wins:
+
+     1. ?api=<url>                     — per-visit override, for pointing a
+                                         built file at a deployed API
+     2. window.EH_API_BASE             — set by a host page before the module
+     3. <meta name="eh-api-base">      — set at build or deploy time
+     4. '/api'                         — the vite dev proxy and the Fly route
+
+   MODE is decided once, by probing /healthz. It is not a build flag, because
+   the same artifact is opened both from disk (no service) and from the
+   deployed host (service present), and a build flag cannot be right for both.
+
+   WHAT IS AND IS NOT AVAILABLE. Three things the console renders have no
+   endpoint behind them, and each degrades to an explicit "not measured"
+   rather than to a mock number — the same rule the diagnostics follow, and
+   for the same reason: a fabricated figure on a screen that otherwise shows
+   measured ones is indistinguishable from a measured one.
+
+     per-row P(planet)   /candidates returns catalogue facts only. Scoring is
+                         per-request through /score/{tic_id} and takes seconds
+                         to minutes, so scoring a page of rows on load is not
+                         available. Rows carry `prob: null` until opened.
+     branch evidence     Per-branch occlusion contributions are stage 11 and
+                         are not built. BRANCHES stays a description of what
+                         each view sees, with no contribution attached.
+     per-mission metrics /reliability returns one pooled reliability curve for
+                         the promoted run. The per-mission split the Model
+                         Performance page wants does not exist yet.
+*/
+
+const API = {
+  base: '/api',
+  mode: 'unknown',            // 'live' | 'mock' | 'unknown'
+  timeoutMs: 8000,
+  scoreTimeoutMs: 240000,     // a cold score runs a BLS search; minutes, not seconds
+  health: null,               // last /healthz body, once probed
+};
+
+(function resolveBase() {
+  const fromQuery = new URLSearchParams(location.search).get('api');
+  const fromGlobal = typeof window !== 'undefined' ? window.EH_API_BASE : null;
+  const meta = document.querySelector('meta[name="eh-api-base"]');
+  const fromMeta = meta ? meta.getAttribute('content') : null;
+  API.base = (fromQuery || fromGlobal || fromMeta || '/api').replace(/\/$/, '');
+})();
+
+/** fetch with a deadline — a hung request must not leave the console spinning. */
+async function apiFetch(path, { timeoutMs = API.timeoutMs } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API.base}${path}`, { signal: ctrl.signal, cache: 'no-store' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `${res.status} ${res.statusText}`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* Decide live vs mock once, on the cheapest endpoint. Anything other than a
+   clean 200 — offline, CORS, 404, timeout — means mock, because a console that
+   half-loads is worse than one that is honestly a prototype. */
+async function probeApi() {
+  try {
+    API.health = await apiFetch('/healthz', { timeoutMs: 4000 });
+    API.mode = 'live';
+  } catch (e) {
+    API.mode = 'mock';
+  }
+  return API.mode;
+}
+
+/* ── mappers: API contract → the shapes the pages already render ──────────
+   Kept in one place so a contract change lands here and not scattered across
+   four render functions. The field names on the right are api/app/schemas.py. */
+
+/** CandidateRow → the catalogue row shape. `prob` is null by contract. */
+function mapCandidate(row) {
+  return {
+    id: row.name,
+    ticId: `TIC ${row.tic_id}`,
+    ticNumeric: row.tic_id,
+    period: row.period_days ?? 0,
+    duration: row.duration_hours ?? 0,
+    // ephemerisFor() sends this as t0; without it /score has no epoch and
+    // falls back to a BLS period search, which is minutes rather than seconds.
+    epochBjd: row.epoch_bjd ?? null,
+    depth: row.depth_ppm != null ? row.depth_ppm / 1e6 : 0,
+    // Bulk-scored offline by scripts/score_candidates.py. An ENSEMBLE MEAN,
+    // not the Platt-calibrated figure /score returns, so this row's number and
+    // the one on its vetting page are computed differently and can differ.
+    prob: row.prob_mean ?? null,
+    probStd: row.prob_std ?? null,
+    scoredAt: row.scored_at ?? null,
+    disposition: row.disposition || '—',
+    source: 'TESS',                          // TOI and CTOI are both TESS products
+    catalogue: row.source,                   // 'TOI' | 'CTOI', kept for display
+    tmag: row.tess_mag ?? 0,
+    sectors: row.sectors || '—',
+    lastScored: row.date_modified ? String(row.date_modified).slice(0, 10) : '—',
+    snr: row.planet_snr ?? 0,
+    tsm: row.tsm ?? null,
+    esm: row.esm ?? null,
+    // No observing-baseline column exists on the catalogue contract. The
+    // console shows a baseline warning wherever a score is, so this stays null
+    // and the warning is suppressed rather than shown against a guess.
+    baselineDays: null,
+    radiusRe: row.planet_radius_re ?? null,
+    teqK: row.teq_k ?? null,
+    stellarRadius: row.stellar_radius_rsun ?? null,
+    stellarTeff: row.stellar_teff_k ?? null,
+  };
+}
+
+/** ScoreResponse → what the Vetting page needs, with API views preserved. */
+function mapScore(s) {
+  return {
+    prob: s.prob_calibrated,
+    probMean: s.prob_mean,
+    probStd: s.prob_std,
+    perFold: s.per_fold.map(f => ({ fold: f.fold, prob: f.prob })),
+    threshold: s.decision_threshold,
+    verdict: s.verdict,
+    modelVersion: s.model_version,
+    nMc: s.n_mc_samples,
+    ephemeris: s.ephemeris,
+    views: {
+      global: s.global_view,
+      local: s.local_view,
+      odd: s.odd_view,
+      even: s.even_view,
+      centroidTrack: s.centroid_track,
+      periodogram: s.periodogram,
+    },
+    diagnostics: {
+      centroid: s.centroid,
+      oddEven: s.odd_even,
+      secondary: s.secondary,
+      duration: s.duration_check,
+      falseAlarms: s.false_alarms,
+    },
+  };
+}
+
+/* ── the four real endpoints ─────────────────────────────── */
+
+function loadHealth() {
+  return apiFetch('/healthz');
+}
+
+/** One page of the catalogue. The console filters and sorts client-side, so
+    it asks for a large limit rather than paging.
+
+    Ordered by score descending server-side: the catalogue holds ~11k rows and
+    only the bulk-scored ones carry a probability, so an arbitrary page would
+    be mostly unscored and the P(planet) column would look broken. This puts
+    the scored ones first, which is also what a triage view is for. */
+async function loadCandidates({ limit = 500 } = {}) {
+  const page = await apiFetch(`/candidates?limit=${limit}&sort_by=prob_mean&order=desc`);
+  return { total: page.total, rows: page.rows.map(mapCandidate) };
+}
+
+/** Score one target. Slow by nature: a target with no catalogue ephemeris
+    runs a BLS search first, which is minutes rather than seconds. */
+async function loadScore(ticId, opts = {}) {
+  const p = new URLSearchParams();
+  if (opts.periodDays != null) p.set('period_days', String(opts.periodDays));
+  if (opts.t0Btjd != null) p.set('t0_btjd', String(opts.t0Btjd));
+  if (opts.durationHours != null) p.set('duration_hours', String(opts.durationHours));
+  if (opts.includePeriodogram) p.set('include_periodogram', 'true');
+  const qs = p.size ? `?${p}` : '';
+  const body = await apiFetch(`/score/${ticId}${qs}`, { timeoutMs: API.scoreTimeoutMs });
+  return mapScore(body);
+}
+
+function loadReliability() {
+  return apiFetch('/reliability');
+}
+
+/** CSV export URL matching the current filters, for the catalogue button. */
+function candidatesCsvUrl({ search, disposition, source } = {}) {
+  const p = new URLSearchParams();
+  if (search) p.set('search', search);
+  if (disposition && disposition !== 'All') p.set('disposition', disposition);
+  if (source && source !== 'All') p.set('source', source);
+  const qs = p.size ? `?${p}` : '';
+  return `${API.base}/candidates.csv${qs}`;
+}
+
+/** Catalogue-row ephemeris in the form /score wants, or {} when unusable.
+    Catalogue epochs are full BJD; the API speaks BTJD (BJD − 2457000). */
+function ephemerisFor(c) {
+  if (!c || !c.period || c.period <= 0 || !c.duration || c.duration <= 0) return {};
+  const opts = { periodDays: c.period, durationHours: c.duration };
+  if (c.epochBjd != null) {
+    opts.t0Btjd = c.epochBjd > 2440000 ? c.epochBjd - 2457000 : c.epochBjd;
+  }
+  return opts;
+}
+
+function loadModel() {
+  return apiFetch('/model');
+}
+
+function loadRuns() {
+  return apiFetch('/runs?limit=8');
+}
+
+/* ── hydration ────────────────────────────────────────────
+   Mutates SERVED and CANDIDATES in place before the first route() so every
+   page stays synchronous. Returns the notes the UI should show about what
+   could not be filled in, because the alternative — silently leaving mock
+   values on screen next to live ones — is the failure this whole module
+   exists to avoid.
+
+   Declared here but called from app.boot.js: SERVED and CANDIDATES live in
+   app.data.js, which is concatenated after this file, so the references
+   below only resolve once everything is parsed. That is fine for a function
+   body and would not be for top-level code. */
+async function hydrate() {
+  const notes = [];
+  const mode = await probeApi();
+  if (mode !== 'live') {
+    return { mode, notes: [`No API at ${API.base} — showing the prototype data set.`] };
+  }
+
+  const [model, reliability, catalogue, runs] = await Promise.allSettled([
+    loadModel(),
+    loadReliability(),
+    loadCandidates(),
+    loadRuns(),
+  ]);
+
+  if (model.status === 'fulfilled') {
+    const m = model.value;
+    const met = m.metrics || {};
+    SERVED.runId = String(m.run_id).slice(0, 8);
+    SERVED.modelVersion = m.model_version;
+    SERVED.promotedAt = (m.promoted_at || '').slice(0, 10);
+    SERVED.arch = `${m.n_folds || 5}-fold dual-view CNN ensemble · MC-dropout · Platt calibration`;
+    SERVED.metrics = met;
+
+    SERVED.noiseFloor = m.noise_floor || { auc: null, recall: null };
+    SERVED.nScored = m.n_scored || 0;
+    SERVED.nHighConfidence = m.n_high_confidence || 0;
+
+    const n = reliability.status === 'fulfilled' ? reliability.value.n_examples : null;
+    if (Array.isArray(m.per_mission) && m.per_mission.length) {
+      SERVED.missions = m.per_mission;
+    } else {
+      // The run evaluated no resolvable mission slice. One pooled card rather
+      // than three invented ones — see the endpoint docstring.
+      SERVED.missions = [{
+        mission: 'ALL MISSIONS', role: 'gating', evaluation: 'out-of-fold', n: n || 0,
+        auc: met.roc_auc ? met.roc_auc.mean : null, aucErr: met.roc_auc ? met.roc_auc.std : null,
+        recall: null, recallErr: null,
+        brier: met.brier ? met.brier.mean : null, brierErr: met.brier ? met.brier.std : null,
+        ece: met.ece ? met.ece.mean : null, eceErr: met.ece ? met.ece.std : null,
+      }];
+      notes.push('This run records no per-mission split, so metrics are pooled.');
+    }
+    GATING = SERVED.missions.find(x => x.role === 'gating') || SERVED.missions[0];
+  } else {
+    // The mock SERVED must not survive a live session: leaving three invented
+    // mission cards on screen because /model 404'd is worse than showing none,
+    // since everything around them is real and they would not read as mock.
+    SERVED.missions = [{
+      mission: 'ALL MISSIONS', role: 'gating', evaluation: 'out-of-fold', n: 0,
+      auc: null, aucErr: null, recall: null, recallErr: null,
+      brier: null, brierErr: null, ece: null, eceErr: null,
+    }];
+    SERVED.metrics = {};
+    SERVED.noiseFloor = { auc: null, recall: null };
+    SERVED.nScored = 0;
+    SERVED.nHighConfidence = 0;
+    GATING = SERVED.missions[0];
+    notes.push(`Model summary unavailable (${model.reason && model.reason.message}) — metrics shown as not measured.`);
+  }
+
+  if (reliability.status === 'fulfilled') {
+    SERVED.reliability = reliability.value;
+  } else {
+    notes.push('Reliability curve unavailable.');
+  }
+
+  if (runs.status === 'fulfilled' && Array.isArray(runs.value.runs) && runs.value.runs.length) {
+    // verdict and reason come back null: registry.json records only what is
+    // served, so nothing on disk says why an earlier run was rejected.
+    RUNS.length = 0;
+    RUNS.push(...runs.value.runs.map(r => ({
+      runId: r.short_id, date: r.date, auc: r.auc, aucErr: r.aucErr,
+      recall: null, brier: r.brier, status: r.status,
+      verdict: r.verdict, reason: r.reason,
+    })));
+  }
+
+  if (catalogue.status === 'fulfilled') {
+    CANDIDATES.length = 0;
+    CANDIDATES.push(...catalogue.value.rows);
+    SERVED.catalogueTotal = catalogue.value.total;
+    notes.push('Per-row P(planet) is not on the catalogue contract — open a candidate to score it.');
+  } else {
+    notes.push(`Catalogue unavailable: ${catalogue.reason && catalogue.reason.message}`);
+  }
+
+  return { mode, notes };
+}

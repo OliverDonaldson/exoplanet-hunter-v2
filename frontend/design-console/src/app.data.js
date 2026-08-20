@@ -54,9 +54,9 @@ const SERVED = {
       auc:0.8480, aucErr:0.0210, recall:0.4030, recallErr:0.0610, brier:0.1420, brierErr:0.0090, ece:0.0410, eceErr:0.0070 },
   ],
 };
-const GATING = SERVED.missions.find(m => m.role === 'gating');
+let GATING = SERVED.missions.find(m => m.role === 'gating');
 
-const RUNS = [
+let RUNS = [
   { runId:'ca906040', date:'2026-07-19', auc:0.9100, aucErr:0.0070, recall:0.6120, brier:0.0871, status:'active', verdict:'PROMOTE',
     reason:'TESS AUC +0.0180 over champion — 2.6× the ±0.0070 noise floor. Brier and ECE not degraded.' },
   { runId:'7b1e4c23', date:'2026-07-02', auc:0.8960, aucErr:0.0071, recall:0.5980, brier:0.0903, status:'archived', verdict:'REJECT',
@@ -190,6 +190,21 @@ function branchEvidence(c) {
    MODEL AGREEMENT — per_fold + prob_std from ScoreResponse
    ═══════════════════════════════════════════════════════════ */
 function foldAgreement(c) {
+  // A live score carries the ensemble's actual members and its MC-dropout
+  // sigma. The simulation below draws plausible ones from the calibrated
+  // score; using it while a real score is attached would put invented fold
+  // dots under a real mean.
+  if (c.live && c.live.perFold && c.live.perFold.length) {
+    const folds = c.live.perFold.map(f => ({ fold: f.fold, score: f.prob }));
+    const scores = folds.map(f => f.score);
+    const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
+    const foldStd = Math.sqrt(scores.reduce((s, v) => s + (v - mean) ** 2, 0) / scores.length);
+    return {
+      folds, foldStd, probStd: c.live.probStd,
+      range: [Math.min(...scores), Math.max(...scores)],
+      mean,
+    };
+  }
   const r = rngFor(c.id + '|folds');
   const ambiguity = 1 - Math.abs(c.prob - 0.5) * 2;
   const spread = 0.006 + ambiguity * 0.075;
@@ -247,7 +262,37 @@ const DIAGNOSTICS = [
     fail:'Many predicted transits fall in data gaps' },
 ];
 
+/* The API returns five diagnostic suites on /score. Three map onto entries in
+   DIAGNOSTICS; the other four entries (ghost, MES, bootstrap, sky offset) have
+   no field on the score contract and come back unmeasured rather than
+   simulated. That is the same three-state rule the panel already follows, now
+   driven by what the service actually returned. */
+function liveDiagnostics(c) {
+  const d = c.live.diagnostics || {};
+  const out = DIAGNOSTICS.map(spec => {
+    if (spec.key === 'centroid' && d.centroid) {
+      return { ...spec, state: d.centroid.suspicious ? 'fail' : 'pass',
+               value: d.centroid.centroid_snr,
+               threshold: `< ${d.centroid.beb_threshold_sigma.toFixed(1)} σ` };
+    }
+    if (spec.key === 'oddeven' && d.oddEven) {
+      return { ...spec, state: d.oddEven.depth_diff_sigma > 3 ? 'fail' : 'pass',
+               value: d.oddEven.depth_diff_sigma, unit: 'σ', dp: 2,
+               field: 'odd_even depth difference', threshold: '< 3.0 σ' };
+    }
+    if (spec.key === 'secondary' && d.secondary) {
+      return { ...spec, state: d.secondary.suspicious ? 'fail' : 'pass',
+               value: d.secondary.secondary_significance, unit: 'σ', dp: 2,
+               threshold: `< ${d.secondary.fa_threshold.toFixed(1)} σ FA` };
+    }
+    return { ...spec, state: 'unmeasured' };
+  });
+
+  return out;
+}
+
 function diagnosticsFor(c) {
+  if (c.live) return liveDiagnostics(c);
   const r = rngFor(c.id + '|diag');
   const noReport = NO_DV_REPORT.has(c.id);
   const healthy = c.prob >= 0.5;
@@ -274,6 +319,7 @@ function diagnosticsFor(c) {
 
 function diagValue(d) {
   if (d.state === 'unmeasured') return 'not measured';
+  if (d.value == null || !Number.isFinite(d.value)) return 'not measured';
   if (d.key === 'bootstrap') return d.value.toExponential(1);
   if (d.key === 'ghost') return `${d.value.toFixed(2)} / ${(d.value * 0.75).toFixed(2)}`;
   return d.value.toFixed(d.dp) + (d.unit ? ` ${d.unit}` : '');
@@ -300,14 +346,33 @@ function followUp(c) {
   const tsmCut = rp < 1.5 ? 12 : rp < 2.75 ? 92 : rp < 4 ? 84 : 96;
   const hz = { inner: 0.95, outer: 1.67 };
 
-  return { rp, a, teq, insol, tsm, esm, tsmCut, hz,
-           inHz: a >= hz.inner && a <= hz.outer, tsmPass: tsm >= tsmCut, esmPass: esm >= 7.5 };
+  // The archive publishes TSM/ESM for TOIs; those are computed from real J/K
+  // magnitudes and a real stellar radius, where the estimates above assume
+  // R* = 1 R☉, M* = 1 M☉ and NIR magnitudes proxied off T-mag. Prefer the
+  // measured value wherever the catalogue carries one, and keep the estimate
+  // only as a fallback — CTOIs have no TSM/ESM on the contract.
+  const outTsm = Number.isFinite(c.tsm) ? c.tsm : (Number.isFinite(tsm) ? tsm : null);
+  const outEsm = Number.isFinite(c.esm) ? c.esm : (Number.isFinite(esm) ? esm : null);
+  const outTeq = Number.isFinite(c.teqK) ? c.teqK : (Number.isFinite(teq) ? teq : null);
+  const outRp  = Number.isFinite(c.radiusRe) ? c.radiusRe : (Number.isFinite(rp) ? rp : null);
+
+  return { rp: outRp, a, teq: outTeq, insol, tsm: outTsm, esm: outEsm, tsmCut, hz,
+           estimated: !Number.isFinite(c.tsm),
+           inHz: a >= hz.inner && a <= hz.outer,
+           tsmPass: outTsm != null && outTsm >= tsmCut,
+           esmPass: outEsm != null && outEsm >= 7.5 };
 }
 
-CANDIDATES.forEach(c => {
-  const f = followUp(c);
-  c.tsm = f.tsm; c.esm = f.esm; c.teqK = f.teq; c.rp = f.rp;
-});
+/* Ran at module level against the mock array. Now a function, called after
+   hydrate(), so live rows are derived from live values instead of having
+   mock-derived ones left on them. */
+function deriveFollowUp() {
+  CANDIDATES.forEach(c => {
+    const f = followUp(c);
+    c.tsm = f.tsm; c.esm = f.esm; c.teqK = f.teq; c.rp = f.rp;
+  });
+}
+deriveFollowUp();
 
 /* ── components/StarField.tsx ────────────────────────────── */
 (function starField() {
@@ -424,13 +489,29 @@ function mountOrbitalDiagram(size = 460) {
   requestAnimationFrame(draw);
 }
 
-/* ── ScoringTicker ───────────────────────────────────────── */
-(function scoringTicker() {
-  const feed = CANDIDATES.map(c =>
-    `<div class="item"><b>${c.id}</b><em>·</em><i style="color:${probColor(c.prob)}">P=${c.prob.toFixed(3)}</i><em>·</em><span>${c.period.toFixed(1)}d</span><em>·</em><span>${c.source}</span><em>·</em><span>SNR ${c.snr.toFixed(1)}</span></div>`
-  ).join('');
-  document.getElementById('ticker-track').innerHTML = feed + feed;
-})();
+/* ── ScoringTicker ─────────────────────────────────────────
+   A function called after hydrate(), not an IIFE. As an IIFE it ran at parse
+   time and pinned the mock array into the strip, so a live session scrolled
+   twenty fabricated scores under a panel reporting the real served model.
+
+   P= is rendered only where a score exists. Live catalogue rows carry
+   prob: null — /candidates has no score column — so the strip shows the
+   catalogue facts it does have rather than a number it does not. */
+function mountTicker() {
+  const el = document.getElementById('ticker-track');
+  if (!el || !CANDIDATES.length) return;
+  const cell = c => {
+    const bits = [`<b>${esc(c.id)}</b>`];
+    if (c.prob != null) bits.push(`<i style="color:${probColor(c.prob)}">P=${c.prob.toFixed(3)}</i>`);
+    else if (c.disposition && c.disposition !== '—') bits.push(`<i style="color:${getDispositionColor(c.disposition)}">${esc(c.disposition)}</i>`);
+    if (c.period) bits.push(`<span>${c.period.toFixed(1)}d</span>`);
+    if (c.depth) bits.push(`<span>${(c.depth * 1e6).toFixed(0)} ppm</span>`);
+    if (c.snr) bits.push(`<span>SNR ${c.snr.toFixed(1)}</span>`);
+    return `<div class="item">${bits.join('<em>·</em>')}</div>`;
+  };
+  const feed = CANDIDATES.slice(0, 40).map(cell).join('');
+  el.innerHTML = feed + feed;
+}
 
 /* ── charts ──────────────────────────────────────────────── */
 const AXIS = '#8A8FA8';
@@ -548,7 +629,7 @@ function renderChart(container, cfg) {
 const NAV_LINKS = [
   { label:'Mission',   href:'#/' },
   { label:'Catalogue', href:'#/catalogue' },
-  { label:'Vetting',   href:'#/vetting/TOI-4328.01' },
+  { label:'Vetting',   href:'#/vetting' },
   { label:'Model',     href:'#/model' },
   { label:'Upload',    href:'#/upload' },
 ];
@@ -569,6 +650,19 @@ function bindNavButtons() {
   });
 }
 
+/* Which candidate "Vetting" opens with no id in the hash.
+
+   Prefers a row that carries a published period and epoch: those score against
+   the catalogue ephemeris in seconds, where a row without one triggers a BLS
+   period search first and takes minutes. Falls back to the first row, then to
+   the prototype id when there is no catalogue at all. */
+function defaultVettingId() {
+  const usable = CANDIDATES.find(c => c.period && c.duration && c.epochBjd != null)
+    || CANDIDATES.find(c => c.period && c.duration)
+    || CANDIDATES[0];
+  return usable ? usable.id : 'TOI-4328.01';
+}
+
 function route() {
   clearCharts();
   stopHealth();
@@ -577,7 +671,7 @@ function route() {
   window.scrollTo(0, 0);
   if (path === '/catalogue') return Catalogue();
   if (path.startsWith('/vetting/')) return Vetting(decodeURIComponent(path.slice('/vetting/'.length)));
-  if (path === '/vetting') return Vetting('TOI-4328.01');
+  if (path === '/vetting') return Vetting(defaultVettingId());
   if (path === '/model') return ModelPerformance();
   if (path === '/upload') return Upload();
   return Home();
