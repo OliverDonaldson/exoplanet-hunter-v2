@@ -316,7 +316,7 @@ function Vetting(candidateId) {
     }
     const lo = Math.max(0, Math.min(agree.range[0], c.prob - agree.probStd) - 0.05);
     const hi = Math.min(1, Math.max(agree.range[1], c.prob + agree.probStd) + 0.05);
-    const pct = v => ((v - lo) / (hi - lo)) * 100;
+    const pct = v => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
     const verdict = agree.foldStd < 0.02
       ? 'The five fold models agree closely — the ensemble score is well determined.'
       : agree.foldStd < 0.05
@@ -337,14 +337,17 @@ function Vetting(candidateId) {
           <div class="fold-band" style="left:${pct(c.prob - agree.probStd)}%;width:${pct(c.prob + agree.probStd) - pct(c.prob - agree.probStd)}%"></div>
           <div class="fold-mean" style="left:${pct(c.prob)}%"></div>
           ${agree.folds.map(f => `<div class="fold-dot" style="left:${pct(f.score)}%" title="fold ${f.fold} · ${f.score.toFixed(3)}"></div>`).join('')}
-          <div class="fold-tick" style="left:0%">${lo.toFixed(2)}</div>
+          <!-- The end ticks sit on the axis ends, and .fold-tick centres itself
+               on its position, so each hung half its width outside the panel.
+               Anchored to their own edge instead; the middle one still centres. -->
+          <div class="fold-tick" style="left:0%;transform:translateX(0)">${lo.toFixed(2)}</div>
           <div class="fold-tick" style="left:50%">${((lo + hi) / 2).toFixed(2)}</div>
-          <div class="fold-tick" style="left:100%">${hi.toFixed(2)}</div>
+          <div class="fold-tick" style="left:100%;transform:translateX(-100%)">${hi.toFixed(2)}</div>
         </div>
 
         <div style="display:flex;gap:1.75rem;flex-wrap:wrap;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.06)">
-          <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:11px;height:11px;border-radius:50%;border:1px solid #4DFFD2"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">per_fold score</span></div>
-          <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:14px;height:2px;background:#4DFFD2"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">ensemble mean</span></div>
+          <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:13px;height:13px;border-radius:50%;border:1px solid #4DFFD2;background:rgba(5,6,8,0.9)"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">per_fold score</span></div>
+          <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:1px;height:14px;background:#4DFFD2;box-shadow:0 0 8px rgba(77,255,210,0.7);margin:0 6px"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">ensemble mean</span></div>
           <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:14px;height:10px;background:rgba(77,255,210,0.12);border-left:1px solid rgba(77,255,210,0.3);border-right:1px solid rgba(77,255,210,0.3)"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">± prob_std</span></div>
         </div>
       </div>
@@ -648,7 +651,7 @@ function ModelPerformance() {
                 <tr class="data-row" style="cursor:default">
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:${v.status === 'active' ? '#4DFFD2' : '#8A8FA8'}">${v.runId}</span>${v.status === 'active' ? '<div class="tag-chip tag-oof" style="display:inline-block;margin-left:0.4rem">served</div>' : ''}</td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${v.date || '—'}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.auc) ? v.auc.toFixed(4) : '—'} <span style="color:#8A8FA8">±${has(v.aucErr) ? v.aucErr.toFixed(4) : '—'}</span></span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.auc) ? v.auc.toFixed(4) : '—'} ${has(v.aucErr) ? `<span style="color:#8A8FA8">±${v.aucErr.toFixed(4)}</span>` : ''}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.recall) ? v.recall.toFixed(4) : '—'}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.brier) ? v.brier.toFixed(4) : '—'}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top">${v.verdict ? `<span class="tag-chip ${v.verdict === 'PROMOTE' ? 'tag-promote' : 'tag-reject'}">${v.verdict}</span>` : `<span style="color:#8A8FA8;font-family:'JetBrains Mono';font-size:0.65rem">—</span>`}</td>
@@ -771,11 +774,11 @@ function Upload() {
   let timer = null, ticker = null;
 
   const STAGES = [
-    { label:'Resolving target in the TIC',      to:8,   ms:600 },
-    { label:'Downloading photometry from MAST', to:56,  ms:3400 },
-    { label:'Detrending and phase-folding',     to:72,  ms:1100 },
-    { label:'Scoring 11-branch ensemble',       to:91,  ms:1500 },
-    { label:'Platt calibration · MC-dropout',   to:100, ms:900 },
+    { label:'Resolving target in the TIC',      short:'Resolve',    to:8,   ms:600 },
+    { label:'Downloading photometry from MAST', short:'Download',   to:56,  ms:3400 },
+    { label:'Detrending and phase-folding',     short:'Detrend',    to:72,  ms:1100 },
+    { label:'Scoring 11-branch ensemble',       short:'Score',      to:91,  ms:1500 },
+    { label:'Platt calibration · MC-dropout',   short:'Calibrate',  to:100, ms:900 },
   ];
 
   app.innerHTML = `
@@ -784,7 +787,7 @@ function Upload() {
 
       <div style="margin-bottom:2.5rem">
         <div class="section-label" style="margin-bottom:0.75rem">Data Submission</div>
-        <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">NAME A TARGET.</h1>
+        <h1 style="font-family:'Ailerons';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">NAME A TARGET.</h1>
         <h2 style="font-family:'Ailerons';font-size:clamp(1.2rem, 2.5vw, 2rem);font-weight:300;letter-spacing:-0.02em;color:rgba(240,238,232,0.25);line-height:1.0;margin-bottom:0.6rem">GET A CALIBRATED ANSWER.</h2>
         <p style="font-family:'Inter';font-size:0.85rem;color:rgba(240,238,232,0.45);line-height:1.7">
           Give the pipeline a TIC or KIC identifier. It pulls the photometry from MAST, rebuilds the eleven input views, and scores the target against the promoted model.
@@ -897,7 +900,7 @@ function Upload() {
             </div>
             <div style="display:flex;gap:1rem;align-items:baseline">
               <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8">${state.elapsed.toFixed(1)}s elapsed</span>
-              <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;font-variant-numeric:tabular-nums">${state.awaiting ? 'waiting on MAST' : state.progress + '%'}</span>
+              <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;font-variant-numeric:tabular-nums">${state.awaiting ? 'waiting on MAST' : `stage ${state.stage + 1} of ${STAGES.length}`}</span>
               <button class="btn-ghost" id="up-cancel" style="font-size:0.6rem;padding:0.3rem 0.7rem">Cancel</button>
             </div>
           </div>
@@ -909,7 +912,7 @@ function Upload() {
               const done = i < state.stage, now = i === state.stage;
               return `<div style="display:flex;align-items:center;gap:0.4rem">
                 <div style="width:6px;height:6px;border-radius:50%;background:${done || now ? '#4DFFD2' : 'rgba(255,255,255,0.15)'};opacity:${now ? 1 : done ? 0.6 : 1};box-shadow:${done || now ? '0 0 6px rgba(77,255,210,0.6)' : 'none'}"></div>
-                <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${done || now ? '#4DFFD2' : '#8A8FA8'}">${esc(s.label.split(' ').slice(0, 2).join(' '))}</span>
+                <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${done || now ? '#4DFFD2' : '#8A8FA8'}">${esc(s.short)}</span>
               </div>`;
             }).join('')}
           </div>
@@ -1117,7 +1120,7 @@ function Discovery() {
   <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
     <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0">
       <div class="section-label" style="margin-bottom:0.75rem">Discovery</div>
-      <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">SEARCH A LIGHT CURVE.</h1>
+      <h1 style="font-family:'Ailerons';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">SEARCH A LIGHT CURVE.</h1>
       <div style="font-family:'Ailerons';font-size:clamp(1.4rem, 2.6vw, 2.2rem);font-weight:600;color:rgba(240,238,232,0.30);letter-spacing:-0.02em;margin-bottom:1.25rem">FIND THE SIGNAL YOURSELF</div>
       <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin-bottom:2.5rem">
         Every other page on this console vets a signal somebody else detected — a
