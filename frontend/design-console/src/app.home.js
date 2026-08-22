@@ -8,14 +8,32 @@
    their labels, their order and their counters are exactly as designed — only
    the values behind them now come from /model, so a promotion moves them. */
 const NOT_MEASURED = '—';
+
+/* "63" was a constant in this file with no endpoint behind it and no date on
+   it, and TESS has flown well past it. How many sectors the mission has run is
+   not something this console can measure; how many distinct sectors the rows it
+   serves were observed in is. That is a different quantity, so the tile says
+   which one it is rather than quietly swapping one for the other. */
+function tessSectorCount() {
+  const seen = new Set();
+  CANDIDATES.forEach(c => String(c.sectors || '').split(/[^0-9]+/).forEach(n => {
+    if (n) seen.add(Number(n));
+  }));
+  return seen.size;
+}
+
 function missionStats() {
   const g = GATING || {};
   const kepler = (SERVED.missions || []).find(m => m.mission === 'Kepler');
+  const sectors = tessSectorCount();
   return [
-    { label:'Candidates Scored', value:(SERVED.nScored || 5388).toLocaleString(),
-      accent:false, count:SERVED.nScored || 5388, dur:2000 },
-    { label:'High Confidence',   value:(SERVED.nHighConfidence || 146).toLocaleString(),
-      accent:true,  count:SERVED.nHighConfidence || 146,  dur:1500 },
+    // `|| 5388` and `|| 146` used to stand behind these two. A run that
+    // reported neither then printed the prototype's figures in the same type
+    // as the four measured tiles beside them.
+    { label:'Candidates Scored', value:SERVED.nScored ? SERVED.nScored.toLocaleString() : NOT_MEASURED,
+      accent:false, count:SERVED.nScored || 0, dur:2000 },
+    { label:'High Confidence',   value:SERVED.nHighConfidence ? SERVED.nHighConfidence.toLocaleString() : NOT_MEASURED,
+      accent:true,  count:SERVED.nHighConfidence || 0,  dur:1500 },
     // the pooled 0.955 is gone: the gating mission is the number that decides promotion
     { label:`${g.mission || 'TESS'} ROC-AUC`,
       value: has(g.auc) ? g.auc.toFixed(4) : NOT_MEASURED, accent:false,
@@ -23,18 +41,26 @@ function missionStats() {
     { label:`${g.mission || 'TESS'} Recall @1% FPR`,
       value: has(g.recall) ? g.recall.toFixed(4) : NOT_MEASURED, accent:false,
       sub: has(g.recallErr) ? `±${g.recallErr.toFixed(4)} · shortlist criterion` : 'not measured for this run' },
-    { label:'TESS Sectors',      value:'63',    accent:false, count:63,   dur:1200 },
+    { label:'TESS Sectors', value: sectors ? sectors.toLocaleString() : NOT_MEASURED,
+      accent:false, count: sectors || 0, dur:1200,
+      sub: sectors ? 'distinct across the served catalogue' : 'no sector column on these rows' },
     // 9,564 is the full public KOI catalogue; this is what was actually trained on
-    { label:'Kepler KOIs Trained', value:(kepler ? kepler.n : 2500).toLocaleString(),
-      accent:false, count: kepler ? kepler.n : 2500, dur:2200 },
+    { label:'Kepler KOIs Trained', value:kepler ? kepler.n.toLocaleString() : NOT_MEASURED,
+      accent:false, count: kepler ? kepler.n : 0, dur:2200 },
   ];
 }
 
-const FLOATING_CANDIDATES = [
-  { id:'TOI-4328.01',  period:'P=703.8d', prob:'0.989', x:'62%', y:'22%' },
-  { id:'TOI-4565.01',  period:'P=412.1d', prob:'0.983', x:'52%', y:'52%' },
-  { id:'TIC 77175217', period:'P=88.4d',  prob:'0.912', x:'78%', y:'42%' },
-];
+/* Three notes drift over the hero. Their positions are design; their contents
+   were a hardcoded list, which put three invented candidates on the first
+   screen of a live console. The positions stay, the rows come from the
+   catalogue, and a position with no row behind it renders nothing. */
+const HERO_NOTE_POSITIONS = [{ x:'62%', y:'22%' }, { x:'52%', y:'52%' }, { x:'78%', y:'42%' }];
+const heroNotes = () => topScored(HERO_NOTE_POSITIONS.length).map((c, i) => ({
+  id: c.id,
+  period: c.period ? `P=${c.period.toFixed(1)}d` : 'period not published',
+  prob: c.prob.toFixed(3),
+  ...HERO_NOTE_POSITIONS[i],
+}));
 
 const PIPELINE = [
   { step:'01', title:'Catalog Refresh',  desc:'Automated ingestion from NASA ExoFOP, MAST, and Kepler archive. Nightly delta sync.' },
@@ -53,12 +79,12 @@ function Home() {
       <div style="position:absolute;inset:0;background:linear-gradient(to right, rgba(5,6,8,0.95) 40%, rgba(5,6,8,0.4) 70%, rgba(5,6,8,0.6) 100%)"></div>
       <div style="position:absolute;bottom:0;left:0;right:0;height:200px;background:linear-gradient(to bottom, transparent, #050608)"></div>
 
-      ${FLOATING_CANDIDATES.map((c, i) => `
+      ${heroNotes().map((c, i) => `
         <div class="rv hero-note" style="position:absolute;left:${c.x};top:${c.y};pointer-events:none;transition:opacity 1s ease ${0.8 + i * 0.2}s">
           <div style="display:flex;align-items:center;gap:0.4rem">
             <div style="width:6px;height:6px;border-radius:50%;border:1px solid #4DFFD2"></div>
             <div>
-              <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:rgba(240,238,232,0.8)">${c.id}</div>
+              <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:rgba(240,238,232,0.8)">${esc(c.id)}</div>
               <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:rgba(138,143,168,0.7)">${c.period} · <span style="color:#4DFFD2">${c.prob}</span></div>
             </div>
           </div>
@@ -300,7 +326,7 @@ function Catalogue() {
         </span>
       </div>
 
-      <div style="overflow-x:auto;border:1px solid rgba(255,255,255,0.08)">
+      <div data-fit-table="catalogue" style="overflow-x:auto;border:1px solid rgba(255,255,255,0.08)">
         <table style="width:100%;border-collapse:collapse;min-width:1180px">
           <thead><tr id="cat-head" style="background:rgba(255,255,255,0.02)"></tr></thead>
           <tbody id="cat-body"></tbody>
@@ -365,6 +391,9 @@ function Catalogue() {
     bodyEl.querySelectorAll('tr').forEach(tr => tr.addEventListener('click', () => {
       location.hash = '#/vetting/' + encodeURIComponent(tr.dataset.id);
     }));
+    // filtering and sorting change the widest cell in several columns, so the
+    // fit is measured again rather than kept from the first paint
+    fitTables();
   };
 
   const paintChips = () => {

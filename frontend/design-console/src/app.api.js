@@ -67,14 +67,31 @@ async function apiFetch(path, { timeoutMs = API.timeoutMs, signal } = {}) {
 
 /* Decide live vs mock once, on the cheapest endpoint. Anything other than a
    clean 200 — offline, CORS, 404, timeout — means mock, because a console that
-   half-loads is worse than one that is honestly a prototype. */
+   half-loads is worse than one that is honestly a prototype.
+
+   fly.toml suspends the machine when it is idle, so the common first request of
+   the day pays a resume before it answers; at a single 4 s attempt that resume
+   read as "no service" and the console then quietly served prototype data for
+   the rest of the session.
+
+   So a slow first attempt is retried once — but only when it was slow. A
+   deadline abort means something is there and taking its time, which is what a
+   resume looks like; any other rejection is a refused connection, a CORS block
+   or a bad host, and none of those get better on a second go. That keeps the
+   suspended-machine case alive without making the offline case, which is how
+   this file opens from disk, sit through two full timeouts before it renders. */
 async function probeApi() {
-  try {
-    API.health = await apiFetch('/healthz', { timeoutMs: 4000 });
-    API.mode = 'live';
-  } catch (e) {
-    API.mode = 'mock';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      API.health = await apiFetch('/healthz', { timeoutMs: 8000 });
+      API.mode = 'live';
+      return API.mode;
+    } catch (e) {
+      API.probeError = e.message;
+      if (e.name !== 'AbortError') break;
+    }
   }
+  API.mode = 'mock';
   return API.mode;
 }
 
@@ -120,6 +137,17 @@ function mapCandidate(row) {
   };
 }
 
+/** How much of a binned view actually carries data. `flux` is null in a phase
+    bin no cadence landed in, and the count of those is the one honest measure
+    of coverage the contract offers — the pipeline panel reports it rather than
+    implying every bin was observed. */
+function viewCoverage(v) {
+  if (!v || !Array.isArray(v.phase)) return null;
+  const total = v.phase.length;
+  const filled = (v.flux || []).filter(f => has(f) && Number.isFinite(f)).length;
+  return { total, filled, span: total ? Math.abs(v.phase[0]) : null };
+}
+
 /** ScoreResponse → what the Vetting page needs, with API views preserved. */
 function mapScore(s) {
   return {
@@ -139,6 +167,16 @@ function mapScore(s) {
       even: s.even_view,
       centroidTrack: s.centroid_track,
       periodogram: s.periodogram,
+    },
+    coverage: {
+      global: viewCoverage(s.global_view),
+      local: viewCoverage(s.local_view),
+      odd: viewCoverage(s.odd_view),
+      even: viewCoverage(s.even_view),
+      centroidTrack: s.centroid_track ? { total: s.centroid_track.phase.length,
+        filled: (s.centroid_track.offset_pixels || []).filter(f => has(f) && Number.isFinite(f)).length } : null,
+      periodogram: s.periodogram ? { total: s.periodogram.period_days.length,
+        bestPeriodDays: s.periodogram.best_period_days } : null,
     },
     diagnostics: {
       centroid: s.centroid,
@@ -229,7 +267,7 @@ async function hydrate() {
   const notes = [];
   const mode = await probeApi();
   if (mode !== 'live') {
-    return { mode, notes: [`No API at ${API.base} — showing the prototype data set.`] };
+    return { mode, notes: [`No API at ${API.base}${API.probeError ? ` (${API.probeError})` : ''} — showing the prototype data set.`] };
   }
 
   const [model, reliability, catalogue, runs] = await Promise.allSettled([
@@ -291,15 +329,23 @@ async function hydrate() {
     notes.push('Reliability curve unavailable.');
   }
 
-  if (runs.status === 'fulfilled' && Array.isArray(runs.value.runs) && runs.value.runs.length) {
+  // The prototype's run table must not survive into a live session, so RUNS is
+  // emptied whichever way /runs goes. `recall` used to be pinned to null here
+  // while the endpoint was returning one, which showed a measured figure as
+  // not measured — the same defect as inventing one, pointed the other way.
+  if (runs.status === 'fulfilled' && Array.isArray(runs.value.runs)) {
     // verdict and reason come back null: registry.json records only what is
     // served, so nothing on disk says why an earlier run was rejected.
     RUNS.length = 0;
     RUNS.push(...runs.value.runs.map(r => ({
       runId: r.short_id, date: r.date, auc: r.auc, aucErr: r.aucErr,
-      recall: null, brier: r.brier, status: r.status,
+      recall: r.recall ?? null, brier: r.brier, status: r.status,
       verdict: r.verdict, reason: r.reason,
     })));
+    if (!RUNS.length) notes.push('The service reports no runs.');
+  } else {
+    RUNS.length = 0;
+    notes.push(`Run history unavailable${runs.reason && runs.reason.message ? `: ${runs.reason.message}` : ''}.`);
   }
 
   if (catalogue.status === 'fulfilled') {
@@ -308,6 +354,10 @@ async function hydrate() {
     SERVED.catalogueTotal = catalogue.value.total;
     notes.push('Per-row P(planet) is not on the catalogue contract — open a candidate to score it.');
   } else {
+    // Same rule as the run table: eleven prototype rows rendered beside a live
+    // model panel would not read as prototype rows.
+    CANDIDATES.length = 0;
+    SERVED.catalogueTotal = 0;
     notes.push(`Catalogue unavailable: ${catalogue.reason && catalogue.reason.message}`);
   }
 

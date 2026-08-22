@@ -5,12 +5,14 @@
    Part 1/2 — data model, shared components, Home, Catalogue.
    ═══════════════════════════════════════════════════════════ */
 
-const { animate, createTimeline, stagger, svg, text, utils, engine } = ANIME;
+const { animate, createTimeline, stagger, svg, text, utils } = ANIME;
 
-// anime.js pauses its engine while the document is hidden. Right default for
-// decorative motion, but it would park the boot overlay in front of the console
-// for anyone opening this in a background tab.
-engine.pauseOnDocumentHidden = false;
+// anime.js pauses its engine while the document is hidden, and that default is
+// kept. Turning it off does not keep motion running in a background tab —
+// requestAnimationFrame does not fire there either way — it only skips the
+// resetTime() that engine.resume() does, so the first frame back applies the
+// whole hidden interval at once and every animation snaps to its end. The boot
+// overlay's own 9 s failsafe is what stops it parking in front of the console.
 
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -18,6 +20,11 @@ const signed = (v, d = 2) => {
   const r = +v.toFixed(d);                         // avoid rendering "−0.00"
   return (r >= 0 ? '+' : '−') + Math.abs(r).toFixed(d);
 };
+
+/* One rendering for "there is no number here", so a pending fetch, a failed
+   one and an endpoint that carries no such field all read alike. */
+const pendingPanel = msg =>
+  `<div style="padding:3rem;text-align:center;font-family:'JetBrains Mono';font-size:0.75rem;color:#8A8FA8">${msg}</div>`;
 
 /* deterministic per-candidate randomness — evidence must not reshuffle on every render */
 function rngFor(seed) {
@@ -205,6 +212,12 @@ function foldAgreement(c) {
       mean,
     };
   }
+  // A live service and no attached score means the members are simply not
+  // measured for this row — /candidates has no per-fold column. Returning the
+  // simulation here is the exact failure the comment above describes, because
+  // the catalogue's bulk mean is already a real number on the same panel.
+  if (API.mode === 'live') return null;
+
   const r = rngFor(c.id + '|folds');
   const ambiguity = 1 - Math.abs(c.prob - 0.5) * 2;
   const spread = 0.006 + ambiguity * 0.075;
@@ -293,6 +306,10 @@ function liveDiagnostics(c) {
 
 function diagnosticsFor(c) {
   if (c.live) return liveDiagnostics(c);
+  // The suites come back on /score and nowhere else, so before a score lands
+  // every one of them is unmeasured. The panel already renders that state, and
+  // already says that unmeasured is not the same as passing.
+  if (API.mode === 'live') return DIAGNOSTICS.map(d => ({ ...d, state: 'unmeasured' }));
   const r = rngFor(c.id + '|diag');
   const noReport = NO_DV_REPORT.has(c.id);
   const healthy = c.prob >= 0.5;
@@ -427,22 +444,34 @@ deriveFollowUp();
   requestAnimationFrame(draw);
 })();
 
-/* ── components/OrbitalDiagram.tsx ───────────────────────── */
+/* ── components/OrbitalDiagram.tsx ─────────────────────────
+   The four orbits are decoration and their geometry is fixed. What they are
+   labelled with is not: the names and scores came from a hardcoded list that
+   outlived the prototype, so a live console captioned real orbits with four
+   invented candidates. They now name the highest-scoring rows the catalogue
+   actually returned, and an orbit with no row behind it carries no label. */
 const ORBIT_PLANETS = [
-  { radius: 60,  size: 3,   color:'#4DFFD2', speed:180, startAngle:45,  label:'TOI-1843.01', prob:'0.976' },
-  { radius: 100, size: 4,   color:'#F5A623', speed:72,  startAngle:120, label:'TOI-4328.01', prob:'0.989' },
-  { radius: 148, size: 3.5, color:'#4DFFD2', speed:36,  startAngle:200, label:'TOI-4565.01', prob:'0.983' },
-  { radius: 200, size: 2.5, color:'#8A8FA8', speed:18,  startAngle:310, label:'KOI-7016.01', prob:'0.971' },
+  { radius: 60,  size: 3,   color:'#4DFFD2', speed:180, startAngle:45  },
+  { radius: 100, size: 4,   color:'#F5A623', speed:72,  startAngle:120 },
+  { radius: 148, size: 3.5, color:'#4DFFD2', speed:36,  startAngle:200 },
+  { radius: 200, size: 2.5, color:'#8A8FA8', speed:18,  startAngle:310 },
 ];
 
+/** The top scored rows, one per orbit, in catalogue order. */
+const topScored = n => CANDIDATES.filter(c => has(c.prob)).slice(0, n);
+
 function orbitalDiagramHTML(size = 460) {
-  const labels = ORBIT_PLANETS.map(p => {
+  const named = topScored(ORBIT_PLANETS.length);
+  const labels = ORBIT_PLANETS.map((spec, i) => {
+    const row = named[i];
+    if (!row) return '';
+    const p = { ...spec, label: row.id, prob: row.prob.toFixed(3) };
     const a = (p.startAngle + 30) * Math.PI / 180;
     const tx = Math.cos(a) * (p.radius + 20), ty = Math.sin(a) * (p.radius + 20);
     return `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) translate(${tx}px,${ty}px);pointer-events:none;white-space:nowrap">
       <div style="display:flex;align-items:center;gap:0.3rem">
         <div style="width:5px;height:5px;border-radius:50%;border:1px solid ${p.color};background:transparent"></div>
-        <span style="font-family:'JetBrains Mono';font-size:0.6rem;color:rgba(240,238,232,0.6)">${p.label}</span>
+        <span style="font-family:'JetBrains Mono';font-size:0.6rem;color:rgba(240,238,232,0.6)">${esc(p.label)}</span>
         <span style="font-family:'JetBrains Mono';font-size:0.6rem;color:${p.color}">${p.prob}</span>
       </div></div>`;
   }).join('');
@@ -644,6 +673,72 @@ function renderNav(path) {
   }).join('');
 }
 
+/* ── mobile nav ───────────────────────────────────────────
+   Below 900 px the links live in a panel. The CSS owns the appearance; this
+   owns the one piece of state, and every way out of it — a link, a route
+   change, Escape, the scrim, or the viewport growing back past the
+   breakpoint — closes it, so the panel can never be left open over a page
+   that no longer has a button to shut it. */
+(function mountNavMenu() {
+  const nav = document.getElementById('nav');
+  const toggle = document.getElementById('nav-toggle');
+  const scrim = document.getElementById('nav-scrim');
+  const links = document.getElementById('nav-links');
+  const wide = window.matchMedia('(min-width: 901px)');
+
+  const set = open => {
+    nav.classList.toggle('menu-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  };
+  const close = () => set(false);
+
+  toggle.addEventListener('click', () => set(!nav.classList.contains('menu-open')));
+  scrim.addEventListener('click', close);
+  links.addEventListener('click', e => { if (e.target.closest('a')) close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  wide.addEventListener('change', e => { if (e.matches) close(); });
+  window.addEventListener('hashchange', close);
+})();
+
+/* ── wide tables on narrow screens ────────────────────────
+   A fourteen-column comparison reflowed to one column per row is fourteen
+   unrelated lines, which is not what a catalogue is for — so the table keeps
+   its desktop layout and is scaled down to the viewport instead. `zoom`, not
+   a transform, because it scales the layout box too, so the wrapper still
+   sizes to what is drawn and the hit targets stay under the text.
+
+   FIT_FLOOR is the point past which the type stops resolving at all. It is a
+   backstop, not a target: with the narrow gutters the catalogue lands around
+   0.36 on a phone, which is legible, and the floor only bites on a table
+   wider or a screen narrower than anything here produces. Below it the rest
+   is left to the wrapper's scroll, because an unreadable table that fits is
+   worse than a legible one that does not. */
+const FIT_FLOOR = 0.32;
+const fitWide = window.matchMedia('(max-width: 1024px)');
+
+function fitTables() {
+  document.querySelectorAll('[data-fit-table] table').forEach(table => {
+    table.style.zoom = '';
+    if (!fitWide.matches) return;
+    const avail = table.parentElement.clientWidth;
+    const natural = table.scrollWidth;
+    if (!avail || !natural || natural <= avail) return;
+    table.style.zoom = Math.max(FIT_FLOOR, avail / natural).toFixed(4);
+  });
+}
+
+/* Resize fires in bursts, so those are coalesced onto a frame. A repaint is
+   not: the table has just been written and the measurement is wanted now, and
+   a frame never arrives at all while the tab is hidden. */
+let fitPending = 0;
+const scheduleFit = () => {
+  cancelAnimationFrame(fitPending);
+  fitPending = requestAnimationFrame(fitTables);
+};
+window.addEventListener('resize', scheduleFit);
+fitWide.addEventListener('change', scheduleFit);
+
 const app = document.getElementById('app');
 
 function bindNavButtons() {
@@ -653,33 +748,75 @@ function bindNavButtons() {
   });
 }
 
+/* A target scored from Upload that is not a catalogue row. Period, epoch and
+   duration come from the score's own ephemeris; depth, T-mag, SNR, sectors and
+   disposition are ExoFOP columns that /score does not return, so they stay
+   null and every panel that wants one renders it as not measured. Filling them
+   from the score would be inventing catalogue data out of a model output. */
+function adHocCandidate(ticNumeric, score) {
+  const eph = score.ephemeris || {};
+  return {
+    id: `TIC ${ticNumeric}`, ticId: `TIC ${ticNumeric}`, ticNumeric,
+    period: eph.period_days ?? null,
+    duration: has(eph.duration_days) ? eph.duration_days * 24 : null,
+    epochBjd: eph.t0_btjd ?? null,
+    prob: score.prob, probStd: score.probStd,
+    depth: null, tmag: null, snr: null, tsm: null, esm: null,
+    disposition: '—', source: 'TESS', catalogue: null,
+    sectors: '—', lastScored: '—', baselineDays: null,
+    radiusRe: null, teqK: null, stellarRadius: null, stellarTeff: null,
+    live: score, adHoc: true,
+  };
+}
+
+/** Register an ad-hoc target so #/vetting/<id> can find it, and return its id. */
+function rememberScoredTarget(ticNumeric, score) {
+  const known = CANDIDATES.find(c => c.ticNumeric === ticNumeric);
+  if (known) {
+    known.live = score;
+    known.prob = score.prob;
+    known.probStd = score.probStd;
+    return known.id;
+  }
+  const row = adHocCandidate(ticNumeric, score);
+  CANDIDATES.push(row);
+  return row.id;
+}
+
 /* Which candidate "Vetting" opens with no id in the hash.
 
    Prefers a row that carries a published period and epoch: those score against
    the catalogue ephemeris in seconds, where a row without one triggers a BLS
-   period search first and takes minutes. Falls back to the first row, then to
-   the prototype id when there is no catalogue at all. */
+   period search first and takes minutes. Falls back to the first row, and to
+   null when there is no catalogue at all — it used to fall back to a prototype
+   id, which then matched no row and left the previous page on screen. */
 function defaultVettingId() {
   const usable = CANDIDATES.find(c => c.period && c.duration && has(c.epochBjd))
     || CANDIDATES.find(c => c.period && c.duration)
     || CANDIDATES[0];
-  return usable ? usable.id : 'TOI-4328.01';
+  return usable ? usable.id : null;
 }
 
 function route() {
   clearCharts();
   stopHealth();
+  stopScoreLoader();
+  // The upload run keeps going; it just stops painting a page that is gone.
+  detachUploadRender();
   const path = location.hash.replace(/^#/, '') || '/';
   renderNav(path);
   window.scrollTo(0, 0);
-  if (path === '/catalogue') return Catalogue();
-  if (path.startsWith('/vetting/')) return Vetting(decodeURIComponent(path.slice('/vetting/'.length)));
-  if (path === '/vetting') return Vetting(defaultVettingId());
-  if (path === '/model') return ModelPerformance();
-  if (path === '/upload') return Upload();
-  if (path === '/discovery') return Discovery();
-  if (path === '/about') return About();
-  return Home();
+  const page =
+      path === '/catalogue' ? Catalogue
+    : path.startsWith('/vetting/') ? () => Vetting(decodeURIComponent(path.slice('/vetting/'.length)))
+    : path === '/vetting' ? () => Vetting(defaultVettingId())
+    : path === '/model' ? ModelPerformance
+    : path === '/upload' ? Upload
+    : path === '/discovery' ? Discovery
+    : path === '/about' ? About
+    : Home;
+  page();
+  fitTables();
 }
 
 window.addEventListener('hashchange', route);

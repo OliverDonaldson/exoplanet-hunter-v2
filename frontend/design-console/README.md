@@ -140,35 +140,134 @@ is already written and sits next to the simulation. The prototype plays one
 honest cold start per session (`sessionStorage`), then behaves like a warm
 service, which is what the real thing does; the ↻ button replays the sequence.
 
+## Service status
+
+The panel on the Mission page is a **live reader**, not a one-shot. It polls
+`/healthz` every second while connecting, waking or warming, and every 15 s once
+ready — slow enough not to hold the Fly machine awake for a page left open,
+often enough to notice. It stops while the tab is hidden and says so rather than
+going on asserting READY off an ageing reading. Every figure on it comes from
+the last ping: the model version the service reported, the round trip measured
+here, and the age counting up to the next one. A ping that does not come back
+renders as NO ANSWER with the error, not as CONNECTING.
+
+It used to stop polling the moment it first reached ready, and printed a
+hardcoded `0.14 s steady state` underneath — a single reading, presented as a
+live one, that would still have said READY with the service long gone. The
+prototype mode keeps that documented figure and labels it as the prototype's.
+
 ## Boot preloader
 
 `src/app.boot.js`. An instrument dial in the shape of the anime.js hero
 animation — glowing segmented outer ring, dense rotating tick ring, glass disc
-with a specular highlight, thin concentric arcs drawn on with a stagger, and a
-particle field — rendered in our palette, with our motif at the centre (a
-planet transiting its star, tracing the light-curve dip).
+with a specular highlight, thin concentric arcs drawn on with a stagger —
+rendered in our palette, with our motif at the centre: a planet transiting its
+star, tracing the light-curve dip.
 
-The field is a grid of little ringed worlds: each is a `<g>` holding a filled
-circle and a tilted ellipse. The group carries **no** `transform` attribute of
-its own — anime.js owns the element's transform, and a translate baked into the
-markup would be overwritten on the first frame — so position lives in the
-children's coordinates and `transform-box: fill-box` puts the origin on the
-planet. Each world scales in from 0, so it is a circle at every frame and never
-reads as a square. The whole field is clipped to the disc, which keeps the
-scatter inside the instrument however far a drift throws it.
+The light curve is drawn on the star's own line (`y = 180`, the centre of the
+360×360 viewBox) with the dip below it, so the planet riding the path crosses
+the star it dims. It used to sit 66 units lower, which put the whole transit
+under the star and made the two read as unrelated objects.
+
+There is no particle field. It was a 7×7 lattice of circles drifting ±70 units
+with nothing clipping them, and at boot resolution it read as noise over the
+instrument rather than as candidates being scored.
 
 anime.js features used: `svg.createDrawable` with `draw` for the ring segments,
 arcs and the transit trace; `svg.createMotionPath` for the transiting planet;
-`stagger` with a `grid` for the particle field; `composition: 'blend'` so the
-per-particle drifts add rather than replace; `text.scrambleText` for the status
+`stagger` for the segment and tick reveals; `text.scrambleText` for the status
 readout.
 
 Skipped entirely under `prefers-reduced-motion`. A 9 s hard timeout guarantees
 the console is never left behind the overlay if the animation stalls.
 
+**Cleanup matters here.** `root.remove()` detaches the nodes but anime.js keeps
+ticking anything still animating them, so a `loop: true` animation on a removed
+element runs for the rest of the session. `finish()` cancels the handles it
+holds *and* calls `utils.remove()` over the overlay's subtree, because the
+scramble readout is re-animated on every stage change and the handles alone do
+not cover it.
+
+**Background tabs.** `engine.pauseOnDocumentHidden` is left at its default
+(`true`). Setting it to `false` does not keep motion running in a hidden tab —
+`requestAnimationFrame` does not fire there either way — it only skips the
+`resetTime()` that `engine.resume()` performs, so the first frame back applies
+the entire hidden interval at once and every animation snaps to its end state.
+The 9 s failsafe is what keeps the overlay from parking in front of the console.
+
+**Nothing that animates may carry a layout transform.** anime.js owns the whole
+`transform` property on any element it touches, so the `translateX(-50%)` that
+was centring `.boot-meter` was replaced by the timeline's `translateY` on the
+first frame, and the meter spent every boot half its own width to the right. It
+centres with `margin: 0 auto` now. The same rule is why the dial's own groups
+carry no transform attribute in the markup.
+
+**Short viewports.** The meter is pinned to the bottom while the dial and
+readout are centred above it, so the two collided below about 660 px of height —
+46 px of overlap at 1280x620. `#boot` reserves the meter's strip as padding and
+the dial takes a `66vh` cap, so it gives way before the text does.
+
 **Reviewing it:** `dist/preview.html?boot=hold` freezes the dial fully assembled,
 just before it hands over, so the composition can be looked at without catching
 a 4-second animation.
+
+## Vetting: the pipeline timeline
+
+The Vetting page opens on **Pipeline** — nine stages between "a TIC went in" and
+"this number came out", each with what it actually produced, read back from that
+target's own `/score` response. Ephemeris and its provenance (`catalogue`,
+`user` or `bls`), bin coverage for each view, the five fold scores and their
+spread, the MC-dropout passes and sigma, the Platt shift from raw mean to
+calibrated score, the threshold and verdict, and which diagnostic suites
+returned and which flagged.
+
+**Stage 2 is deliberately empty.** `ScoreResponse` carries the binned views and
+not the cadences they were built from, so the unprocessed light curve cannot be
+drawn and the stage says so. Showing it would need the raw series added to the
+score contract, which is an API change.
+
+Coverage counts come from `viewCoverage()` in `app.api.js`: `flux` is null in a
+phase bin no cadence landed in, so `filled / total` is a real measure and array
+length is not.
+
+A target scored from **Upload** that has no catalogue row still gets this page.
+`rememberScoredTarget()` keeps the score against the target and returns the id
+to route to; an unknown TIC becomes an `adHocCandidate` carrying the ephemeris
+and the score and nothing else. Depth, T-mag, SNR, sectors and disposition are
+ExoFOP columns the score does not return, so they render as not measured and
+the follow-up panel — TSM and ESM are functions of depth and T-mag — is dropped
+rather than computed from zeros.
+
+**Upload and Vetting are the same scoring call.** Upload takes an identifier and
+shows the answer; Vetting takes a target already on the page and shows the
+working. The result panel hands off to `#/vetting/<id>` rather than dropping the
+user on the catalogue.
+
+## Narrow screens
+
+Below **900 px** the seven nav links move into a panel behind a menu button;
+they need about 810 px of bar in Ailerons and the wordmark is already hidden by
+1150. Below **820 px** the bottom ticker goes — it is a horizontal marquee that
+shows two cells at a time on a phone and costs a fixed strip of screen for them
+— and the space every page reserves for it is given back.
+
+**Tables are scaled, not reflowed.** A fifteen-column comparison turned into one
+column per row is fifteen unrelated lines, which is not what a catalogue is for.
+`fitTables()` measures each `[data-fit-table]` wrapper and sets `zoom` on the
+table so the whole thing fits the viewport at desktop layout. `zoom` rather than
+a transform, because it scales the layout box too, so the wrapper still sizes to
+what is drawn and the hit targets stay under the text.
+
+Two things make the scale affordable. Cell gutters drop from 1 rem a side to
+0.4 rem below 820 px — 270 px of the catalogue's 1224 was gutter — and the
+catalogue's `min-width` drops with them, from 1180 to 940, or the fit would be
+paying for 240 px of table that is no longer there. Together the full catalogue
+lands at about 0.36 and fits a 390 px phone exactly. `FIT_FLOOR` is a backstop
+below which the type stops resolving at all; past it the wrapper scrolls.
+
+The fit runs on `route()` and on every catalogue repaint — sorting and filtering
+change the widest cell in several columns — and is coalesced onto a frame only
+for resize.
 
 ## Porting to React
 

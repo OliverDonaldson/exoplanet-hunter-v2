@@ -21,11 +21,18 @@
      3. Determinate bar only for the ~90 s ensemble load. A bar that completes
         in 2 s reads as broken; a spinner that runs for 90 s reads as hung.
 
-   NOTE ON THE CONTRACT: the deployed GET /healthz currently returns only
-   { status, model_loaded, model_version }. The "warming" state needs two more
-   fields — ensemble_ready (bool) and uptime_s (number). Until they exist this
-   client degrades to connecting → waking → ready, which is correct behaviour
-   for the suspend-resume path but skips the cold-start progress entirely.
+   CONTRACT: GET /healthz returns { status, model_loaded, model_version,
+   ensemble_ready, uptime_s }. The last two arrived after this file was first
+   written, so the "warming" state is now driven by the service rather than
+   skipped.
+
+   THIS PANEL IS A LIVE READER. Every figure on it comes from the last ping:
+   the model version is what the service reported, the round trip is measured
+   here, and the age counts up until the next one lands. It used to stop
+   polling the moment it first reached "ready" and then sit on a hardcoded
+   "0.14 s steady state" — a one-shot reading, presented as a live one, that
+   would still have said READY with the service long gone. The only number not
+   measured per ping is the prototype mode's, which says so.
 */
 
 const HEALTH = {
@@ -33,7 +40,11 @@ const HEALTH = {
   // API the probe fails, and the scripted clock still demonstrates the states.
   get live() { return API.mode === 'live'; },
   get endpoint() { return `${API.base}/healthz`; },
-  pollMs: 1000,
+  pollMs: 1000,                // while connecting, waking or warming
+  // Once ready there is nothing to watch closely, and fly.toml suspends the
+  // machine when it is idle — a 1 s poll would hold it awake for as long as
+  // anyone left the page open. Slow enough to be cheap, often enough to notice.
+  readyPollMs: 15000,
   wakingAfterMs: 2000,         // an in-flight request older than this is a resume
   ensembleLoadS: 90,           // documented cold-start ensemble load
 };
@@ -44,36 +55,65 @@ const HEALTH_STATES = {
     colour: '#8A8FA8',
     detail: () => `GET ${HEALTH.endpoint}`,
     bar: 'indeterminate',
-    foot: 'Catalogue and reliability are parquet reads — they answer in ~0.8 s whatever the model is doing.',
+    foot: () => 'Catalogue and reliability are parquet reads — they answer in ~0.8 s whatever the model is doing.',
   },
   waking: {
     label: 'WAKING THE OBSERVATORY',
     colour: '#F5A623',
     detail: () => 'restoring RAM snapshot · ensemble still resident',
     bar: 'indeterminate',
-    foot: 'The machine suspends rather than stops, so this is a ~2 s resume, not a cold start.',
+    foot: () => 'The machine suspends rather than stops, so this is a ~2 s resume, not a cold start.',
   },
   warming: {
     label: 'WARMING MODEL',
     colour: '#F5A623',
     detail: () => 'loading 5-fold ensemble · TensorFlow import',
     bar: 'determinate',
-    foot: 'Browse the catalogue meanwhile — only scoring waits on the ensemble.',
+    foot: () => 'Browse the catalogue meanwhile — only scoring waits on the ensemble.',
   },
   ready: {
     label: 'MODEL WARM',
     colour: '#4DFFD2',
     detail: s => s.modelVersion || SERVED.modelVersion,
     bar: 'done',
-    foot: 'Scoring ready · 0.14 s steady state.',
+    // Measured per ping when there is a service; the prototype's steady state
+    // is the documented figure and is labelled as the prototype's.
+    foot: s => HEALTH.live
+      ? `Scoring ready · ${Math.round(s.inflightMs)} ms round trip · ${pingFreshness()}`
+      : 'Scoring ready · 0.14 s steady state (prototype).',
   },
   degraded: {
     label: 'NO PROMOTED MODEL',
     colour: '#FF4D4D',
     detail: () => 'registry.json has no promoted run',
     bar: 'none',
-    foot: 'Scoring is unavailable. The catalogue and reliability views still work.',
+    foot: () => 'Scoring is unavailable. The catalogue and reliability views still work.',
   },
+  // A ping that does not come back. The panel used to render this as
+  // CONNECTING, which reads as "starting up" rather than "gone".
+  unreachable: {
+    label: 'NO ANSWER',
+    colour: '#FF4D4D',
+    detail: s => s.error ? String(s.error).slice(0, 64) : `no response from ${HEALTH.endpoint}`,
+    bar: 'none',
+    foot: () => `Last ping failed ${pingAge()} s ago. Anything already on screen was loaded before it stopped answering.`,
+
+  },
+};
+
+/* Seconds since the last completed ping, for the readings that count up. */
+let lastPingAt = 0;
+const pingAge = () => (lastPingAt ? Math.max(0, Math.round((performance.now() - lastPingAt) / 1000)) : 0);
+
+/* Pings stop while the tab is in the background, so a panel left open there
+   would go on asserting READY off a reading minutes old. Past three missed
+   cadences the age stops being a detail and becomes the point. */
+const STALE_AFTER_S = (HEALTH.readyPollMs / 1000) * 3;
+const pingFreshness = () => {
+  const age = pingAge();
+  return age > STALE_AFTER_S
+    ? `last answer ${age} s ago · not rechecked while this tab is in the background`
+    : `pinged ${age} s ago`;
 };
 
 let healthTimer = null;
@@ -119,6 +159,7 @@ function simulatedHealth(t0, forceCold) {
 }
 
 function phaseFor(snap) {
+  if (snap.failed) return 'unreachable';
   if (snap.status === null || snap.status === undefined) {
     return snap.inflightMs > HEALTH.wakingAfterMs ? 'waking' : 'connecting';
   }
@@ -185,8 +226,6 @@ function mountHealth() {
 
     label.style.color = spec.colour;
     arc.setAttribute('stroke', spec.colour);
-    detail.textContent = spec.detail(snap);
-    foot.textContent = spec.foot;
 
     if (REDUCED) label.textContent = spec.label;
     else animate(label, {
@@ -212,20 +251,20 @@ function mountHealth() {
     if (spec.bar === 'done') healthAnims.push(animate(fill, { width: '100%', duration: 520, ease: 'out(3)' }));
   };
 
-  const tick = () => {
-    const snap = HEALTH.live ? null : simulatedHealth(t0, forceCold);
-    if (!snap) return;                                  // live path resolves async
-    render(snap);
-  };
+  let lastSnap = { status: null, inflightMs: 0 };
+  let inflight = false;
 
   const render = snap => {
+    lastSnap = snap;
     const phase = phaseFor(snap);
     if (phase !== healthPhase) { healthPhase = phase; applyPhase(phase, snap); }
+    // Written on every ping, not only when the state changes, because both
+    // lines carry values that move while the state stays put.
+    detail.textContent = HEALTH_STATES[phase].detail(snap);
+    foot.textContent = HEALTH_STATES[phase].foot(snap);
 
     if (phase === 'ready' || phase === 'degraded') {
       try { sessionStorage.setItem(SEEN_KEY, '1'); } catch (e) {}
-      clearInterval(healthTimer);
-      healthTimer = null;
     }
 
     if (phase === 'warming') {
@@ -237,17 +276,40 @@ function mountHealth() {
     }
   };
 
+  /* One ping, whichever source is answering. `inflight` keeps a slow reply from
+     stacking requests on a suspended machine. */
+  const ping = () => {
+    if (!HEALTH.live) { lastPingAt = performance.now(); render(simulatedHealth(t0, forceCold)); return; }
+    inflight = true;
+    const sent = performance.now();
+    fetchHealth()
+      .then(snap => { lastPingAt = performance.now(); render(snap); })
+      .catch(e => {
+        lastPingAt = performance.now();
+        render({ status: null, failed: true, error: e.message, inflightMs: performance.now() - sent });
+      })
+      .finally(() => { inflight = false; });
+  };
+
+  /* A single 1 s tick drives both jobs: it fires a ping when the current
+     phase's cadence is up, and it rewrites the foot every second regardless so
+     the age reading counts rather than freezing between pings. Nothing is sent
+     while the tab is hidden — nobody is reading it, and the machine would be
+     held awake for a page nobody is looking at. */
   const start = () => {
     clearInterval(healthTimer);
     t0 = performance.now();
+    lastPingAt = 0;
     healthPhase = null;
     fill.style.width = '0%';
-    tick();
+    ping();
     healthTimer = setInterval(() => {
       if (!document.getElementById('hstat')) { stopHealth(); return; }
-      if (HEALTH.live) fetchHealth().then(render).catch(() => render({ status:null, inflightMs: performance.now() - t0 }));
-      else tick();
-    }, HEALTH.pollMs);
+      const cadence = healthPhase === 'ready' || healthPhase === 'degraded'
+        ? HEALTH.readyPollMs : HEALTH.pollMs;
+      if (!document.hidden && !inflight && performance.now() - lastPingAt >= cadence) ping();
+      else if (healthPhase) foot.textContent = HEALTH_STATES[healthPhase].foot(lastSnap);
+    }, 1000);
   };
 
   document.getElementById('hstat-replay').addEventListener('click', () => {

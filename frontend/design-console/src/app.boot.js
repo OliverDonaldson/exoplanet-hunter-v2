@@ -4,10 +4,14 @@
    Structure follows the anime.js hero dial: a glowing segmented
    outer ring, a dense tick ring that keeps turning, a glass disc
    with a specular highlight, thin concentric arcs drawn on with
-   a stagger, and a particle field animated with blend
-   composition. Palette and motif stay ours — the segments are
-   the five folds plus the calibration and gate stages, and the
-   particles are candidates being scored.
+   a stagger, and the transit motif at the centre. Palette and
+   motif stay ours — the segments are the five folds plus the
+   calibration and gate stages, and the light curve is drawn on
+   the star's own line, so the planet crosses the star it dims.
+
+   `?boot=hold` freezes the dial fully assembled, one frame before
+   it hands over, so the composition can be reviewed without
+   catching a four-second animation.
    ═══════════════════════════════════════════════════════════ */
 
 let resolveBoot;
@@ -19,11 +23,29 @@ const bootReady = new Promise(r => { resolveBoot = r; });
   const stageEl = document.getElementById('boot-stage-label');
   const pctEl = document.getElementById('boot-pct');
   const fillEl = document.getElementById('boot-fill');
+  const HOLD = new URLSearchParams(location.search).get('boot') === 'hold';
+
+  /* root.remove() only detaches the nodes — anime keeps ticking a looping
+     animation against a detached target for the life of the page, which is
+     what the tick ring and the scramble readout were doing. Cancelling the
+     handles is not enough on its own: the readout is re-animated on every
+     stage change, so finish() also detaches every node under the overlay from
+     whatever is still animating it. */
+  const running = [];
+  const track = a => { running.push(a); return a; };
 
   let done = false;
-  const finish = () => { if (done) return; done = true; root.remove(); resolveBoot(); };
+  const finish = () => {
+    if (done) return;
+    done = true;
+    running.forEach(a => a.cancel());
+    utils.remove(root.querySelectorAll('*'));
+    utils.remove(root);
+    root.remove();
+    resolveBoot();
+  };
 
-  setTimeout(finish, 9000);              // the console must never stay behind the overlay
+  if (!HOLD) setTimeout(finish, 9000);   // the console must never stay behind the overlay
   if (REDUCED) { finish(); return; }
 
   const C = 180;                          // centre of the 360×360 viewBox
@@ -60,25 +82,9 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     `<path class="boot-arc" d="${arcPath(C, C, s.r, s.a0, s.a1)}" stroke="${s.col}" stroke-width="${s.w}"/>`
   ).join('');
 
-  /* ── candidate field ────────────────────────────────────── */
-  const GRID = 7, SPACING = 26;
-  const fieldRng = rngFor('boot|field');
-  document.getElementById('boot-field').innerHTML = Array.from({ length: GRID * GRID }, (_, i) => {
-    const gx = i % GRID, gy = Math.floor(i / GRID);
-    const x = C + (gx - (GRID - 1) / 2) * SPACING;
-    const y = C + (gy - (GRID - 1) / 2) * SPACING;
-    const roll = fieldRng();
-    const col = roll > 0.86 ? '#F5A623' : roll > 0.94 ? '#FF4D4D' : '#4DFFD2';
-    const r = 1.4 + fieldRng() * 1.8;
-    return `<circle class="boot-particle" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(2)}"
-      fill="${col}" opacity="0"/>`;
-  }).join('');
-
   /* ── starting state ─────────────────────────────────────── */
   utils.set('.boot-tick', { opacity: 0 });
-  utils.set('.boot-particle', { opacity: 0 });
   utils.set('#boot-glass', { scale: 0.7, opacity: 0 });
-  utils.set('#boot-gloss', { opacity: 0, rotate: -35 });
   utils.set('#boot-star', { scale: 0, opacity: 0 });
   utils.set('#boot-halo', { scale: 0, opacity: 0 });
   utils.set('#boot-planet', { opacity: 0 });
@@ -101,18 +107,18 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     if (i === stageIndex) return;
     stageIndex = i;
     stageEl.textContent = STAGES[i][1];
-    animate(statusEl, {
+    track(animate(statusEl, {
       innerHTML: text.scrambleText({
         text: STAGES[i][0], chars: 'A-Z', from: 'left',
         revealRate: 90, settleDuration: 160, duration: 520,
       }),
-    });
+    }));
   };
 
   /* the tick ring keeps turning for as long as the overlay is up */
-  animate('#boot-ticks', { rotate: 360, duration: 48000, ease: 'linear', loop: true });
+  const spin = track(animate('#boot-ticks', { rotate: 360, duration: 48000, ease: 'linear', loop: true }));
 
-  createTimeline({
+  const tl = createTimeline({
     defaults: { ease: 'inOut(3)' },
     onUpdate: self => {
       const p = self.progress;
@@ -135,25 +141,17 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     .add('.tick-minor', { opacity: [0, 0.30], duration: 380, delay: stagger(7), ease: 'outQuad' }, 420)
     .add('.tick-major', { opacity: [0, 0.85], duration: 420, delay: stagger(44), ease: 'outQuad' }, 420)
 
-    // glass disc and its specular highlight
+    // glass disc
     .add('#boot-glass', { scale: [0.7, 1], opacity: [0, 1], duration: 900, ease: 'out(4)' }, 500)
-    .add('#boot-gloss', { opacity: [0, 1], rotate: [-35, 8], duration: 1400, ease: 'out(3)' }, 620)
 
     // thin arcs sweep in behind the instrument
     .add(arcs, { draw: ['0 0', '0 1', '1 1'], duration: 1600, delay: stagger(90), ease: 'inOut(3)' }, 760)
-
-    // the candidate field arrives from the centre outwards
-    .add('.boot-particle', {
-      opacity: [0, t => 0.35 + Number(t.getAttribute('r')) * 0.22],
-      scale: [0, 1], duration: 620,
-      delay: stagger(14, { grid: [GRID, GRID], from: 'center' }), ease: 'out(3)',
-    }, 900)
 
     // star ignites
     .add('#boot-halo', { scale: [0, 1], opacity: [0, 1], duration: 900, ease: 'out(3)' }, 1200)
     .add('#boot-star', { scale: [0, 1], opacity: [0, 1], duration: 700, ease: 'outBack(2.2)' }, 1250)
 
-    // a planet transits, tracing the light-curve dip beneath it
+    // a planet transits, tracing the light-curve dip across the star's own line
     .add('#boot-planet', { opacity: [0, 1], duration: 300 }, 1500)
     .add('#boot-planet', { x: orbit.translateX, y: orbit.translateY, duration: 1700, ease: 'inOutSine' }, 1500)
     .add(trace,          { draw: ['0 0', '0 1'], duration: 1700, ease: 'inOutSine' }, 1500)
@@ -167,28 +165,20 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     .add('.boot-readout, .boot-meter, .boot-corner', { opacity: 0, duration: 420 }, 3560)
     .add(root,           { opacity: 0, duration: 520, ease: 'outQuad' }, 3680);
 
-  /* Blend composition: every particle keeps drifting on its own clock, and the
-     drifts add rather than replace, so the field never snaps between states. */
-  setTimeout(() => {
-    if (done) return;
-    animate('.boot-particle', {
-      x: () => utils.random(-70, 70),
-      y: () => utils.random(-70, 70),
-      rotate: () => utils.random(-180, 180),
-      scale: () => utils.random(0.5, 1.7),
-      duration: () => utils.random(600, 1300),
-      composition: 'blend',
-      ease: 'inOut(2)',
-      loop: true,
-      alternate: true,
-      delay: stagger(14, { grid: [GRID, GRID], from: 'center' }),
-    });
-  }, 1500);
+  if (HOLD) { tl.pause(); tl.seek(3470); spin.pause(); }
 })();
 
 /* ── go ──────────────────────────────────────────────────── */
-// replaceState, not `location.hash = …`, so the initial route renders once
-if (!location.hash) history.replaceState(null, '', '#/');
+/* Every open lands on Mission, whatever hash the URL arrived with: a reload
+   part-way through the console, or a tab restored from last week, starts at the
+   front door rather than dropping straight into a vetting page. replaceState,
+   not `location.hash = …`, so this does not queue a hashchange and the initial
+   route still renders exactly once.
+
+   The cost is that a pasted deep link opens on Mission rather than the target it
+   names. In-session navigation is untouched, including the Upload page's
+   hand-off to #/vetting/<id>. */
+history.replaceState(null, '', '#/');
 
 /* hydrate() fills SERVED and CANDIDATES from the API before the first render,
    which keeps every page function synchronous. It never rejects — an
@@ -199,6 +189,11 @@ hydrate().then(({ mode, notes }) => {
   API.notes = notes;
   if (mode !== 'live') console.info('[eh] no API reachable — prototype data');
   else console.info(`[eh] live against ${API.base}`, notes);
+  // The boot corner names the served run. It is left empty in the markup
+  // because boot starts before the service has answered, and a hash printed
+  // there before /model returns one would be a guess.
+  const corner = document.getElementById('boot-model');
+  if (corner) corner.textContent = mode === 'live' ? SERVED.runId : 'prototype data';
   mountTicker();
   route();
 });

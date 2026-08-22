@@ -29,6 +29,11 @@ function generateViews(c) {
     const durPhaseLive = eph && eph.period_days ? (eph.duration_days / eph.period_days) : 0.02;
     return { durPhase: durPhaseLive, localSpan: lSpan, global: g, local: l };
   }
+  // Live service, no score attached yet. The binned views arrive with the
+  // score and nothing else on the contract carries them, so the panel says so
+  // rather than drawing the simulation below under a measured period.
+  if (API.mode === 'live') return null;
+
   const r = rngFor(c.id + '|views');
   // A catalogue row with no published period would divide by zero here.
   const durPhase = c.period ? Math.min(0.45, (c.duration / 24) / c.period) : 0.02;
@@ -83,7 +88,21 @@ function viewChart(el, data, label, span) {
 
 function Vetting(candidateId) {
   const c = CANDIDATES.find(x => x.id === candidateId) || CANDIDATES[0];
-  if (!c) return;
+  // Returning here used to leave the previous route's markup on screen.
+  if (!c) {
+    app.innerHTML = `
+      <div style="min-height:100vh;background:#050608;padding-top:56px;display:flex;align-items:center;justify-content:center">
+        <div style="text-align:center;max-width:32rem;padding:2rem">
+          <div class="section-label" style="margin-bottom:0.75rem">Vetting Console</div>
+          <div style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:rgba(240,238,232,0.6);margin-bottom:1.5rem">
+            ${candidateId ? `No catalogue row matches <span style="font-family:'JetBrains Mono';color:#F0EEE8">${esc(candidateId)}</span>.` : 'The catalogue is empty, so there is nothing to vet.'}
+          </div>
+          <button class="btn-ghost" data-nav="#/catalogue">← Back to Catalogue</button>
+        </div>
+      </div>`;
+    bindNavButtons();
+    return;
+  }
 
   /* Score once per candidate, then re-enter to paint the same page with real
      values. The row arrives from /candidates with no score — that endpoint has
@@ -105,29 +124,43 @@ function Vetting(candidateId) {
   const branches = branchEvidence(c);
   const agree = foldAgreement(c);
   const diags = diagnosticsFor(c);
-  const fu = followUp(c);
+  // TSM and ESM are functions of depth and T-mag. Both are catalogue columns,
+  // so a target that arrived through Upload has neither and the panel is
+  // dropped rather than computed from zeros.
+  const canFollowUp = has(c.depth) && c.depth > 0 && has(c.tmag) && c.tmag > 0 && has(c.period) && c.period > 0;
+  const fu = canFollowUp ? followUp(c) : null;
   const dispColor = getDispositionColor(c.disposition);
-  let activeTab = 'lightcurve';
+  // The timeline opens the page: it is the account of where the headline number
+  // came from, and every other tab is one stage of it in detail. It is read
+  // back from a real score response, so in prototype mode there is nothing for
+  // it to describe and the phase-folded views lead instead.
+  let activeTab = API.mode === 'live' ? 'pipeline' : 'lightcurve';
 
   const TABS = [
+    ['pipeline',    'Pipeline'],
     ['lightcurve',  'Phase-Folded Views'],
     ['branches',    'Branch Evidence <span class="tag-chip tag-soon" style="margin-left:0.4rem">in progress</span>'],
     ['agreement',   'Model Agreement'],
     ['diagnostics', 'Diagnostic Flags'],
   ];
 
+  /* An ad-hoc target from Upload carries the score's ephemeris and nothing
+     else, so every catalogue column below can legitimately be absent. */
+  const num = (v, dp, unit = '') => (has(v) && Number.isFinite(v) && v !== 0
+    ? v.toFixed(dp) + unit : 'not measured');
+
   const KEY_PARAMS = [
-    { label:'Period',      value:`${c.period.toFixed(1)} d` },
-    { label:'Duration',    value:`${c.duration.toFixed(1)} h` },
-    { label:'Depth',       value:c.depth.toFixed(4) },
-    { label:'T-mag',       value:c.tmag.toFixed(1) },
-    { label:'SNR',         value:c.snr.toFixed(1) },
-    { label:'Last Scored', value:c.lastScored },
+    { label:'Period',      value:num(c.period, 1, ' d') },
+    { label:'Duration',    value:num(c.duration, 1, ' h') },
+    { label:'Depth',       value:num(c.depth, 4) },
+    { label:'T-mag',       value:num(c.tmag, 1) },
+    { label:'SNR',         value:num(c.snr, 1) },
+    { label:'Last Scored', value:c.lastScored || 'not measured' },
   ];
 
   const longBaseline = has(c.baselineDays) && c.baselineDays >= 1000;
-  const fuVerdict =
-    fu.tsmPass && fu.esmPass ? 'High priority — viable for both transmission and emission spectroscopy'
+  const fuVerdict = !fu ? ''
+    : fu.tsmPass && fu.esmPass ? 'High priority — viable for both transmission and emission spectroscopy'
     : fu.tsmPass ? 'Transmission target — TSM clears the Kempton threshold for this radius bin'
     : fu.esmPass ? 'Emission target — ESM above the GJ 1132 b benchmark'
     : 'Below Kempton thresholds — not competitive for JWST time';
@@ -157,7 +190,7 @@ function Vetting(candidateId) {
           <div style="font-family:'JetBrains Mono';font-size:0.68rem;color:#8A8FA8;margin-top:0.35rem">${
             !has(c.prob)
               ? (c.scoring ? 'scoring — light curve → 5-fold ensemble' : (c.scoreError ? esc(c.scoreError) : 'not scored'))
-              : `± ${agree.probStd.toFixed(3)} MC-dropout · Platt-calibrated`}</div>
+              : agree ? `± ${agree.probStd.toFixed(3)} MC-dropout · Platt-calibrated` : 'spread not measured'}</div>
           <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.65rem;border:1px solid ${longBaseline ? 'rgba(245,166,35,0.35)' : 'rgba(255,255,255,0.10)'};background:${longBaseline ? 'rgba(245,166,35,0.05)' : 'transparent'}">
             <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${longBaseline ? '#F5A623' : '#8A8FA8'}">
               ${!has(c.baselineDays)
@@ -176,6 +209,15 @@ function Vetting(candidateId) {
           </div>`).join('')}
       </div>
 
+      ${!fu ? `
+      <div class="panel" style="margin-bottom:2.5rem;padding:1.1rem 1.25rem">
+        <div class="section-label" style="margin-bottom:0.4rem">Follow-up Priority</div>
+        <div style="font-family:'Inter';font-size:0.78rem;line-height:1.6;color:rgba(240,238,232,0.55)">
+          TSM and ESM are functions of transit depth and host T-mag, which are catalogue
+          columns — /score does not return them. This target did not arrive with a catalogue
+          row, so they are not computed.
+        </div>
+      </div>` : `
       <div class="panel" style="margin-bottom:2.5rem">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;padding:1.1rem 1.25rem;border-bottom:1px solid rgba(255,255,255,0.08)">
           <div class="section-label">Follow-up Priority</div>
@@ -209,6 +251,8 @@ function Vetting(candidateId) {
           </div>
         </div>
       </div>
+
+`}
 
       <div style="display:flex;gap:0;margin-bottom:2rem;border-bottom:1px solid rgba(255,255,255,0.08);flex-wrap:wrap" id="vet-tabs">
         ${TABS.map(([k, label]) => `<button data-tab="${k}" style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.75rem 1.5rem;background:none;border:none;transition:all 150ms ease;margin-bottom:-1px">${label}</button>`).join('')}
@@ -309,10 +353,14 @@ function Vetting(candidateId) {
   };
 
   const agreementPanel = () => {
-    if (!has(c.prob)) {
-      return `<div style="padding:3rem;text-align:center;font-family:'JetBrains Mono';font-size:0.75rem;color:#8A8FA8">
-        ${c.scoring ? 'Scoring — the ensemble members arrive with the score.' : 'Not scored — no fold members to compare.'}
-      </div>`;
+    // `agree` is null whenever the fold members are not measured. A catalogue
+    // row carries a bulk ensemble mean but no members, so the headline number
+    // can be real while there is still nothing to put under it.
+    if (!has(c.prob) || !agree) {
+      return pendingPanel(
+        c.scoring ? 'Scoring — the ensemble members arrive with the score.'
+        : c.scoreError ? `Not scored — ${esc(c.scoreError)}`
+        : 'Fold members not measured — /candidates carries the bulk ensemble mean, not the members behind it.');
     }
     const lo = Math.max(0, Math.min(agree.range[0], c.prob - agree.probStd) - 0.05);
     const hi = Math.min(1, Math.max(agree.range[1], c.prob + agree.probStd) + 0.05);
@@ -392,7 +440,11 @@ function Vetting(candidateId) {
       ${noReport ? `
       <div class="note" style="margin-bottom:1.5rem">
         <span class="ico">▲</span>
-        <span class="txt">No Data Validation report exists for this target, so none of these tests have been run.
+        <span class="txt">${c.scoring
+          ? 'The suites come back with the score, which is still running.'
+          : c.scoreError
+            ? `This target was not scored — ${esc(c.scoreError)} — so none of these tests have been run.`
+            : 'No Data Validation report exists for this target, so none of these tests have been run.'}
         <b style="color:rgba(240,238,232,0.85);font-weight:500">Absent is not the same as passing</b> — an unmeasured diagnostic carries no evidence either way, and the score below was produced without it.</span>
       </div>` : ''}
 
@@ -417,12 +469,15 @@ function Vetting(candidateId) {
       </div>`;
   };
 
-  const viewsPanel = () => `
+  const viewsPanel = () => !views ? pendingPanel(
+        c.scoring ? 'Scoring — the binned views arrive with the score.'
+      : c.scoreError ? `Not scored — ${esc(c.scoreError)}`
+      : 'Not scored — no photometry has been fetched for this target.') : `
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
         <div>
           <div class="stat-label" style="margin-bottom:0.25rem">Phase-Folded Photometry</div>
           <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">
-            P = ${c.period.toFixed(3)} d · depth = ${c.depth.toFixed(4)} · SNR = ${c.snr.toFixed(1)} · transit spans ${(views.durPhase * 100).toFixed(3)}% of phase
+            P = ${num(c.period, 3, ' d')} · depth = ${num(c.depth, 4)} · SNR = ${num(c.snr, 1)} · transit spans ${(views.durPhase * 100).toFixed(3)}% of phase
           </div>
         </div>
         <div style="display:flex;gap:1.5rem">
@@ -454,12 +509,132 @@ function Vetting(candidateId) {
         this pipeline classifies light curves, it does not solve for orbital parameters. The line is the per-bin median; the band is the per-bin scatter.</span>
       </div>`;
 
+  /* ── the pipeline timeline ──────────────────────────────
+     Every stage between "a TIC went in" and "this number came out", with what
+     each one actually produced. The figures are all from the score itself; the
+     one stage the service does not retain says so, because a timeline with a
+     silent gap in it is worse than one that names the gap. */
+  const step = (n, title, what, outs, absent) => `
+    <div class="pipe-step${absent ? ' absent' : ''}">
+      <div class="n">STAGE ${String(n).padStart(2, '0')}</div>
+      <h4>${title}</h4>
+      <div class="what">${what}</div>
+      ${outs.length ? `<div class="pipe-out">${outs.map(o => `
+        <div><div class="k">${o.k}</div><div class="v${o.dim ? ' dim' : ''}">${o.v}</div></div>`).join('')}</div>` : ''}
+    </div>`;
+
+  const pipelinePanel = () => {
+    const live = c.live;
+    if (!live) {
+      return pendingPanel(
+        c.scoring ? 'Scoring — the pipeline record is written as the score is produced.'
+        : c.scoreError ? `Not scored — ${esc(c.scoreError)}`
+        : 'Not scored — there is no run to describe yet.');
+    }
+
+    const eph = live.ephemeris || {};
+    const cov = live.coverage || {};
+    const folds = live.perFold || [];
+    const fs = folds.map(f => f.prob);
+    const foldSd = fs.length
+      ? Math.sqrt(fs.reduce((a, v) => a + (v - fs.reduce((x, y) => x + y, 0) / fs.length) ** 2, 0) / fs.length) : null;
+    const shift = has(live.prob) && has(live.probMean) ? live.prob - live.probMean : null;
+    const ephSource = { catalogue: 'from the catalogue row', user: 'supplied with the request', bls: 'solved by a BLS period search' }[eph.source] || 'unrecorded';
+    const suites = [
+      ['centroid', live.diagnostics.centroid], ['odd/even', live.diagnostics.oddEven],
+      ['secondary', live.diagnostics.secondary], ['duration', live.diagnostics.duration],
+      ['false alarms', live.diagnostics.falseAlarms],
+    ];
+    const returned = suites.filter(([, v]) => v);
+    const flagged = returned.filter(([, v]) => v.suspicious);
+    const binCov = k => cov[k] ? `${cov[k].filled} / ${cov[k].total} bins` : 'not returned';
+
+    return `
+      <div style="margin-bottom:1.5rem">
+        <div class="stat-label" style="margin-bottom:0.25rem">How this number was produced</div>
+        <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">
+          ${esc(live.modelVersion || SERVED.modelVersion)} · one <span style="color:#4DFFD2">GET /score/${c.ticNumeric}</span> · every figure below is from that response
+        </div>
+      </div>
+      <div class="pipe">
+        ${step(1, 'Target and ephemeris',
+          `The period, epoch and duration fix where in the light curve a transit should fall. Everything downstream is folded on them, so a wrong ephemeris makes every later stage wrong in the same way. This one was <b style="color:rgba(240,238,232,0.8);font-weight:500">${ephSource}</b>.`,
+          [{ k: 'TIC', v: c.ticNumeric },
+           { k: 'Period', v: has(eph.period_days) ? `${eph.period_days.toFixed(5)} d` : 'not measured' },
+           { k: 'Epoch t0', v: has(eph.t0_btjd) ? `${eph.t0_btjd.toFixed(4)} BTJD` : 'not measured' },
+           { k: 'Duration', v: has(eph.duration_days) ? `${(eph.duration_days * 24).toFixed(2)} h` : 'not measured' },
+           { k: 'Source', v: eph.source || 'not recorded', dim: !eph.source }])}
+
+        ${step(2, 'Raw photometry',
+          `SPOC or PDC photometry is pulled from MAST and detrended before anything else happens. <b style="color:rgba(240,238,232,0.8);font-weight:500">The series itself is not part of the score contract</b> — /score returns the binned views built from it and not the cadences that went in, so the unprocessed curve cannot be drawn here. It is the one stage on this page with no numbers of its own.`,
+          [{ k: 'Cadences returned', v: 'not measured', dim: true },
+           { k: 'Sectors', v: c.sectors && c.sectors !== '—' ? esc(c.sectors) : 'not measured', dim: !c.sectors || c.sectors === '—' }],
+          true)}
+
+        ${step(3, 'Detrend and phase-fold',
+          `The detrended flux is folded on the ephemeris above and binned twice: a global view over the whole phase, and a local view zoomed on the transit. These two arrays are what the network is fed. Bins with no cadence in them come back empty, so the counts below are coverage, not array length.`,
+          [{ k: 'Global view', v: binCov('global') },
+           { k: 'Local view', v: binCov('local') },
+           { k: 'Local span', v: cov.local && has(cov.local.span) ? `±${cov.local.span.toFixed(4)} phase` : 'not measured' },
+           { k: 'Transit width', v: views ? `${(views.durPhase * 100).toFixed(3)}% of phase` : 'not measured' }])}
+
+        ${step(4, 'The other input views',
+          `Four more views carry the evidence the odd/even, secondary and centroid tests read. A view the service could not build is absent rather than zero-filled, and the branch that reads it then has nothing to contribute.`,
+          [{ k: 'Odd epochs', v: binCov('odd'), dim: !cov.odd },
+           { k: 'Even epochs', v: binCov('even'), dim: !cov.even },
+           { k: 'Centroid track', v: binCov('centroidTrack'), dim: !cov.centroidTrack },
+           { k: 'Periodogram', v: cov.periodogram ? `${cov.periodogram.total} samples · peak ${cov.periodogram.bestPeriodDays.toFixed(4)} d` : 'not returned', dim: !cov.periodogram }],
+          !cov.odd && !cov.even && !cov.centroidTrack && !cov.periodogram)}
+
+        ${step(5, 'The ensemble',
+          `Each of the ${folds.length || 5} fold models scores the views independently. They were trained on different splits, so their spread is the part of the uncertainty that comes from which data the model happened to see. Wide spread here means the answer depends on the split, and the mean deserves less weight than its own precision suggests.`,
+          folds.length
+            ? folds.map(f => ({ k: `fold ${f.fold}`, v: f.prob.toFixed(4) }))
+                .concat([{ k: 'Fold σ', v: has(foldSd) ? foldSd.toFixed(4) : 'not measured' }])
+            : [{ k: 'Members', v: 'not returned', dim: true }])}
+
+        ${step(6, 'MC-dropout',
+          `Dropout is left on at inference and the ensemble is run ${has(live.nMc) ? live.nMc : 'n'} times, so each pass sees a slightly different network. The spread across those passes is the model's own uncertainty about this target, separate from the disagreement between folds above.`,
+          [{ k: 'Stochastic passes', v: has(live.nMc) ? live.nMc : 'not measured' },
+           { k: 'Ensemble mean', v: has(live.probMean) ? live.probMean.toFixed(4) : 'not measured' },
+           { k: 'MC-dropout σ', v: has(live.probStd) ? live.probStd.toFixed(4) : 'not measured' }])}
+
+        ${step(7, 'Platt calibration',
+          `The raw mean is not a probability — a network trained to separate classes is free to be confident and wrong. Platt scaling maps it onto the frequency actually observed out of fold, which is what makes "0.9" mean nine in ten. The reliability diagram on the Model page is the evidence for this step.`,
+          [{ k: 'Before', v: has(live.probMean) ? live.probMean.toFixed(4) : 'not measured' },
+           { k: 'After', v: has(live.prob) ? live.prob.toFixed(4) : 'not measured' },
+           { k: 'Shift', v: has(shift) ? signed(shift, 4) : 'not measured' }])}
+
+        ${step(8, 'Decision',
+          `The calibrated score is compared with the promoted run's operating threshold. The threshold is a policy choice about how many false positives a shortlist can carry, not a property of this target — a score either side of it is still the same score.`,
+          [{ k: 'Calibrated P(planet)', v: has(live.prob) ? live.prob.toFixed(4) : 'not measured' },
+           { k: 'Threshold', v: has(live.threshold) ? live.threshold.toFixed(3) : 'not measured' },
+           { k: 'Verdict', v: esc(live.verdict || 'not returned'), dim: !live.verdict }])}
+
+        ${step(9, 'Automated diagnostics',
+          `Run beside the model, not inside it: these are independent tests on the same photometry, and they can disagree with the score. ${returned.length ? `${flagged.length} of ${returned.length} returned suites flagged this target.` : 'None of the suites returned for this target.'} An absent suite is not a pass.`,
+          suites.map(([name, v]) => ({ k: name, v: v ? (v.suspicious ? 'flagged' : 'clear') : 'not measured', dim: !v })),
+          !returned.length)}
+      </div>
+
+      <div class="note" style="margin-top:1.5rem">
+        <span class="ico">▸</span>
+        <span class="txt">Stages 1 and 3–9 are read back from this target's own score response. Stage 2 is the
+        gap: the service does not return the cadences it worked from, so the unprocessed light curve
+        cannot be shown and is marked as such rather than reconstructed.</span>
+      </div>`;
+  };
+
   const paintPanel = () => {
     clearCharts();
-    if (activeTab === 'lightcurve') {
+    if (activeTab === 'pipeline') {
+      panel.innerHTML = pipelinePanel();
+    } else if (activeTab === 'lightcurve') {
       panel.innerHTML = viewsPanel();
-      viewChart(document.getElementById('chart-global'), views.global, 'Global view', 0.5);
-      viewChart(document.getElementById('chart-local'), views.local, 'Local view', views.localSpan);
+      if (views) {
+        viewChart(document.getElementById('chart-global'), views.global, 'Global view', 0.5);
+        viewChart(document.getElementById('chart-local'), views.local, 'Local view', views.localSpan);
+      }
     } else if (activeTab === 'branches') {
       panel.innerHTML = branchPanel();
     } else if (activeTab === 'agreement') {
@@ -518,6 +693,7 @@ function calibrationFor(m) {
       count: b.count,
     }));
   }
+  if (API.mode === 'live') return null;
   const r = rngFor(m.mission + '|calib');
   const ece = m.ece || 0;
   return [0.05,0.15,0.25,0.35,0.45,0.55,0.65,0.75,0.85,0.95].map(p => ({
@@ -527,11 +703,15 @@ function calibrationFor(m) {
   }));
 }
 
-/* derived from the mission spec so the matrix, the recall headline and the
-   stated operating point cannot drift apart */
+/* Prototype-only. The matrix needs the number of positives in the slice and
+   no endpoint carries it — /model reports n and recall, never the label
+   balance behind them — so these three constants turned one assumption into
+   four measured-looking counts and three derived metrics. Live, the panel
+   reports the cells as not measured instead. */
 const POSITIVE_RATE = { TESS: 0.493, Kepler: 0.538, K2: 0.524 };
 
 function confusionFor(m) {
+  if (API.mode === 'live') return null;
   const P = Math.round(m.n * (POSITIVE_RATE[m.mission] ?? 0.5));
   const N = m.n - P;
   const fp = Math.round(N * 0.01);            // the 1% FPR operating point
@@ -640,7 +820,7 @@ function ModelPerformance() {
         <div style="padding:1.5rem 1.5rem 1rem">
           <div class="stat-label">Run Registry &amp; Promotion Gate</div>
         </div>
-        <div style="overflow-x:auto;padding:0 1.5rem 1.5rem">
+        <div data-fit-table="runs" style="overflow-x:auto;padding:0 1.5rem 1.5rem">
           <table style="width:100%;border-collapse:collapse;min-width:820px">
             <thead><tr>
               ${['Run','Date','TESS AUC','Recall @1% FPR','Brier','Verdict','Reason'].map(h =>
@@ -670,9 +850,10 @@ function ModelPerformance() {
     clearCharts();
     const m = SERVED.missions.find(x => x.mission === mission);
     const cm = confusionFor(m);
-    const precision = cm.tp / (cm.tp + cm.fp);
-    const recall = cm.tp / (cm.tp + cm.fn);
-    const f1 = 2 * precision * recall / (precision + recall);
+    // Recall is served; precision and F1 need the cells, which are not.
+    const precision = cm ? cm.tp / (cm.tp + cm.fp) : null;
+    const recall = cm ? cm.tp / (cm.tp + cm.fn) : (has(m.recall) ? m.recall : null);
+    const f1 = cm ? 2 * precision * recall / (precision + recall) : null;
 
     detail.innerHTML = `
       ${m.evaluation === 'zero-shot' ? `
@@ -684,7 +865,12 @@ function ModelPerformance() {
       <div class="charts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-bottom:2rem">
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.5rem">ROC Curve — ${m.mission}</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">AUC = ${has(m.auc) ? m.auc.toFixed(4) : '—'} ± ${has(m.aucErr) ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:0.35rem">AUC = ${has(m.auc) ? m.auc.toFixed(4) : '—'} ± ${has(m.aucErr) ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
+          <!-- The AUC is measured; the curve is not. No endpoint carries the
+               per-threshold points, so this is the binormal curve that the
+               measured AUC implies, and it says so rather than passing a model
+               off as a measurement. -->
+          <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:rgba(138,143,168,0.75);margin-bottom:1rem">binormal curve implied by the AUC · per-threshold points not measured</div>
           <div class="chart-wrap" id="chart-roc"></div>
         </div>
         <div class="panel" style="padding:1.5rem">
@@ -700,23 +886,28 @@ function ModelPerformance() {
           <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-bottom:1.25rem">at the 1% FPR operating point · ${m.evaluation}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,0.08)">
             ${[
-              { label:'True Positive',  value:cm.tp, color:'#4DFFD2' },
-              { label:'False Positive', value:cm.fp, color:'#FF4D4D' },
-              { label:'False Negative', value:cm.fn, color:'#F5A623' },
-              { label:'True Negative',  value:cm.tn, color:'#4DFFD2' },
+              { label:'True Positive',  value:cm && cm.tp, color:'#4DFFD2' },
+              { label:'False Positive', value:cm && cm.fp, color:'#FF4D4D' },
+              { label:'False Negative', value:cm && cm.fn, color:'#F5A623' },
+              { label:'True Negative',  value:cm && cm.tn, color:'#4DFFD2' },
             ].map(cell => `
               <div style="background:#050608;padding:1.25rem;text-align:center">
-                <div style="font-family:'JetBrains Mono';font-size:1.5rem;font-weight:500;color:${cell.color};margin-bottom:0.25rem;font-variant-numeric:tabular-nums">${cell.value.toLocaleString()}</div>
+                <div style="font-family:'JetBrains Mono';font-size:${cm ? '1.5rem' : '0.85rem'};font-weight:500;color:${cm ? cell.color : '#8A8FA8'};margin-bottom:0.25rem;font-variant-numeric:tabular-nums">${cm ? cell.value.toLocaleString() : 'not measured'}</div>
                 <div class="stat-label">${cell.label}</div>
               </div>`).join('')}
           </div>
+          ${cm ? '' : `
+          <div class="note" style="margin-top:1.25rem">
+            <span class="ico">▲</span>
+            <span class="txt">The cells need the number of real planets in the ${esc(m.mission)} slice, and no endpoint reports it — /model gives n and recall, not the label balance behind them.</span>
+          </div>`}
         </div>
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:1.5rem">Derived Metrics — ${m.mission}</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:2rem">
-            ${metricBlock('Precision', precision, m.recallErr * 0.6, false)}
+            ${metricBlock('Precision', precision, cm ? m.recallErr * 0.6 : null, false)}
             ${metricBlock('Recall', recall, m.recallErr, false)}
-            ${metricBlock('F1', f1, m.recallErr * 0.7, false)}
+            ${metricBlock('F1', f1, cm ? m.recallErr * 0.7 : null, false)}
           </div>
           <div style="font-family:'Inter';font-size:0.75rem;line-height:1.6;color:rgba(240,238,232,0.5);margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.06)">
             Intervals are the ±1σ spread over the five folds. Recall @ 1% FPR is the promotion criterion — it is what "would this candidate reach the shortlist" actually means, and it is the number that rejected all five architecture arms.
@@ -735,8 +926,12 @@ function ModelPerformance() {
       tooltipFormat: v => v.toFixed(4), tooltipValueColor: '#F0EEE8',
     });
 
-    renderChart(document.getElementById('chart-calib'), {
-      height: 260, data: calibrationFor(m), xKey: 'predicted', fontSize: 9,
+    const calib = calibrationFor(m);
+    if (!calib) {
+      document.getElementById('chart-calib').innerHTML =
+        pendingPanel('Reliability diagram unavailable — /reliability did not answer.');
+    } else renderChart(document.getElementById('chart-calib'), {
+      height: 260, data: calib, xKey: 'predicted', fontSize: 9,
       margin: { top: 5, right: 10, bottom: 40, left: 52 },
       xLabel: 'Mean Predicted Probability', yLabel: 'Fraction of Positives',
       xDomain: [0, 1], yDomain: () => [0, 1],
@@ -766,20 +961,100 @@ const UPLOAD_MODES = [
     why:'Resolving RA/Dec to a TIC needs a cone search against the target catalogue. Not wired up — name the target directly for now.' },
 ];
 
+/* ── the scoring loader ───────────────────────────────────
+   Six copies of the console's own motif — flat baseline, transit dip, flat
+   baseline — drawn on in sequence with `svg.createDrawable`, so the wait reads
+   as light curves arriving rather than as a spinner. It measures nothing and
+   is not meant to: the honest count is the elapsed seconds above it.
+
+   One handle at module scope, reverted by stopScoreLoader(), because the
+   panel that holds it is torn down by a cancel, a completed run or a route
+   change, and a looping animation on a detached target never stops on its own. */
+const LOADER_UNITS = 6, LOADER_W = 80;
+let scoreLoader = null;
+
+function scoreLoaderHTML() {
+  const paths = Array.from({ length: LOADER_UNITS }, (_, i) => {
+    const x = i * LOADER_W;
+    return `<path d="M ${x} 8 L ${x + 24} 8 L ${x + 29} 17 L ${x + 51} 17 L ${x + 56} 8 L ${x + LOADER_W} 8"/>`;
+  }).join('');
+  return `<svg id="score-loader" viewBox="0 0 ${LOADER_UNITS * LOADER_W} 24" preserveAspectRatio="none"
+       aria-hidden="true" fill="none" stroke="#4DFFD2" stroke-width="1.6"
+       stroke-linecap="round" stroke-linejoin="round"
+       style="display:block;width:100%;height:22px;margin-top:1.25rem;opacity:0.75">${paths}</svg>`;
+}
+
+function mountScoreLoader() {
+  stopScoreLoader();
+  if (REDUCED || !document.getElementById('score-loader')) return;
+  scoreLoader = animate(svg.createDrawable('#score-loader path'), {
+    draw: ['0 0', '0 1', '1 1'],
+    delay: stagger(40),
+    ease: 'inOut(3)',
+    duration: 1500,
+    loop: true,
+  });
+}
+
+function stopScoreLoader() {
+  if (!scoreLoader) return;
+  scoreLoader.revert();
+  scoreLoader = null;
+}
+
 const RATE_LIMIT_S = 60;
 let lastScoreAt = 0;
 
-function Upload() {
-  const state = { mode:'tic', ticId:'', status:'idle', progress:0, stage:0, elapsed:0, result:null, cooldown:0 };
-  let timer = null, ticker = null;
+/* The run outlives the page. Navigating away used to clear the interval and
+   drop the closure that held the request, so a score you had waited 40 s for
+   was abandoned the moment you looked at anything else — and /score is rate
+   limited to one call a minute, so starting again cost another wait. State and
+   timers live out here; the page registers a render hook while it is mounted
+   and clears it when it is not, and the run carries on either way. */
+const UPLOAD = { mode:'tic', ticId:'', status:'idle', progress:0, stage:0, elapsed:0,
+                 script:0, awaiting:false, waitedOn:0, result:null, error:null,
+                 cooldown:0, controller:null, cancelled:false, vettingId:null,
+                 answeredAt:0, ephemeris:{}, blsExpected:false };
+let uploadTimer = null, uploadCooldown = null, uploadRender = null;
 
-  const STAGES = [
-    { label:'Resolving target in the TIC',      short:'Resolve',    to:8,   ms:600 },
-    { label:'Downloading photometry from MAST', short:'Download',   to:56,  ms:3400 },
-    { label:'Detrending and phase-folding',     short:'Detrend',    to:72,  ms:1100 },
-    { label:'Scoring 11-branch ensemble',       short:'Score',      to:91,  ms:1500 },
-    { label:'Platt calibration · MC-dropout',   short:'Calibrate',  to:100, ms:900 },
-  ];
+/** Called by route() on the way out: stop painting, keep running. */
+function detachUploadRender() { uploadRender = null; }
+
+const paintUpload = () => { if (uploadRender) uploadRender(); };
+
+/* `holds` marks the stage the run actually waits in. /score is one blocking
+     request that reports nothing about its own progress, so the client knows
+     exactly two things: when it was sent, and when it answered. The MAST fetch
+     is what that gap is — 20-60 s cold against about three seconds for
+     everything after it — so the run stops on that stage and counts real
+     seconds there, instead of running the bar to 100% on 'Platt calibration'
+     and waiting behind a finished animation. */
+const STAGES = [
+  { label:'Resolving target in the TIC',      short:'Resolve',    to:8,   ms:600 },
+  { label:'Downloading photometry from MAST', short:'Download',   to:56,  ms:3400, holds:true },
+  { label:'Detrending and phase-folding',     short:'Detrend',    to:72,  ms:1100 },
+  { label:'Scoring 11-branch ensemble',       short:'Score',      to:91,  ms:1500 },
+  { label:'Platt calibration · MC-dropout',   short:'Calibrate',  to:100, ms:900 },
+];
+const HOLD_AT = STAGES.findIndex(x => x.holds);
+const HOLD_MS = STAGES.slice(0, HOLD_AT + 1).reduce((a, x) => a + x.ms, 0);
+const TOTAL_MS = STAGES.reduce((a, x) => a + x.ms, 0);
+
+/** Scripted milliseconds → which stage is running and how full the bar is. */
+const stageAt = ms => {
+  let acc = 0;
+  for (let i = 0; i < STAGES.length; i++) {
+    if (ms < acc + STAGES[i].ms || i === STAGES.length - 1) {
+      const from = i === 0 ? 0 : STAGES[i - 1].to;
+      const f = Math.max(0, Math.min(1, (ms - acc) / STAGES[i].ms));
+      return { stage: i, progress: Math.round(from + (STAGES[i].to - from) * f) };
+    }
+    acc += STAGES[i].ms;
+  }
+};
+
+function Upload() {
+  const state = UPLOAD;
 
   app.innerHTML = `
   <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
@@ -858,7 +1133,20 @@ function Upload() {
     document.getElementById('up-tic').addEventListener('input', e => { state.ticId = e.target.value; paintAction(); });
   };
 
+  const cancelRun = () => {
+    state.cancelled = true;
+    if (state.controller) state.controller.abort();
+    clearInterval(uploadTimer);
+    uploadTimer = null;
+    state.status = 'idle';
+    state.awaiting = false;
+    state.error = null;
+    document.body.classList.remove('scoring');
+    paintAction();
+  };
+
   const paintAction = () => {
+    if (state.status !== 'running') stopScoreLoader();
     const m = UPLOAD_MODES.find(x => x.key === state.mode);
     if (!m.live) { actionEl.innerHTML = ''; return; }
 
@@ -890,49 +1178,67 @@ function Upload() {
       return;
     }
 
+    /* Rendered once on entry, then patched. The panel used to be rebuilt on
+       every 220 ms tick, which restarted the rail's waiting sweep and would
+       have rebuilt the loader with it — the same detached-target leak the boot
+       overlay had, five times a second. */
     if (state.status === 'running') {
-      actionEl.innerHTML = `
-        <div style="margin-top:2rem">
+      if (!actionEl.querySelector('#up-run')) {
+        actionEl.innerHTML = `
+        <div id="up-run" style="margin-top:2rem">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem">
             <div style="display:flex;align-items:center;gap:0.5rem">
               <div class="live-dot"></div>
-              <span class="stat-label" style="color:#4DFFD2">${esc(STAGES[state.stage].label)}…</span>
+              <span class="stat-label" id="up-stage" style="color:#4DFFD2"></span>
             </div>
             <div style="display:flex;gap:1rem;align-items:baseline">
-              <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8">${state.elapsed.toFixed(1)}s elapsed</span>
-              <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;font-variant-numeric:tabular-nums">${state.awaiting ? 'waiting on MAST' : `stage ${state.stage + 1} of ${STAGES.length}`}</span>
+              <span id="up-elapsed" style="font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8"></span>
+              <span id="up-count" style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;font-variant-numeric:tabular-nums"></span>
               <button class="btn-ghost" id="up-cancel" style="font-size:0.6rem;padding:0.3rem 0.7rem">Cancel</button>
             </div>
           </div>
-          <div style="height:2px;background:rgba(255,255,255,0.08);position:relative;overflow:hidden">
-            <div style="height:100%;width:${state.progress}%;background:#4DFFD2;transition:width 400ms linear;box-shadow:0 0 8px rgba(77,255,210,0.6)"></div>
+          <div class="up-rail" id="up-railel"><div class="up-fill" id="up-fill"></div></div>
+          <div id="up-chips" style="margin-top:1rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:0.5rem">
+            ${STAGES.map(st => `<div style="display:flex;align-items:center;gap:0.4rem">
+                <div class="up-chip-dot" style="width:6px;height:6px;border-radius:50%"></div>
+                <span class="up-chip-text" style="font-family:'JetBrains Mono';font-size:0.62rem">${esc(st.short)}</span>
+              </div>`).join('')}
           </div>
-          <div style="margin-top:1rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:0.5rem">
-            ${STAGES.map((s, i) => {
-              const done = i < state.stage, now = i === state.stage;
-              return `<div style="display:flex;align-items:center;gap:0.4rem">
-                <div style="width:6px;height:6px;border-radius:50%;background:${done || now ? '#4DFFD2' : 'rgba(255,255,255,0.15)'};opacity:${now ? 1 : done ? 0.6 : 1};box-shadow:${done || now ? '0 0 6px rgba(77,255,210,0.6)' : 'none'}"></div>
-                <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${done || now ? '#4DFFD2' : '#8A8FA8'}">${esc(s.short)}</span>
-              </div>`;
-            }).join('')}
-          </div>
-          <div style="font-family:'Inter';font-size:0.72rem;color:#8A8FA8;margin-top:1rem">
-            Holding the connection open while MAST serves the light curve. This is the slow step and it is not cached for this target.
-          </div>
+          ${scoreLoaderHTML()}
+          <div id="up-foot" style="font-family:'Inter';font-size:0.72rem;color:#8A8FA8;margin-top:1rem"></div>
         </div>`;
-      const cancel = document.getElementById('up-cancel');
-      if (cancel) cancel.addEventListener('click', () => {
-        state.cancelled = true;
-        if (state.controller) state.controller.abort();
-        clearInterval(timer);
-        state.status = 'idle';
-        state.awaiting = false;
-        state.pending = null;
-        state.error = null;
-        paintAction();
+        document.getElementById('up-cancel').addEventListener('click', cancelRun);
+        mountScoreLoader();
+      }
+
+      document.getElementById('up-stage').textContent = `${STAGES[state.stage].label}…`;
+      document.getElementById('up-elapsed').textContent = `${state.elapsed.toFixed(1)}s elapsed`;
+      document.getElementById('up-count').textContent = state.awaiting
+        ? `waiting on MAST · ${state.waitedOn.toFixed(1)}s`
+        : `stage ${state.stage + 1} of ${STAGES.length}`;
+      document.getElementById('up-railel').classList.toggle('waiting', state.awaiting);
+      document.getElementById('up-fill').style.width = `${state.progress}%`;
+      document.querySelectorAll('#up-chips .up-chip-dot').forEach((dot, i) => {
+        const done = i < state.stage, now = i === state.stage;
+        dot.style.background = done || now ? '#4DFFD2' : 'rgba(255,255,255,0.15)';
+        dot.style.opacity = now ? '1' : done ? '0.6' : '1';
+        dot.style.boxShadow = done || now ? '0 0 6px rgba(77,255,210,0.6)' : 'none';
       });
+      document.querySelectorAll('#up-chips .up-chip-text').forEach((t, i) => {
+        t.style.color = i <= state.stage ? '#4DFFD2' : '#8A8FA8';
+      });
+      document.getElementById('up-foot').innerHTML = !state.awaiting
+        ? `Scoring runs server-side in one request; the stages are its sequence. The run will stop on <b style="color:rgba(240,238,232,0.75);font-weight:500">${esc(STAGES[HOLD_AT].short)}</b> and count real seconds there until MAST answers.`
+        : 'Holding the connection open while MAST serves the light curve. /score is a single blocking request and reports nothing about its own progress, so this is real elapsed time in the fetch, not a percentage of it — the bar stops here until the answer arrives.'
+          // Past a minute the wait has almost certainly stopped being the fetch.
+          // The client cannot see inside one blocking request, so it says which
+          // of the two it is rather than going on naming the fetch.
+          + (state.blsExpected && state.waitedOn > 45
+              ? ' This target carries no catalogue ephemeris, so its period is being solved by a BLS search before it can be scored — past about a minute, that is what the wait is.'
+              : '');
       return;
     }
+
 
     if (state.status === 'complete' && state.result) {
       const r = state.result;
@@ -976,7 +1282,11 @@ function Upload() {
           </div>` : ''}
 
           <div style="display:flex;gap:1rem;flex-wrap:wrap">
-            <button class="btn-teal" data-nav="#/catalogue">View in Catalogue →</button>
+            <!-- was "View in Catalogue", which dropped the user on 500 unrelated
+                 rows with nothing pointing at the target they had just scored. -->
+            ${state.vettingId
+              ? `<button class="btn-teal" data-nav="#/vetting/${encodeURIComponent(state.vettingId)}">Open full vetting →</button>`
+              : `<button class="btn-teal" data-nav="#/catalogue">View in Catalogue →</button>`}
             <button class="btn-ghost" id="up-again">Score another</button>
           </div>
         </div>`;
@@ -991,12 +1301,16 @@ function Upload() {
   };
 
   const startCooldown = () => {
-    clearInterval(ticker);
-    ticker = setInterval(() => {
+    clearInterval(uploadCooldown);
+    uploadCooldown = setInterval(() => {
       state.cooldown -= 1;
-      if (state.cooldown <= 0) { clearInterval(ticker); state.status = 'idle'; state.result = null; }
-      if (location.hash.replace(/^#/, '') === '/upload') paintAction();
-      else clearInterval(ticker);
+      if (state.cooldown <= 0) {
+        clearInterval(uploadCooldown);
+        uploadCooldown = null;
+        state.status = 'idle';
+        state.result = null;
+      }
+      paintUpload();
     }, 1000);
   };
 
@@ -1004,70 +1318,102 @@ function Upload() {
     const wait = Math.ceil((RATE_LIMIT_S * 1000 - (Date.now() - lastScoreAt)) / 1000);
     if (lastScoreAt && wait > 0) { state.status = 'ratelimited'; state.cooldown = wait; startCooldown(); paintAction(); return; }
 
-    state.status = 'running'; state.progress = 0; state.stage = 0; state.elapsed = 0; state.result = null;
+    state.status = 'running'; state.progress = 0; state.stage = 0;
+    state.elapsed = 0; state.script = 0; state.result = null;
+    state.awaiting = false; state.waitedOn = 0; state.vettingId = null;
+    // The nav marks a run in flight, so leaving the page to browse does not
+    // mean losing track of whether one is still going.
+    document.body.classList.add('scoring');
     paintAction();
 
     const t0 = performance.now();
-    clearInterval(timer);
+    let last = t0;
+    clearInterval(uploadTimer);
 
-    /* The staged bar and the real request run together. The stages are a
-       readable account of what the server is doing, not a measurement of it,
-       so the bar is allowed to finish first and then wait. */
     const tic = Number(String(state.ticId).replace(/[^0-9]/g, ''));
     state.cancelled = false;
     state.controller = API.mode === 'live' && tic ? new AbortController() : null;
-    state.pending = state.controller
-      ? loadScore(tic, {}, { signal: state.controller.signal })
-          .then(sc => ({ sc }))
-          .catch(e => ({ err: e.name === 'AbortError' ? null : e.message }))
-      : null;
-    state.awaiting = false;
 
-    timer = setInterval(() => {
-      state.elapsed = (performance.now() - t0) / 1000;
-      const total = STAGES.slice(0, state.stage + 1).reduce((s, x) => s + x.ms, 0);
-      const prev = STAGES.slice(0, state.stage).reduce((s, x) => s + x.ms, 0);
-      const from = state.stage === 0 ? 0 : STAGES[state.stage - 1].to;
-      const f = Math.min(1, (state.elapsed * 1000 - prev) / STAGES[state.stage].ms);
-      state.progress = Math.round(from + (STAGES[state.stage].to - from) * f);
-      if (state.elapsed * 1000 >= total && state.stage < STAGES.length - 1) state.stage++;
-      if (state.elapsed * 1000 >= STAGES.reduce((s, x) => s + x.ms, 0)) {
-        if (state.pending) {
-          // Hold the last stage until the real score lands. MAST fetches run
-          // 20-60 s cold, well past the animation, and completing the bar
-          // before the answer exists would show a finished run with no result.
-          const pending = state.pending;
-          state.pending = null;
-          state.awaiting = true;
-          pending.then(out => {
-            clearInterval(timer);
-            state.awaiting = false;
-            // A cancelled run never happened: it must not start the rate-limit
-            // cooldown, and it has nothing to report.
-            if (state.cancelled || !has(out.err) && !has(out.sc)) {
-              state.status = 'idle';
-              return;
-            }
-            lastScoreAt = Date.now();
-            if (out.err) {
-              state.status = 'idle';
-              state.error = out.err;
-            } else {
-              state.status = 'complete';
-              state.error = null;
-              state.result = liveScoreResult(state.ticId, state.elapsed, out.sc);
-            }
-            if (location.hash.replace(/^#/, '') === '/upload') paintAction();
-          });
-        } else if (!state.awaiting) {
-          clearInterval(timer);
+    /* Send the catalogue ephemeris when the target is a row already held. The
+       Vetting page has always done this; Upload sent {} for everything, so a
+       target whose period and epoch were sitting in memory still had its period
+       solved from scratch by a BLS search — seconds turned into minutes for no
+       reason. Unknown targets still fall back to the search, as they must. */
+    const known = CANDIDATES.find(c => c.ticNumeric === tic);
+    state.ephemeris = known ? ephemerisFor(known) : {};
+    state.blsExpected = !has(state.ephemeris.periodDays);
+
+    /* The request and the staged bar run together. The bar is a readable
+       account of the server's sequence, not a measurement of it — so it is
+       allowed to run ahead of the request up to the MAST stage, and there it
+       stops until the answer lands. */
+    /* `answeredAt` is stamped where the promise settles, not where the 220 ms
+       timer next runs. Browsers throttle timers in a background tab, so the
+       reported "scored in" was the delay until the console noticed rather than
+       the time the request took — it read 52.8 s for a run that had answered
+       long before. */
+    let answer = null;
+    state.answeredAt = 0;
+    if (state.controller) {
+      loadScore(tic, state.ephemeris, { signal: state.controller.signal })
+        .then(sc => { state.answeredAt = performance.now(); answer = { sc }; })
+        .catch(e => { state.answeredAt = performance.now(); answer = { err: e.name === 'AbortError' ? null : e.message }; });
+    }
+
+    uploadTimer = setInterval(() => {
+      const now = performance.now();
+      const dt = now - last;
+      last = now;
+      state.elapsed = (now - t0) / 1000;
+
+      // A mock run has nothing to wait for, so its script never stops.
+      const settled = !state.controller || Boolean(answer);
+      // Once the answer is in hand the remaining stages are narration, so they
+      // run at 3x. A cached score answers in about 0.1 s and used to sit behind
+      // seven and a half seconds of animation describing work already done.
+      state.script = Math.min(settled ? TOTAL_MS : HOLD_MS, state.script + dt * (settled ? 3 : 1));
+      state.awaiting = !settled && state.script >= HOLD_MS;
+      if (state.awaiting) state.waitedOn = state.elapsed - HOLD_MS / 1000;
+
+      const at = stageAt(state.script);
+      // At exactly HOLD_MS the mapper has already rolled to the next stage, so
+      // a run parked on the MAST fetch would be captioned "Detrending".
+      state.stage = state.awaiting ? HOLD_AT : at.stage;
+      state.progress = state.awaiting ? STAGES[HOLD_AT].to : at.progress;
+
+      if (settled && state.script >= TOTAL_MS) {
+        clearInterval(uploadTimer);
+        uploadTimer = null;
+        state.awaiting = false;
+        document.body.classList.remove('scoring');
+        if (!state.controller) {
           lastScoreAt = Date.now();
           state.status = 'complete';
           state.result = mockScore(state.ticId, state.elapsed);
+        } else {
+          // A cancelled run never happened: it must not start the rate-limit
+          // cooldown, and it has nothing to report.
+          if (state.cancelled || (!has(answer.err) && !has(answer.sc))) {
+            state.status = 'idle';
+          } else {
+            lastScoreAt = Date.now();
+            if (answer.err) {
+              state.status = 'idle';
+              state.error = answer.err;
+            } else {
+              state.status = 'complete';
+              state.error = null;
+              state.result = liveScoreResult(state.ticId, (state.answeredAt - t0) / 1000, answer.sc);
+              /* The score is kept against the target so the vetting page can
+                 open on it without scoring again — same endpoint, same answer,
+                 and /score is rate limited to one call a minute. */
+              state.vettingId = rememberScoredTarget(tic, answer.sc);
+            }
+          }
         }
       }
-      if (location.hash.replace(/^#/, '') === '/upload') paintAction();
-      else clearInterval(timer);
+
+      paintUpload();
     }, 220);
   };
 
@@ -1075,6 +1421,8 @@ function Upload() {
     state.mode = b.dataset.m; paintModes(); paintInput(); paintAction();
   }));
 
+  // Painting resumes from wherever the run got to while the page was away.
+  uploadRender = paintAction;
   paintModes(); paintInput(); paintAction();
 }
 
