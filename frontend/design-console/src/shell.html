@@ -1,4 +1,4 @@
-<title>Exoplanet Hunter · Transit Detection Console</title>
+<title>Exoplanet Hunter</title>
 <style>
 /* ═══════════════════════════════════════════════════════════
    EXOPLANET HUNTER — DESIGN SYSTEM
@@ -37,6 +37,52 @@ body{
   -moz-osx-font-smoothing:grayscale;
   overflow-x:clip;
 }
+/* iOS Safari zooms the viewport in when a focused input's type is under 16 px,
+   and does not zoom back out. The catalogue search was 12 px and the TIC field
+   14.4 px, so typing a target on a phone left the page zoomed. Scoped to touch
+   devices so the desktop type scale is untouched -- the bug is the zoom, not
+   the size. */
+@media (hover: none) and (pointer: coarse){
+  input,textarea,select{font-size:16px !important;}
+}
+
+/* Touch targets. Measured on a 375 px viewport, these came in between 17 and
+   32 px against the 44 px the guidelines ask for on touch: the filter chips at
+   41x29, the menu button 42x32, the candidate shortcuts 95x28, the vetting tabs
+   92x42, and the health panel's replay control worst at 18x17.
+
+   The fix is a centred overlay rather than more padding, so the hit area grows
+   and nothing moves. `max()` means a control already at or above 44 px is left
+   alone. Applied only on touch, where the 44 px floor applies and where there
+   is no cursor to aim with. The overlays stay narrower than the gaps between
+   the controls they sit on, so none of them steals a neighbour's tap. */
+@media (hover: none) and (pointer: coarse){
+  #cat-disp button,#cat-src button,#nav-toggle,.cand-btn,#vet-tabs button,#hstat-replay{
+    position:relative;
+  }
+  #cat-disp button::after,#cat-src button::after,#nav-toggle::after,
+  .cand-btn::after,#vet-tabs button::after,#hstat-replay::after{
+    content:'';position:absolute;left:50%;top:50%;
+    transform:translate(-50%,-50%);
+    width:max(100%,44px);height:max(100%,44px);
+  }
+  /* A range input's hit area is its box, and a pseudo-element cannot carry the
+     drag. Padding grows the box while the track stays the size it looks. */
+  #cat-range{height:16px;padding:14px 0;box-sizing:content-box;}
+}
+
+/* Seven nav links stand between a keyboard user and the content on every page. */
+.skip-link{
+  position:fixed;top:0;left:0;z-index:300;
+  transform:translateY(-120%);
+  background:#050608;color:#4DFFD2;border:1px solid rgba(77,255,210,0.5);
+  font-family:'JetBrains Mono',monospace;font-size:0.7rem;letter-spacing:0.12em;
+  text-transform:uppercase;text-decoration:none;padding:0.75rem 1.25rem;margin:0.5rem;
+  transition:transform 160ms ease;
+}
+.skip-link:focus{transform:translateY(0);}
+@media(prefers-reduced-motion:reduce){ .skip-link{transition:none;} }
+
 h1,h2,h3,h4{font-family:'Ailerons',sans-serif;letter-spacing:-0.02em;margin:0;}
 p{margin:0;}
 button:not(:disabled),[role="button"]:not([aria-disabled="true"]),a[href]{cursor:pointer;}
@@ -61,7 +107,7 @@ table{border-collapse:collapse;}
   background:transparent;border:1px solid rgba(77,255,210,0.5);color:#4DFFD2;
   font-family:'Ailerons',sans-serif;font-size:0.75rem;font-weight:600;letter-spacing:0.12em;
   text-transform:uppercase;padding:0.75rem 1.75rem;
-  transition:all 200ms cubic-bezier(0.23,1,0.32,1);position:relative;overflow:hidden;
+  transition:background-color 200ms cubic-bezier(0.23,1,0.32,1),color 200ms cubic-bezier(0.23,1,0.32,1),border-color 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1);position:relative;overflow:hidden;
 }
 .btn-teal:hover{background:rgba(77,255,210,0.08);border-color:#4DFFD2;box-shadow:0 0 24px rgba(77,255,210,0.2),inset 0 0 24px rgba(77,255,210,0.05);}
 .btn-teal:active{transform:scale(0.97);}
@@ -70,7 +116,7 @@ table{border-collapse:collapse;}
 .btn-ghost{
   background:transparent;border:1px solid rgba(255,255,255,0.2);color:rgba(240,238,232,0.8);
   font-family:'Ailerons',sans-serif;font-size:0.75rem;font-weight:500;letter-spacing:0.10em;
-  text-transform:uppercase;padding:0.75rem 1.75rem;transition:all 200ms cubic-bezier(0.23,1,0.32,1);
+  text-transform:uppercase;padding:0.75rem 1.75rem;transition:background-color 200ms cubic-bezier(0.23,1,0.32,1),color 200ms cubic-bezier(0.23,1,0.32,1),border-color 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1);
 }
 .btn-ghost:hover{border-color:rgba(255,255,255,0.5);color:#F0EEE8;background:rgba(255,255,255,0.04);}
 .btn-ghost:active{transform:scale(0.97);}
@@ -139,7 +185,7 @@ table{border-collapse:collapse;}
 
 .chart-tooltip{background:rgba(10,12,16,0.95);border:1px solid rgba(77,255,210,0.3);padding:0.5rem 0.75rem;font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:#F0EEE8;backdrop-filter:blur(8px);}
 
-.upload-zone{border:1px dashed rgba(77,255,210,0.3);background:rgba(77,255,210,0.02);transition:all 250ms ease;}
+.upload-zone{border:1px dashed rgba(77,255,210,0.3);background:rgba(77,255,210,0.02);transition:background-color 250ms ease,border-color 250ms ease;}
 .upload-zone:hover,.upload-zone.drag-over{border-color:rgba(77,255,210,0.6);background:rgba(77,255,210,0.05);box-shadow:0 0 30px rgba(77,255,210,0.1);}
 
 /* Mission backdrop, cropped and lifted at build time by tools/backdrop.py.
@@ -185,7 +231,20 @@ table{border-collapse:collapse;}
 }
 .hero-credit a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(138,143,168,0.22);}
 .hero-credit a:hover,.hero-credit a:focus-visible{color:rgba(240,238,232,0.75);}
-@media(max-width:820px){ .hero-credit{left:1.5rem;} }
+@media(max-width:820px){
+  /* The hero centres its content in 100vh, so on a short, narrow viewport the
+     block is taller than the space and the top of it runs up under the fixed
+     nav -- at 375x812 the eyebrow sat beneath the bar and behind the menu
+     button. Reserving the bar's height as padding centres the content in what
+     is actually free. */
+  .hero{padding-top:56px;box-sizing:border-box;}
+  /* The status panel goes full width down here and the credit at 3.25rem
+     landed inside it. Anchoring to the section's bottom instead put it past the
+     fold, because the section runs taller than the viewport once the nav's
+     height is reserved. So on narrow screens it leaves the corner entirely and
+     sits in flow under the panel, which cannot collide with anything. */
+  .hero-credit{position:static;margin:0.9rem 1.5rem 0;}
+}
 @media(max-width:640px){ .hero-credit{font-size:0.5rem;letter-spacing:0.06em;max-width:calc(100% - 3rem);} }
 
 .orbital-motif{position:absolute;top:50%;right:-200px;transform:translateY(-50%);width:600px;height:600px;border-radius:50%;border:1px solid rgba(255,255,255,0.03);pointer-events:none;}
@@ -340,7 +399,7 @@ select option{background:#0A0C10;color:#F0EEE8;}
 .seg button{
   font-family:'Ailerons',sans-serif;font-size:0.62rem;font-weight:600;letter-spacing:0.12em;
   text-transform:uppercase;padding:0.55rem 1.1rem;background:transparent;border:none;
-  border-right:1px solid rgba(255,255,255,0.1);color:#8A8FA8;transition:all 150ms ease;
+  border-right:1px solid rgba(255,255,255,0.1);color:#8A8FA8;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease;
 }
 .seg button:last-child{border-right:none;}
 .seg button.on{background:rgba(77,255,210,0.08);color:#4DFFD2;}
@@ -367,7 +426,7 @@ select option{background:#0A0C10;color:#F0EEE8;}
 #hstat .label{font-family:'Ailerons',sans-serif;font-size:0.55rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;flex:1;min-width:0;}
 #hstat .detail{font-family:'JetBrains Mono',monospace;font-size:0.56rem;color:#8A8FA8;margin-top:0.35rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #hstat .foot{font-family:'Inter',sans-serif;font-size:0.6rem;line-height:1.45;color:rgba(240,238,232,0.42);margin-top:0.55rem;}
-#hstat .replay{background:none;border:1px solid rgba(255,255,255,0.12);color:#8A8FA8;font-family:'JetBrains Mono',monospace;font-size:0.56rem;line-height:1;padding:0.2rem 0.34rem;transition:all 150ms ease;flex:none;}
+#hstat .replay{background:none;border:1px solid rgba(255,255,255,0.12);color:#8A8FA8;font-family:'JetBrains Mono',monospace;font-size:0.56rem;line-height:1;padding:0.2rem 0.34rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease;flex:none;}
 #hstat .replay:hover{border-color:rgba(77,255,210,0.4);color:#4DFFD2;}
 /* indeterminate: a travelling sliver, for the sub-2s and suspend-resume paths */
 #hstat .rail{position:relative;height:2px;background:rgba(255,255,255,0.07);margin-top:0.6rem;overflow:hidden;}
@@ -498,6 +557,7 @@ select option{background:#0A0C10;color:#F0EEE8;}
 
 <canvas id="star-canvas" aria-hidden="true"></canvas>
 
+<a class="skip-link" href="#app">Skip to content</a>
 <header id="nav">
   <div class="container">
     <div class="mission-tags">
@@ -527,7 +587,7 @@ select option{background:#0A0C10;color:#F0EEE8;}
   <div id="nav-scrim"></div>
 </header>
 
-<main id="app" class="page-content"></main>
+<main id="app" class="page-content" tabindex="-1"></main>
 
 <div id="ticker" aria-hidden="true">
   <div class="tag"><div class="live-dot"></div><span>Ranked Candidates</span></div>

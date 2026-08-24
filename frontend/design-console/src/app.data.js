@@ -797,15 +797,56 @@ function defaultVettingId() {
   return usable ? usable.id : null;
 }
 
+/* The tab reads "Exoplanet Hunter" on every route, by choice. The guidelines in
+   AGENTS.md ask for a title that tracks the current view, and this deliberately
+   does not: the console is one product and the tab is its name, not a readout
+   of which of its seven pages happens to be open.
+
+   The set is still needed as the list of routes route() will accept, which is
+   what keeps an unknown hash from rendering a blank page. */
+const SITE_TITLE = 'Exoplanet Hunter';
+const KNOWN_ROUTES = new Set([
+  '/', '/catalogue', '/vetting', '/model', '/upload', '/discovery', '/about',
+]);
+
+/* Browsers restore scroll on their own for a document navigation, but this is
+   one document and seven hash routes, so it never had anything to restore and
+   every Back landed at the top of a 500-row catalogue. The offset is parked in
+   the history entry itself, which means it survives with the entry rather than
+   in a map this page has to keep in step with it. */
+history.scrollRestoration = 'manual';
+
+/* Trailing timeout rather than requestAnimationFrame. rAF does not fire while
+   the tab is hidden, and "scrolled, then switched tabs, then came back and hit
+   Back" is exactly when losing the offset is most annoying. A timer still runs
+   there, throttled, which is all this needs. */
+let scrollParkPending = 0;
+const parkScroll = () => {
+  clearTimeout(scrollParkPending);
+  scrollParkPending = setTimeout(() => {
+    // replaceState with no url keeps the current one, hash included
+    history.replaceState({ ...history.state, y: window.scrollY }, '');
+  }, 150);
+};
+
+/* popstate fires only for Back/Forward; assigning location.hash does not raise
+   it. Both then raise hashchange, popstate first, so this hands the offset
+   forward for exactly the navigations that should restore one and leaves a
+   link click to land at the top. */
+let restoreTo = null;
+window.addEventListener('popstate', e => { restoreTo = (e.state && e.state.y) || 0; });
+
 function route() {
   clearCharts();
   stopHealth();
   stopScoreLoader();
   // The upload run keeps going; it just stops painting a page that is gone.
   detachUploadRender();
-  const path = location.hash.replace(/^#/, '') || '/';
+  const raw = location.hash.replace(/^#/, '') || '/';
+  const path = raw.startsWith('/vetting/') || KNOWN_ROUTES.has(raw) ? raw : '/';
   renderNav(path);
-  window.scrollTo(0, 0);
+  document.title = SITE_TITLE;
+
   const page =
       path === '/catalogue' ? Catalogue
     : path.startsWith('/vetting/') ? () => Vetting(decodeURIComponent(path.slice('/vetting/'.length)))
@@ -817,9 +858,18 @@ function route() {
     : Home;
   page();
   fitTables();
+
+  /* After the page is in the DOM, or there is nothing to scroll through yet.
+     `behavior: 'instant'` because html carries scroll-behavior:smooth for
+     in-page anchors, and without the override a route change animates its way
+     to the top over several hundred milliseconds instead of just being there. */
+  const y = restoreTo;
+  restoreTo = null;
+  window.scrollTo({ top: y || 0, left: 0, behavior: 'instant' });
 }
 
 window.addEventListener('hashchange', route);
 window.addEventListener('scroll', () => {
   document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 40);
+  parkScroll();
 }, { passive: true });

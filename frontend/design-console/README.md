@@ -278,6 +278,41 @@ shows the answer; Vetting takes a target already on the page and shows the
 working. The result panel hands off to `#/vetting/<id>` rather than dropping the
 user on the catalogue.
 
+## Web Interface Guidelines
+
+`AGENTS.md` at the repo root is Vercel's Web Interface Guidelines. Eight gaps
+against it were closed:
+
+- **Deep links work again.** Every load used to be rewritten to `#/`. Only a bare
+  URL is now, and an unrecognised path falls through to Mission.
+- **Scroll position survives Back.** `history.scrollRestoration` is `manual` and
+  the offset is parked in the history entry itself, so it travels with the entry.
+  Parked on a trailing timeout rather than `requestAnimationFrame`, because rAF
+  does not fire in a hidden tab and "scrolled, switched tabs, came back, hit
+  Back" is exactly when losing the offset stings.
+- **Inputs are 16 px on touch.** Below that iOS Safari zooms the viewport in on
+  focus and does not zoom out. The catalogue search was 12 px and the TIC field
+  14.4 px. Scoped to `(hover: none) and (pointer: coarse)` so the desktop type
+  scale is untouched: the bug is the zoom, not the size.
+- **No `transition: all`.** Sixteen of them, now naming their properties.
+- **Skip-to-content link**, ahead of seven nav links on every page.
+- **`<meta name="theme-color">`** so mobile chrome stops drawing grey above a
+  near-black page.
+- **Touch targets at 44 px.** Measured at 375 px: filter chips 41x29, menu button
+  42x32, candidate shortcuts 95x28, health replay worst at 18x17. Grown with a
+  centred overlay rather than padding, so the hit area changes and nothing moves.
+  A range input cannot use a pseudo-element for this, so it gets padding instead.
+
+**One is deliberately not met.** The guidelines want `<title>` to track the
+current view; it reads "Exoplanet Hunter" everywhere by choice. The console is
+one product and the tab is its name, not a readout of which page is open.
+
+**One cannot be met without giving up something asked for.** Sort headers in the
+catalogue are 35x14 before the fit scale, so about 5 px of tap target once the
+table is scaled to a phone. Growing them would overlap adjacent columns, and the
+table is scaled precisely so it keeps its desktop layout. Sorting on a phone is
+the cost of that.
+
 ## Narrow screens
 
 Below **900 px** the seven nav links move into a panel behind a menu button;

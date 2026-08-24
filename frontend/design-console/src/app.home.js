@@ -74,7 +74,7 @@ const H1 = 'font-family:\'Anurati\', sans-serif;font-size:clamp(3.5rem, 7vw, 6re
 function Home() {
   app.innerHTML = `
   <div style="min-height:100vh;background:#050608;position:relative">
-    <section style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;padding-bottom:40px">
+    <section class="hero" style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;padding-bottom:40px">
       <div class="hero-sky" aria-hidden="true"></div>
       <div style="position:absolute;inset:0;background:linear-gradient(to right, rgba(5,6,8,0.95) 40%, rgba(5,6,8,0.4) 70%, rgba(5,6,8,0.6) 100%)"></div>
       <div style="position:absolute;bottom:0;left:0;right:0;height:200px;background:linear-gradient(to bottom, transparent, #050608)"></div>
@@ -93,14 +93,14 @@ function Home() {
       <div class="page-pad" style="position:relative;z-index:2;padding:0 3rem;max-width:1440px;margin:0 auto;width:100%">
         <div class="hero-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4rem;align-items:center">
           <div>
-            <div class="section-label rv" style="margin-bottom:2rem;transform:translateY(16px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s">Exoplanet Hunter V2 · Transit Detection Console</div>
-            <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.2s">HUNTING</h1>
-            <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.3s">WORLDS</h1>
-            <h1 class="rv" style="${H1};font-weight:300;color:rgba(240,238,232,0.25);margin-bottom:2.5rem;transform:translateY(24px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.4s">BEYOND</h1>
-            <p class="rv" style="font-family:'Inter', sans-serif;font-size:1rem;line-height:1.7;color:rgba(240,238,232,0.6);max-width:480px;margin-bottom:2.5rem;transform:translateY(16px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.5s">
+            <div class="section-label rv" style="margin-bottom:2rem;transform:translateY(16px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s">Exoplanet Hunter V2 · Transit Detection Console</div>
+            <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.2s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.2s">HUNTING</h1>
+            <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.3s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.3s">WORLDS</h1>
+            <h1 class="rv" style="${H1};font-weight:300;color:rgba(240,238,232,0.25);margin-bottom:2.5rem;transform:translateY(24px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.4s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.4s">BEYOND</h1>
+            <p class="rv" style="font-family:'Inter', sans-serif;font-size:1rem;line-height:1.7;color:rgba(240,238,232,0.6);max-width:480px;margin-bottom:2.5rem;transform:translateY(16px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.5s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.5s">
               A calibrated deep-learning pipeline vetting unconfirmed NASA transit candidates, with uncertainty you can trust.
             </p>
-            <div class="rv" style="display:flex;gap:1rem;flex-wrap:wrap;transform:translateY(16px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.6s">
+            <div class="rv" style="display:flex;gap:1rem;flex-wrap:wrap;transform:translateY(16px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.6s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.6s">
               <button class="btn-teal" data-nav="#/catalogue">Explore Candidates →</button>
               <button class="btn-ghost" data-nav="#/upload">Submit Data</button>
             </div>
@@ -283,10 +283,10 @@ function Catalogue() {
             style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#F0EEE8;font-family:'JetBrains Mono';font-size:0.75rem;padding:0.6rem 0.75rem 0.6rem 2rem">
         </div>
         <div style="display:flex;gap:0.4rem" id="cat-disp">
-          ${DISPOSITIONS.map(d => `<button data-d="${d}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:all 150ms ease">${d}</button>`).join('')}
+          ${DISPOSITIONS.map(d => `<button data-d="${d}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">${d}</button>`).join('')}
         </div>
         <div style="display:flex;gap:0.4rem" id="cat-src">
-          ${SOURCES.map(s => `<button data-s="${s}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:all 150ms ease">${s}</button>`).join('')}
+          ${SOURCES.map(s => `<button data-s="${s}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">${s}</button>`).join('')}
         </div>
         <div style="display:flex;align-items:center;gap:0.75rem">
           <span class="stat-label">Min P(planet)</span>

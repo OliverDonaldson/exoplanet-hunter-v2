@@ -124,7 +124,10 @@ def main() -> int:
     standalone = (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width,initial-scale=1">'
-        "<title>Exoplanet Hunter · Vetting Console</title>"
+        # matches --void, so mobile browser chrome stops drawing its own grey
+        # band above a near-black page
+        '<meta name="theme-color" content="#050608">'
+        "<title>Exoplanet Hunter</title>"
         + icon_links
         + "<style>body{margin:0;padding:0}</style></head><body>"
         + out

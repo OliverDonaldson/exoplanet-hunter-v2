@@ -169,16 +169,16 @@ const bootReady = new Promise(r => { resolveBoot = r; });
 })();
 
 /* ── go ──────────────────────────────────────────────────── */
-/* Every open lands on Mission, whatever hash the URL arrived with: a reload
-   part-way through the console, or a tab restored from last week, starts at the
-   front door rather than dropping straight into a vetting page. replaceState,
-   not `location.hash = …`, so this does not queue a hashchange and the initial
-   route still renders exactly once.
+/* A hash the page arrived with is honoured, so a link to a specific candidate
+   opens on that candidate. Forcing every load to Mission did make the front
+   door consistent, but it also made every URL on the console un-shareable and
+   lost your place on reload, and there is no signal that separates a pasted
+   deep link from a reload -- both simply arrive with a hash.
 
-   The cost is that a pasted deep link opens on Mission rather than the target it
-   names. In-session navigation is untouched, including the Upload page's
-   hand-off to #/vetting/<id>. */
-history.replaceState(null, '', '#/');
+   Only a bare URL is rewritten, and replaceState rather than `location.hash =
+   …` so this does not queue a hashchange and the initial route still renders
+   exactly once. route() sends an unrecognised path to Mission. */
+if (!location.hash) history.replaceState(null, '', '#/');
 
 /* hydrate() fills SERVED and CANDIDATES from the API before the first render,
    which keeps every page function synchronous. It never rejects — an

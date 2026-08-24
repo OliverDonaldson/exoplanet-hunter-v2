@@ -255,7 +255,7 @@ function Vetting(candidateId) {
 `}
 
       <div style="display:flex;gap:0;margin-bottom:2rem;border-bottom:1px solid rgba(255,255,255,0.08);flex-wrap:wrap" id="vet-tabs">
-        ${TABS.map(([k, label]) => `<button data-tab="${k}" style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.75rem 1.5rem;background:none;border:none;transition:all 150ms ease;margin-bottom:-1px">${label}</button>`).join('')}
+        ${TABS.map(([k, label]) => `<button data-tab="${k}" style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.75rem 1.5rem;background:none;border:none;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease,border-bottom-color 150ms ease;margin-bottom:-1px">${label}</button>`).join('')}
       </div>
 
       <div id="vet-panel" style="margin-bottom:3rem"></div>
@@ -264,7 +264,7 @@ function Vetting(candidateId) {
         <button class="btn-ghost" data-nav="#/catalogue">← Back to Catalogue</button>
         <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
           ${CANDIDATES.slice(0, 5).filter(x => x.id !== c.id).map(x =>
-            `<button class="cand-btn" data-nav="#/vetting/${encodeURIComponent(x.id)}" style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;background:none;border:1px solid rgba(255,255,255,0.08);padding:0.4rem 0.75rem;transition:all 150ms ease">${x.id}</button>`).join('')}
+            `<button class="cand-btn" data-nav="#/vetting/${encodeURIComponent(x.id)}" style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;background:none;border:1px solid rgba(255,255,255,0.08);padding:0.4rem 0.75rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">${x.id}</button>`).join('')}
         </div>
       </div>
     </div>
@@ -1071,7 +1071,7 @@ function Upload() {
 
       <div style="display:flex;gap:0;margin-bottom:2rem;border:1px solid rgba(255,255,255,0.1);flex-wrap:wrap" id="up-modes">
         ${UPLOAD_MODES.map((m, i) => `
-          <button data-m="${m.key}" style="flex:1;min-width:11rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.875rem;border:none;border-right:${i < UPLOAD_MODES.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none'};transition:all 150ms ease">
+          <button data-m="${m.key}" style="flex:1;min-width:11rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.875rem;border:none;border-right:${i < UPLOAD_MODES.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none'};transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">
             ${m.label}${m.live ? '' : '<span class="tag-chip tag-soon">coming</span>'}
           </button>`).join('')}
       </div>
