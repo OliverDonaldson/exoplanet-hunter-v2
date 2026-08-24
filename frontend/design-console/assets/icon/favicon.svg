@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- A planet mid-ingress: the moment a transit starts, which is the thing
+       this console exists to detect. Deliberately only two shapes. At 16 px a
+       light curve smears into a teal blur and a centred planet reads as a
+       pupil, so the planet crosses the limb instead: unmistakably a body in
+       front of a star, at the one size that actually matters. -->
+  <defs>
+    <radialGradient id="star">
+      <stop offset="0%" stop-color="#FFFDF2"/>
+      <stop offset="62%" stop-color="#FFE9B0"/>
+      <stop offset="100%" stop-color="#F5A623"/>
+    </radialGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#050608"/>
+  <circle cx="15" cy="16" r="11" fill="url(#star)"/>
+  <circle cx="23.6" cy="11.4" r="4.7" fill="#050608"/>
+</svg>

@@ -1,4 +1,4 @@
-<title>Exoplanet Hunter — Transit Detection Console</title>
+<title>Exoplanet Hunter · Transit Detection Console</title>
 <style>
 /* ═══════════════════════════════════════════════════════════
    EXOPLANET HUNTER — DESIGN SYSTEM
@@ -141,6 +141,52 @@ table{border-collapse:collapse;}
 
 .upload-zone{border:1px dashed rgba(77,255,210,0.3);background:rgba(77,255,210,0.02);transition:all 250ms ease;}
 .upload-zone:hover,.upload-zone.drag-over{border-color:rgba(77,255,210,0.6);background:rgba(77,255,210,0.05);box-shadow:0 0 30px rgba(77,255,210,0.1);}
+
+/* Mission backdrop, cropped and lifted at build time by tools/backdrop.py.
+
+   It replaces a canvas that drew 900 procedural stars every resize, and whose
+   own comment called it a stand-in for a hero photograph that never arrived.
+
+   The contrast the headline needs is bought entirely by the gradient below,
+   over the left third where the type sits. The right two thirds are left at
+   full strength, because that is where the frame is worth looking at and
+   nothing is written on it.
+
+   `background-attachment` is deliberately not `fixed`: it thrashes on iOS and
+   is one of the reliable ways to make a page scroll badly on a phone. */
+.hero-sky{
+  position:absolute;inset:0;pointer-events:none;
+  background-image:url(data:image/webp;base64,__BG_ORION__);
+  background-size:cover;background-position:38% 42%;
+  opacity:0.9;
+}
+/* Measured, not judged by eye: against the brightest backdrop pixel under each
+   block this holds the headline at 10.9:1 and the muted body copy at 4.5:1.
+   The left stop is the number that matters; the rest is free to open up. */
+.hero-sky::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(100deg,rgba(5,6,8,0.84) 0%,rgba(5,6,8,0.50) 34%,rgba(5,6,8,0.06) 62%,rgba(5,6,8,0.18) 100%);
+}
+/* The ramp above protects the left third, which is where the copy sits on a
+   wide screen. Below the stacking breakpoint the copy spans the full width
+   instead, and the same ramp left the paragraph on 2.02:1. A flat vertical
+   scrim covers it at 5.2:1, at the cost of the frame being evenly dimmed --
+   the right trade on a screen with no room to put the type beside the image. */
+@media(max-width:820px){
+  .hero-sky::after{
+    background:linear-gradient(180deg,rgba(5,6,8,0.80) 0%,rgba(5,6,8,0.70) 55%,rgba(5,6,8,0.24) 100%);
+  }
+}
+
+.hero-credit{
+  position:absolute;left:3rem;bottom:3.25rem;z-index:2;
+  font-family:'JetBrains Mono',monospace;font-size:0.54rem;letter-spacing:0.1em;
+  text-transform:uppercase;color:rgba(138,143,168,0.42);
+}
+.hero-credit a{color:inherit;text-decoration:none;border-bottom:1px solid rgba(138,143,168,0.22);}
+.hero-credit a:hover,.hero-credit a:focus-visible{color:rgba(240,238,232,0.75);}
+@media(max-width:820px){ .hero-credit{left:1.5rem;} }
+@media(max-width:640px){ .hero-credit{font-size:0.5rem;letter-spacing:0.06em;max-width:calc(100% - 3rem);} }
 
 .orbital-motif{position:absolute;top:50%;right:-200px;transform:translateY(-50%);width:600px;height:600px;border-radius:50%;border:1px solid rgba(255,255,255,0.03);pointer-events:none;}
 .orbital-motif::before{content:'';position:absolute;top:50px;left:50px;right:50px;bottom:50px;border-radius:50%;border:1px solid rgba(77,255,210,0.04);}

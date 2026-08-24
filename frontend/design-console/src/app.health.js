@@ -55,7 +55,7 @@ const HEALTH_STATES = {
     colour: '#8A8FA8',
     detail: () => `GET ${HEALTH.endpoint}`,
     bar: 'indeterminate',
-    foot: () => 'Catalogue and reliability are parquet reads — they answer in ~0.8 s whatever the model is doing.',
+    foot: () => 'Catalogue and reliability are parquet reads, so they answer in ~0.8 s whatever the model is doing.',
   },
   waking: {
     label: 'WAKING THE OBSERVATORY',
@@ -69,7 +69,7 @@ const HEALTH_STATES = {
     colour: '#F5A623',
     detail: () => 'loading 5-fold ensemble · TensorFlow import',
     bar: 'determinate',
-    foot: () => 'Browse the catalogue meanwhile — only scoring waits on the ensemble.',
+    foot: () => 'Browse the catalogue meanwhile; only scoring waits on the ensemble.',
   },
   ready: {
     label: 'MODEL WARM',

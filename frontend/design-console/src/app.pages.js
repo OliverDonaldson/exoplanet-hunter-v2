@@ -160,10 +160,10 @@ function Vetting(candidateId) {
 
   const longBaseline = has(c.baselineDays) && c.baselineDays >= 1000;
   const fuVerdict = !fu ? ''
-    : fu.tsmPass && fu.esmPass ? 'High priority — viable for both transmission and emission spectroscopy'
-    : fu.tsmPass ? 'Transmission target — TSM clears the Kempton threshold for this radius bin'
-    : fu.esmPass ? 'Emission target — ESM above the GJ 1132 b benchmark'
-    : 'Below Kempton thresholds — not competitive for JWST time';
+    : fu.tsmPass && fu.esmPass ? 'High priority: viable for both transmission and emission spectroscopy'
+    : fu.tsmPass ? 'Transmission target: TSM clears the Kempton threshold for this radius bin'
+    : fu.esmPass ? 'Emission target: ESM above the GJ 1132 b benchmark'
+    : 'Below Kempton thresholds: not competitive for JWST time';
 
   app.innerHTML = `
   <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
@@ -189,7 +189,7 @@ function Vetting(candidateId) {
           <div style="font-family:'JetBrains Mono';font-size:3.5rem;font-weight:500;color:${!has(c.prob) ? '#8A8FA8' : probColor(c.prob)};line-height:1;letter-spacing:-0.02em;font-variant-numeric:tabular-nums">${!has(c.prob) ? (c.scoring ? '···' : '—') : c.prob.toFixed(3)}</div>
           <div style="font-family:'JetBrains Mono';font-size:0.68rem;color:#8A8FA8;margin-top:0.35rem">${
             !has(c.prob)
-              ? (c.scoring ? 'scoring — light curve → 5-fold ensemble' : (c.scoreError ? esc(c.scoreError) : 'not scored'))
+              ? (c.scoring ? 'scoring: light curve → 5-fold ensemble' : (c.scoreError ? esc(c.scoreError) : 'not scored'))
               : agree ? `± ${agree.probStd.toFixed(3)} MC-dropout · Platt-calibrated` : 'spread not measured'}</div>
           <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.65rem;border:1px solid ${longBaseline ? 'rgba(245,166,35,0.35)' : 'rgba(255,255,255,0.10)'};background:${longBaseline ? 'rgba(245,166,35,0.05)' : 'transparent'}">
             <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${longBaseline ? '#F5A623' : '#8A8FA8'}">
@@ -214,7 +214,7 @@ function Vetting(candidateId) {
         <div class="section-label" style="margin-bottom:0.4rem">Follow-up Priority</div>
         <div style="font-family:'Inter';font-size:0.78rem;line-height:1.6;color:rgba(240,238,232,0.55)">
           TSM and ESM are functions of transit depth and host T-mag, which are catalogue
-          columns — /score does not return them. This target did not arrive with a catalogue
+          columns, and /score does not return them. This target did not arrive with a catalogue
           row, so they are not computed.
         </div>
       </div>` : `
@@ -287,8 +287,8 @@ function Vetting(candidateId) {
         <div class="h">Per-branch contributions not measured yet <span class="tag-chip tag-soon" style="margin-left:0.4rem">in progress</span></div>
         <div class="d">
           The score on this page is real. Attributing it across the eleven input
-          views needs branch-occlusion at serving time, which is not built — so
-          rather than show a plausible split, this tab shows none. What each view
+          views needs branch-occlusion at serving time, which is not built. Rather
+          than show a plausible split, this tab shows none. What each view
           feeds the model is listed below.
         </div>
       </div>
@@ -358,18 +358,18 @@ function Vetting(candidateId) {
     // can be real while there is still nothing to put under it.
     if (!has(c.prob) || !agree) {
       return pendingPanel(
-        c.scoring ? 'Scoring — the ensemble members arrive with the score.'
-        : c.scoreError ? `Not scored — ${esc(c.scoreError)}`
-        : 'Fold members not measured — /candidates carries the bulk ensemble mean, not the members behind it.');
+        c.scoring ? 'Scoring: the ensemble members arrive with the score.'
+        : c.scoreError ? `Not scored: ${esc(c.scoreError)}`
+        : 'Fold members not measured: /candidates carries the bulk ensemble mean, not the members behind it.');
     }
     const lo = Math.max(0, Math.min(agree.range[0], c.prob - agree.probStd) - 0.05);
     const hi = Math.min(1, Math.max(agree.range[1], c.prob + agree.probStd) + 0.05);
     const pct = v => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
     const verdict = agree.foldStd < 0.02
-      ? 'The five fold models agree closely — the ensemble score is well determined.'
+      ? 'The five fold models agree closely, so the ensemble score is well determined.'
       : agree.foldStd < 0.05
-        ? 'Moderate disagreement between folds — the ensemble mean is less firm than the headline figure suggests.'
-        : 'Genuine disagreement between folds — treat the ensemble mean with caution and prefer manual vetting.';
+        ? 'Moderate disagreement between folds: the ensemble mean is less firm than the headline figure suggests.'
+        : 'Genuine disagreement between folds. Treat the ensemble mean with caution and prefer manual vetting.';
 
     return `
       <div style="margin-bottom:1.25rem">
@@ -443,9 +443,9 @@ function Vetting(candidateId) {
         <span class="txt">${c.scoring
           ? 'The suites come back with the score, which is still running.'
           : c.scoreError
-            ? `This target was not scored — ${esc(c.scoreError)} — so none of these tests have been run.`
+            ? `This target was not scored (${esc(c.scoreError)}), so none of these tests have been run.`
             : 'No Data Validation report exists for this target, so none of these tests have been run.'}
-        <b style="color:rgba(240,238,232,0.85);font-weight:500">Absent is not the same as passing</b> — an unmeasured diagnostic carries no evidence either way, and the score below was produced without it.</span>
+        <b style="color:rgba(240,238,232,0.85);font-weight:500">Absent is not the same as passing</b>. An unmeasured diagnostic carries no evidence either way, and the score below was produced without it.</span>
       </div>` : ''}
 
       <div class="diag-grid" style="display:grid;grid-template-columns:repeat(2, 1fr);gap:1px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)">
@@ -463,16 +463,16 @@ function Vetting(candidateId) {
                   <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${d.state === 'unmeasured' ? 'rgba(138,143,168,0.4)' : '#8A8FA8'}">${esc(d.threshold)}</span>
                 </div>
               </div>
-              <div class="diag-desc">${d.state === 'unmeasured' ? 'Not measured — no value returned for this field.' : esc(d.state === 'pass' ? d.pass : d.fail)}</div>
+              <div class="diag-desc">${d.state === 'unmeasured' ? 'Not measured: no value returned for this field.' : esc(d.state === 'pass' ? d.pass : d.fail)}</div>
             </div>
           </div>`).join('')}
       </div>`;
   };
 
   const viewsPanel = () => !views ? pendingPanel(
-        c.scoring ? 'Scoring — the binned views arrive with the score.'
-      : c.scoreError ? `Not scored — ${esc(c.scoreError)}`
-      : 'Not scored — no photometry has been fetched for this target.') : `
+        c.scoring ? 'Scoring: the binned views arrive with the score.'
+      : c.scoreError ? `Not scored: ${esc(c.scoreError)}`
+      : 'Not scored: no photometry has been fetched for this target.') : `
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
         <div>
           <div class="stat-label" style="margin-bottom:0.25rem">Phase-Folded Photometry</div>
@@ -505,8 +505,8 @@ function Vetting(candidateId) {
 
       <div class="note" style="margin-top:1.25rem">
         <span class="ico">▸</span>
-        <span class="txt">These are the binned views the network is fed, not a fitted transit model —
-        this pipeline classifies light curves, it does not solve for orbital parameters. The line is the per-bin median; the band is the per-bin scatter.</span>
+        <span class="txt">These are the binned views the network is fed, not a fitted transit model.
+        This pipeline classifies light curves, it does not solve for orbital parameters. The line is the per-bin median; the band is the per-bin scatter.</span>
       </div>`;
 
   /* ── the pipeline timeline ──────────────────────────────
@@ -527,9 +527,9 @@ function Vetting(candidateId) {
     const live = c.live;
     if (!live) {
       return pendingPanel(
-        c.scoring ? 'Scoring — the pipeline record is written as the score is produced.'
-        : c.scoreError ? `Not scored — ${esc(c.scoreError)}`
-        : 'Not scored — there is no run to describe yet.');
+        c.scoring ? 'Scoring: the pipeline record is written as the score is produced.'
+        : c.scoreError ? `Not scored: ${esc(c.scoreError)}`
+        : 'Not scored: there is no run to describe yet.');
     }
 
     const eph = live.ephemeris || {};
@@ -566,7 +566,7 @@ function Vetting(candidateId) {
            { k: 'Source', v: eph.source || 'not recorded', dim: !eph.source }])}
 
         ${step(2, 'Raw photometry',
-          `SPOC or PDC photometry is pulled from MAST and detrended before anything else happens. <b style="color:rgba(240,238,232,0.8);font-weight:500">The series itself is not part of the score contract</b> — /score returns the binned views built from it and not the cadences that went in, so the unprocessed curve cannot be drawn here. It is the one stage on this page with no numbers of its own.`,
+          `SPOC or PDC photometry is pulled from MAST and detrended before anything else happens. <b style="color:rgba(240,238,232,0.8);font-weight:500">The series itself is not part of the score contract</b>: /score returns the binned views built from it, not the cadences that went in, so the unprocessed curve cannot be drawn here. It is the one stage on this page with no numbers of its own.`,
           [{ k: 'Cadences returned', v: 'not measured', dim: true },
            { k: 'Sectors', v: c.sectors && c.sectors !== '—' ? esc(c.sectors) : 'not measured', dim: !c.sectors || c.sectors === '—' }],
           true)}
@@ -600,13 +600,13 @@ function Vetting(candidateId) {
            { k: 'MC-dropout σ', v: has(live.probStd) ? live.probStd.toFixed(4) : 'not measured' }])}
 
         ${step(7, 'Platt calibration',
-          `The raw mean is not a probability — a network trained to separate classes is free to be confident and wrong. Platt scaling maps it onto the frequency actually observed out of fold, which is what makes "0.9" mean nine in ten. The reliability diagram on the Model page is the evidence for this step.`,
+          `The raw mean is not a probability: a network trained to separate classes is free to be confident and wrong. Platt scaling maps it onto the frequency actually observed out of fold, which is what makes "0.9" mean nine in ten. The reliability diagram on the Model page is the evidence for this step.`,
           [{ k: 'Before', v: has(live.probMean) ? live.probMean.toFixed(4) : 'not measured' },
            { k: 'After', v: has(live.prob) ? live.prob.toFixed(4) : 'not measured' },
            { k: 'Shift', v: has(shift) ? signed(shift, 4) : 'not measured' }])}
 
         ${step(8, 'Decision',
-          `The calibrated score is compared with the promoted run's operating threshold. The threshold is a policy choice about how many false positives a shortlist can carry, not a property of this target — a score either side of it is still the same score.`,
+          `The calibrated score is compared with the promoted run's operating threshold. The threshold is a policy choice about how many false positives a shortlist can carry, not a property of this target; a score either side of it is still the same score.`,
           [{ k: 'Calibrated P(planet)', v: has(live.prob) ? live.prob.toFixed(4) : 'not measured' },
            { k: 'Threshold', v: has(live.threshold) ? live.threshold.toFixed(3) : 'not measured' },
            { k: 'Verdict', v: esc(live.verdict || 'not returned'), dim: !live.verdict }])}
@@ -790,8 +790,8 @@ function ModelPerformance() {
         <span class="txt">
           There is no pooled headline: the missions have different label provenance and different class balance, so a single averaged figure would not mean anything.
           <b style="color:rgba(240,238,232,0.85);font-weight:500">${SERVED.missions.filter(m => m.evaluation === 'zero-shot').map(m => m.mission).join(', ') || 'None'}</b>
-          ${SERVED.missions.some(m => m.evaluation === 'zero-shot') ? 'has no out-of-fold evaluation for this run — its numbers are zero-shot transfer and are not comparable with the out-of-fold columns.' : 'runs are all out-of-fold.'}
-          Measured noise floor: AUC ±${has(SERVED.noiseFloor.auc) ? SERVED.noiseFloor.auc.toFixed(4) : '—'}, shortlist recall ±${has(SERVED.noiseFloor.recall) ? SERVED.noiseFloor.recall.toFixed(4) : '—'} — differences smaller than these are not differences.
+          ${SERVED.missions.some(m => m.evaluation === 'zero-shot') ? 'has no out-of-fold evaluation for this run, so its numbers are zero-shot transfer and are not comparable with the out-of-fold columns.' : 'runs are all out-of-fold.'}
+          Measured noise floor: AUC ±${has(SERVED.noiseFloor.auc) ? SERVED.noiseFloor.auc.toFixed(4) : '—'}, shortlist recall ±${has(SERVED.noiseFloor.recall) ? SERVED.noiseFloor.recall.toFixed(4) : '—'}. Differences smaller than these are not differences.
         </span>
       </div>
 
@@ -811,7 +811,7 @@ function ModelPerformance() {
         <div style="padding:0 1.5rem 1.5rem">
           <div class="soon">
             <div class="h">Not yet available <span class="tag-chip tag-soon" style="margin-left:0.4rem">coming</span></div>
-            <div class="d">Per-epoch loss and accuracy are not persisted by the training job yet, so there is nothing to plot. Queued behind the running block — this panel will fill in once the metrics land in the run artefacts.</div>
+            <div class="d">Per-epoch loss and accuracy are not persisted by the training job yet, so there is nothing to plot. Queued behind the running block; this panel will fill in once the metrics land in the run artefacts.</div>
           </div>
         </div>
       </div>
@@ -864,7 +864,7 @@ function ModelPerformance() {
 
       <div class="charts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-bottom:2rem">
         <div class="panel" style="padding:1.5rem">
-          <div class="stat-label" style="margin-bottom:0.5rem">ROC Curve — ${m.mission}</div>
+          <div class="stat-label" style="margin-bottom:0.5rem">${m.mission} ROC Curve</div>
           <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:0.35rem">AUC = ${has(m.auc) ? m.auc.toFixed(4) : '—'} ± ${has(m.aucErr) ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
           <!-- The AUC is measured; the curve is not. No endpoint carries the
                per-threshold points, so this is the binormal curve that the
@@ -874,7 +874,7 @@ function ModelPerformance() {
           <div class="chart-wrap" id="chart-roc"></div>
         </div>
         <div class="panel" style="padding:1.5rem">
-          <div class="stat-label" style="margin-bottom:0.5rem">Calibration — ${m.mission}</div>
+          <div class="stat-label" style="margin-bottom:0.5rem">${m.mission} Calibration</div>
           <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1rem">Brier ${has(m.brier) ? m.brier.toFixed(4) : '—'} ± ${has(m.brierErr) ? m.brierErr.toFixed(4) : '—'} · ECE ${has(m.ece) ? m.ece.toFixed(4) : '—'}</div>
           <div class="chart-wrap" id="chart-calib"></div>
         </div>
@@ -882,7 +882,7 @@ function ModelPerformance() {
 
       <div class="cm-grid" style="display:grid;grid-template-columns:1fr 2fr;gap:2rem">
         <div class="panel" style="padding:1.5rem">
-          <div class="stat-label" style="margin-bottom:0.35rem">Confusion Matrix — ${m.mission}</div>
+          <div class="stat-label" style="margin-bottom:0.35rem">${m.mission} Confusion Matrix</div>
           <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-bottom:1.25rem">at the 1% FPR operating point · ${m.evaluation}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,0.08)">
             ${[
@@ -899,18 +899,18 @@ function ModelPerformance() {
           ${cm ? '' : `
           <div class="note" style="margin-top:1.25rem">
             <span class="ico">▲</span>
-            <span class="txt">The cells need the number of real planets in the ${esc(m.mission)} slice, and no endpoint reports it — /model gives n and recall, not the label balance behind them.</span>
+            <span class="txt">The cells need the number of real planets in the ${esc(m.mission)} slice, and no endpoint reports it: /model gives n and recall, not the label balance behind them.</span>
           </div>`}
         </div>
         <div class="panel" style="padding:1.5rem">
-          <div class="stat-label" style="margin-bottom:1.5rem">Derived Metrics — ${m.mission}</div>
+          <div class="stat-label" style="margin-bottom:1.5rem">${m.mission} Derived Metrics</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:2rem">
             ${metricBlock('Precision', precision, cm ? m.recallErr * 0.6 : null, false)}
             ${metricBlock('Recall', recall, m.recallErr, false)}
             ${metricBlock('F1', f1, cm ? m.recallErr * 0.7 : null, false)}
           </div>
           <div style="font-family:'Inter';font-size:0.75rem;line-height:1.6;color:rgba(240,238,232,0.5);margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.06)">
-            Intervals are the ±1σ spread over the five folds. Recall @ 1% FPR is the promotion criterion — it is what "would this candidate reach the shortlist" actually means, and it is the number that rejected all five architecture arms.
+            Intervals are the ±1σ spread over the five folds. Recall @ 1% FPR is the promotion criterion: it is what "would this candidate reach the shortlist" actually means, and it is the number that rejected all five architecture arms.
           </div>
         </div>
       </div>`;
@@ -929,7 +929,7 @@ function ModelPerformance() {
     const calib = calibrationFor(m);
     if (!calib) {
       document.getElementById('chart-calib').innerHTML =
-        pendingPanel('Reliability diagram unavailable — /reliability did not answer.');
+        pendingPanel('Reliability diagram unavailable: /reliability did not answer.');
     } else renderChart(document.getElementById('chart-calib'), {
       height: 260, data: calib, xKey: 'predicted', fontSize: 9,
       margin: { top: 5, right: 10, bottom: 40, left: 52 },
@@ -958,7 +958,7 @@ const UPLOAD_MODES = [
   { key:'file',        label:'Upload Light Curve', live:false,
     why:'The scoring API takes a target identifier, not a file. Accepting uploads means running detrending and phase-folding on user photometry, which the service does not do today.' },
   { key:'coordinates', label:'Star Coordinates',   live:false,
-    why:'Resolving RA/Dec to a TIC needs a cone search against the target catalogue. Not wired up — name the target directly for now.' },
+    why:'Resolving RA/Dec to a TIC needs a cone search against the target catalogue. Not wired up; name the target directly for now.' },
 ];
 
 /* ── the scoring loader ───────────────────────────────────
@@ -1084,7 +1084,7 @@ function Upload() {
         <div class="fmt-grid" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1rem">
           ${[
             { h:'GET /score/{tic_id}', t:'live', d:'Resolves the target, fetches SPOC or PDC photometry from MAST, builds the eleven views and returns a calibrated score with per-fold detail.' },
-            { h:'Rate limit', t:'', d:'One scoring request per 60 seconds per client. The MAST fetch dominates the latency — expect 20–60 s on a cold cache.' },
+            { h:'Rate limit', t:'', d:'One scoring request per 60 seconds per client. The MAST fetch dominates the latency; expect 20–60 s on a cold cache.' },
             { h:'Returned', t:'', d:'probability, prob_std, per_fold[5], branch contributions, and whichever Data Validation fields exist for the target.' },
           ].map(f => `
             <div style="padding:1.25rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.01)">
@@ -1155,7 +1155,7 @@ function Upload() {
         <div class="note" style="border-color:rgba(245,166,35,0.35)">
           <span class="ico">▲</span>
           <span class="txt"><b style="color:#F5A623;font-weight:500">Rate limited.</b>
-          The scoring endpoint accepts one request per ${RATE_LIMIT_S} seconds — each one pulls fresh photometry from MAST.
+          The scoring endpoint accepts one request per ${RATE_LIMIT_S} seconds, and each one pulls fresh photometry from MAST.
           Try again in <span style="font-family:'JetBrains Mono';color:#F5A623">${state.cooldown}s</span>.</span>
         </div>`;
       return;
@@ -1167,7 +1167,7 @@ function Upload() {
         actionEl.innerHTML = `
           <div class="note" style="margin-bottom:1rem;border-color:rgba(255,77,77,0.35)">
             <span class="ico" style="color:#FF4D4D">▲</span>
-            <span class="txt">Scoring failed — ${esc(state.error)}</span>
+            <span class="txt">Scoring failed: ${esc(state.error)}</span>
           </div>
           <button class="btn-teal" id="up-go" ${ok ? '' : 'disabled'} style="font-size:0.75rem;padding:0.875rem 2rem">Try again →</button>`;
         if (ok) document.getElementById('up-go').addEventListener('click', run);
@@ -1229,12 +1229,12 @@ function Upload() {
       });
       document.getElementById('up-foot').innerHTML = !state.awaiting
         ? `Scoring runs server-side in one request; the stages are its sequence. The run will stop on <b style="color:rgba(240,238,232,0.75);font-weight:500">${esc(STAGES[HOLD_AT].short)}</b> and count real seconds there until MAST answers.`
-        : 'Holding the connection open while MAST serves the light curve. /score is a single blocking request and reports nothing about its own progress, so this is real elapsed time in the fetch, not a percentage of it — the bar stops here until the answer arrives.'
+        : 'Holding the connection open while MAST serves the light curve. /score is a single blocking request and reports nothing about its own progress, so this is real elapsed time in the fetch, not a percentage of it. The bar stops here until the answer arrives.'
           // Past a minute the wait has almost certainly stopped being the fetch.
           // The client cannot see inside one blocking request, so it says which
           // of the two it is rather than going on naming the fetch.
           + (state.blsExpected && state.waitedOn > 45
-              ? ' This target carries no catalogue ephemeris, so its period is being solved by a BLS search before it can be scored — past about a minute, that is what the wait is.'
+              ? ' This target carries no catalogue ephemeris, so its period is being solved by a BLS search before it can be scored. Past about a minute, that is what the wait is.'
               : '');
       return;
     }
@@ -1278,7 +1278,7 @@ function Upload() {
           ${r.unmeasured ? `
           <div class="note" style="margin-bottom:1.5rem">
             <span class="ico">▲</span>
-            <span class="txt">${r.unmeasured} of ${r.diags.length} diagnostics were not measured for this target — no value was returned, which is not the same as passing.</span>
+            <span class="txt">${r.unmeasured} of ${r.diags.length} diagnostics were not measured for this target: no value was returned, which is not the same as passing.</span>
           </div>` : ''}
 
           <div style="display:flex;gap:1rem;flex-wrap:wrap">
@@ -1471,7 +1471,7 @@ function Discovery() {
       <h1 style="font-family:'Ailerons';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:0.1rem">SEARCH A LIGHT CURVE.</h1>
       <div style="font-family:'Ailerons';font-size:clamp(1.4rem, 2.6vw, 2.2rem);font-weight:600;color:rgba(240,238,232,0.30);letter-spacing:-0.02em;margin-bottom:1.25rem">FIND THE SIGNAL YOURSELF</div>
       <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin-bottom:2.5rem">
-        Every other page on this console vets a signal somebody else detected — a
+        Every other page on this console vets a signal somebody else detected: a
         TOI, a KOI, a SPOC threshold-crossing event. Discovery is the other half:
         take a raw light curve with no ephemeris and search it for a periodic
         transit, then score whatever it finds.
@@ -1480,7 +1480,7 @@ function Discovery() {
       <div class="soon" style="margin-bottom:2.5rem">
         <div class="h">Not yet served <span class="tag-chip tag-soon" style="margin-left:0.4rem">coming</span></div>
         <div class="d">
-          The search itself is built — a box-least-squares period search over a
+          The search itself is built: a box-least-squares period search over a
           configurable grid, the same one the scoring path falls back to when a
           target has no catalogue ephemeris. What is missing is the serving side:
           a survey-scale search is minutes of CPU per target, and the API has no
@@ -1508,10 +1508,10 @@ function Discovery() {
    ═══════════════════════════════════════════════════════════ */
 const ABOUT_SECTIONS = [
   ['What this is', 'A one-paragraph statement of the project: what it classifies, for whom, and what it does not do.'],
-  ['How it works', 'The pipeline end to end — catalogue refresh, validation gates, the eleven input views, the five-fold ensemble, calibration, the promotion gate.'],
+  ['How it works', 'The pipeline end to end: catalogue refresh, validation gates, the eleven input views, the five-fold ensemble, calibration, the promotion gate.'],
   ['How to read a score', 'What a calibrated probability means here, what the MC-dropout band is, and why a margin under the noise floor is not a difference.'],
   ['Known limits', 'The measured defects, stated plainly: observation baseline correlates with the label on TESS, and the model scores the star as well as the transit.'],
-  ['Data and provenance', 'Where every input comes from — MAST, ExoFOP, the NASA archive, Gaia — and which model version served any given number.'],
+  ['Data and provenance', 'Where every input comes from (MAST, ExoFOP, the NASA archive, Gaia), and which model version served any given number.'],
   ['Credits and licence', 'Attribution, the ExoMiner work this builds on, and the licence this is released under.'],
 ];
 

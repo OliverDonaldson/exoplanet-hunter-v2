@@ -1,0 +1,29 @@
+Mission page backdrop
+=====================
+
+File            orion-hero.webp
+Source          orion-source.jpeg (1408x768)
+Origin          Generated artwork, supplied by Ollie. Not an observation, not a
+                photograph, and not derived from survey data.
+
+Because it is generated rather than captured, there is no third-party copyright
+to clear and no attribution owed. What it does need is honesty: the Mission page
+labels it "generated artwork - not an observation" rather than captioning it as
+a real frame of M 42. Every other number on that page is measured, and a
+synthetic sky presented as a real one would be the one fabricated thing on a
+console built to avoid exactly that.
+
+The previous backdrop was ESO's HAWK-I view of M 42 (eso1625a, CC BY 4.0,
+credit ESO/H. Drass et al.). It was replaced at Ollie's request. If a real frame
+is ever wanted here again, that one is a drop-in: it needs the ESO credit line
+restored to .hero-credit, because CC BY 4.0 requires the credit stay visible.
+
+Adaptations made
+    Cropped to 16:9 about the centre (the source is slightly wider than 16:9,
+    so the trim is horizontal).
+    Brightness x1.15, saturation x0.90.
+    Re-encoded to WebP, quality 94.
+Reproduce with  python3 tools/backdrop.py
+
+The source is kept beside the derived file so the transform can be redone or
+revised without needing the original again.

@@ -137,6 +137,14 @@ function mapCandidate(row) {
   };
 }
 
+/* The one piece of rendered text this console does not author. The pipeline
+   builds its caution verdict as `f"Caution - {concerns}. ..."` with an em dash
+   (scoring/diagnostics.py, the "Caution" branch), and it is the only one of the
+   four verdict strings that carries one. Normalised here so the console holds
+   to one punctuation style end to end. The durable fix is that one line in the
+   pipeline; when it lands, this can go. */
+const plainDashes = t => (typeof t === 'string' ? t.replace(/\s+\u2014\s+/g, ': ') : t);
+
 /** How much of a binned view actually carries data. `flux` is null in a phase
     bin no cadence landed in, and the count of those is the one honest measure
     of coverage the contract offers — the pipeline panel reports it rather than
@@ -156,7 +164,7 @@ function mapScore(s) {
     probStd: s.prob_std,
     perFold: s.per_fold.map(f => ({ fold: f.fold, prob: f.prob })),
     threshold: s.decision_threshold,
-    verdict: s.verdict,
+    verdict: plainDashes(s.verdict),
     modelVersion: s.model_version,
     nMc: s.n_mc_samples,
     ephemeris: s.ephemeris,
@@ -267,7 +275,7 @@ async function hydrate() {
   const notes = [];
   const mode = await probeApi();
   if (mode !== 'live') {
-    return { mode, notes: [`No API at ${API.base}${API.probeError ? ` (${API.probeError})` : ''} — showing the prototype data set.`] };
+    return { mode, notes: [`No API at ${API.base}${API.probeError ? ` (${API.probeError})` : ''}. Showing the prototype data set.`] };
   }
 
   const [model, reliability, catalogue, runs] = await Promise.allSettled([
@@ -320,7 +328,7 @@ async function hydrate() {
     SERVED.nScored = 0;
     SERVED.nHighConfidence = 0;
     GATING = SERVED.missions[0];
-    notes.push(`Model summary unavailable (${model.reason && model.reason.message}) — metrics shown as not measured.`);
+    notes.push(`Model summary unavailable (${model.reason && model.reason.message}). Metrics are shown as not measured.`);
   }
 
   if (reliability.status === 'fulfilled') {
@@ -352,7 +360,7 @@ async function hydrate() {
     CANDIDATES.length = 0;
     CANDIDATES.push(...catalogue.value.rows);
     SERVED.catalogueTotal = catalogue.value.total;
-    notes.push('Per-row P(planet) is not on the catalogue contract — open a candidate to score it.');
+    notes.push('Per-row P(planet) is not on the catalogue contract. Open a candidate to score it.');
   } else {
     // Same rule as the run table: eleven prototype rows rendered beside a live
     // model panel would not read as prototype rows.

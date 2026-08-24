@@ -75,7 +75,7 @@ function Home() {
   app.innerHTML = `
   <div style="min-height:100vh;background:#050608;position:relative">
     <section style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;padding-bottom:40px">
-      <canvas id="hero-bg" style="position:absolute;inset:0;width:100%;height:100%;opacity:0.35"></canvas>
+      <div class="hero-sky" aria-hidden="true"></div>
       <div style="position:absolute;inset:0;background:linear-gradient(to right, rgba(5,6,8,0.95) 40%, rgba(5,6,8,0.4) 70%, rgba(5,6,8,0.6) 100%)"></div>
       <div style="position:absolute;bottom:0;left:0;right:0;height:200px;background:linear-gradient(to bottom, transparent, #050608)"></div>
 
@@ -93,12 +93,12 @@ function Home() {
       <div class="page-pad" style="position:relative;z-index:2;padding:0 3rem;max-width:1440px;margin:0 auto;width:100%">
         <div class="hero-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4rem;align-items:center">
           <div>
-            <div class="section-label rv" style="margin-bottom:2rem;transform:translateY(16px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s">Exoplanet Hunter V2 — Transit Detection Console</div>
+            <div class="section-label rv" style="margin-bottom:2rem;transform:translateY(16px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s">Exoplanet Hunter V2 · Transit Detection Console</div>
             <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.2s">HUNTING</h1>
             <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.3s">WORLDS</h1>
             <h1 class="rv" style="${H1};font-weight:300;color:rgba(240,238,232,0.25);margin-bottom:2.5rem;transform:translateY(24px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.4s">BEYOND</h1>
             <p class="rv" style="font-family:'Inter', sans-serif;font-size:1rem;line-height:1.7;color:rgba(240,238,232,0.6);max-width:480px;margin-bottom:2.5rem;transform:translateY(16px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.5s">
-              A calibrated deep-learning pipeline vetting unconfirmed NASA transit candidates — with uncertainty you can trust.
+              A calibrated deep-learning pipeline vetting unconfirmed NASA transit candidates, with uncertainty you can trust.
             </p>
             <div class="rv" style="display:flex;gap:1rem;flex-wrap:wrap;transform:translateY(16px);transition:all 0.8s cubic-bezier(0.23,1,0.32,1) 0.6s">
               <button class="btn-teal" data-nav="#/catalogue">Explore Candidates →</button>
@@ -114,6 +114,12 @@ function Home() {
           </div>
         </div>
       </div>
+
+      <!-- The frame is generated artwork, not an observation. On a console whose
+           whole argument is that every number on screen was measured, a
+           synthetic sky captioned like a real one would undercut the point, so
+           it says what it is. -->
+      <div class="hero-credit">Backdrop: generated artwork · not an observation</div>
 
       ${healthPanelHTML()}
     </section>
@@ -186,7 +192,6 @@ function Home() {
     </section>
   </div>`;
 
-  heroBackdrop();
   mountOrbitalDiagram(460);
   mountHealth();
   bindNavButtons();
@@ -211,33 +216,6 @@ function countUp(el) {
     onUpdate: () => { el.textContent = Math.floor(obj.v).toLocaleString(); },
     onComplete: () => { el.textContent = target.toLocaleString(); },
   });
-}
-
-/* Stand-in for the hero photograph (hero-space-bg_8e38c7b4.jpg, which was not
-   in the design hand-off). A plain star field on the void, rendered at the same
-   0.35 opacity and sitting under the same two gradient overlays as the
-   original. No nebula. */
-function heroBackdrop() {
-  const c = document.getElementById('hero-bg');
-  if (!c) return;
-  const paint = () => {
-    const w = c.width = c.offsetWidth, h = c.height = c.offsetHeight;
-    if (!w || !h) return;
-    const ctx = c.getContext('2d');
-    let seed = 20260719;
-    const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
-
-    ctx.fillStyle = '#050608';
-    ctx.fillRect(0, 0, w, h);
-
-    for (let i = 0; i < 900; i++) {
-      const x = rnd() * w, y = rnd() * h, s = rnd() * 1.3 + 0.2, o = rnd() * 0.55 + 0.05;
-      ctx.fillStyle = `rgba(240,238,232,${o})`;
-      ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
-    }
-  };
-  paint();
-  const ro = new ResizeObserver(paint); ro.observe(c); chartObservers.push(ro);
 }
 
 /* ── CATALOGUE ───────────────────────────────────────────── */
@@ -320,7 +298,7 @@ function Catalogue() {
       <div class="note" style="margin-bottom:1.5rem">
         <span class="ico">▸</span>
         <span class="txt">
-          <b style="color:rgba(240,238,232,0.8);font-weight:500">TSM / ESM</b> are Kempton (2018) follow-up metrics — sort on them to rank targets for telescope time rather than by score alone.
+          <b style="color:rgba(240,238,232,0.8);font-weight:500">TSM / ESM</b> are Kempton (2018) follow-up metrics. Sort on them to rank targets for telescope time rather than by score alone.
           <b style="color:rgba(240,238,232,0.8);font-weight:500">Baseline</b> is the observed span for the host; long baselines inflate detectability, so scores are not comparable across very different baselines.
           <b style="color:rgba(240,238,232,0.8);font-weight:500">Per-row σ</b> is the spread across the five folds. Catalogue scores are ensemble means from the bulk scorer, not the Platt-calibrated figure the vetting page returns, so the two can differ for the same target.
         </span>
@@ -364,7 +342,7 @@ function Catalogue() {
         <td style="${td}"><span style="${mono}">${n(c.period, 1)}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.depth, 4)}</span></td>
         <td style="${td}">${!has(c.prob)
-            ? `<span style="${dim};color:rgba(138,143,168,0.5)" title="/candidates carries no score — open to vet">not scored</span>`
+            ? `<span style="${dim};color:rgba(138,143,168,0.5)" title="/candidates carries no score; open to vet">not scored</span>`
             : `<span class="${getProbClass(c.prob)}">${c.prob.toFixed(3)}</span>`}</td>
         <td style="${td}"><span style="${dim}${!has(c.probStd) ? ';color:rgba(138,143,168,0.5)' : ''}" title="${!has(c.probStd) ? 'not scored' : 'ensemble spread over the five folds'}">${!has(c.probStd) ? '—' : c.probStd.toFixed(3)}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;font-weight:600;color:${dc};background:${dc}18;border:1px solid ${dc}44;padding:0.15rem 0.5rem;border-radius:2px">${c.disposition}</span></td>

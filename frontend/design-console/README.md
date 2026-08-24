@@ -211,6 +211,41 @@ the dial takes a `66vh` cap, so it gives way before the text does.
 just before it hands over, so the composition can be looked at without catching
 a 4-second animation.
 
+## Mission backdrop
+
+`assets/backdrop/orion-hero.webp`, base64-inlined by `build.py` through the same
+placeholder mechanism as the fonts, because the artifact host's CSP blocks every
+external request. 258 KB, taking the single file from 442 KB to 829 KB.
+
+It replaces a canvas that drew 900 procedural stars on every resize, and whose
+own comment called it a stand-in for a hero photograph that never arrived.
+
+`tools/backdrop.py` derives it: crop to 16:9 about the centre, gamma 0.62 with a
+0.10 black point, saturation 0.90, WebP at quality 94. The lift is a curve
+rather than a brightness multiplier because the source is a night sky. Scaling
+it linearly raises the empty sky as fast as the nebula and the void stops
+reading as void; a gamma curve lifts the midtones where the dust lives and the
+black point puts the sky back down afterwards. Over the frame that is roughly
++30% on the nebula's bright half against almost no movement in the empty sky.
+
+**Contrast is measured, not judged.** The check maps the real text bounding
+boxes from the live page into image pixels, applies the sky opacity and the
+gradient alpha at each position, and reads the 99.5th percentile luminance under
+each block -- a single star in a glyph gap is not what legibility turns on.
+Desktop lands at 5.05:1 worst case, against 4.5:1 for AA body text.
+
+**Two gradients, because the copy moves.** On a wide screen the type sits in the
+left third, so a 100deg ramp darkens that side and leaves the rest of the frame
+alone. Below 820 px the copy spans the full width and that same ramp left the
+paragraph at **2.02:1** -- a real failure, found by measuring rather than by
+looking. Narrow screens get a flat vertical scrim instead, which reads 5.20:1.
+
+**The frame is generated artwork, not an observation**, and the page says so.
+On a console whose whole argument is that every number on it was measured, a
+synthetic sky captioned like a real one would be the one fabricated thing on
+screen. `assets/backdrop/CREDIT.txt` records the provenance, and notes what
+would have to change to put a real, attributed frame back.
+
 ## Vetting: the pipeline timeline
 
 The Vetting page opens on **Pipeline** — nine stages between "a TIC went in" and

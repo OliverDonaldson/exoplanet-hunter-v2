@@ -52,7 +52,14 @@ results/*
 # the same way the catalogue and the CV runs do: a tiny pointer in git, the
 # bytes pulled from R2 at boot.
 !results/*.dvc
+
+# Agent tooling, not project source. `npx skills add` and `playwright
+# init-skills` write these into the repo root; they configure whoever is
+# working on the code, not the code. Ignored so a `git add -A` cannot commit
+# somebody's assistant setup as a project dependency.
 .claude/
+.agents/
+skills-lock.json
 
 # TRICERATOPS writes <TIC>_TRILEGAL.csv into the cwd (vendor funcs.py:331).
 # Per-target star-count queries — regenerable, and one got committed by a
