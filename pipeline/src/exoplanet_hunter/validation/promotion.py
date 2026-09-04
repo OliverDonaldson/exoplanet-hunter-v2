@@ -33,7 +33,10 @@ block fall back to the aggregate, which is what every run before 2026-08-05
 carries.
 
 The registry is a plain JSON pointer, not MLflow state: the serving path and
-the CI gate both read it without a tracking-server dependency.
+the CI gate both read it without a tracking-server dependency. It names the
+winner and nothing else, so every decision is additionally written beside the
+run it judged as `PROMOTION_LOG_NAME` — the only record of why the other runs
+are not the winner, and the only one a rejected run leaves behind at all.
 """
 
 from __future__ import annotations
@@ -47,6 +50,12 @@ from pathlib import Path
 from typing import Any
 
 REGISTRY_NAME = "registry.json"
+#: Written into the **candidate's** run directory, not into `models/`. The
+#: registry records only what is currently served, so it can answer "which run
+#: is live" and nothing else; the log answers "what was decided about this run,
+#: and why" and therefore has to travel with the run it judged, including the
+#: ones that were never promoted and so never appear in the registry at all.
+PROMOTION_LOG_NAME = "promotion_log.json"
 
 #: Fewest paired folds at which a signed-rank p-value is worth printing. With
 #: five pairs the two-sided Wilcoxon floor is p=0.0625, so it cannot reach 0.05
@@ -337,6 +346,16 @@ class PromotionDecision:
     #: "owes a written explanation in the roadmap before promotion" is a
     #: condition no unattended run can satisfy.
     alarms: list[str] = field(default_factory=list)
+    #: Every tolerance and floor **as actually applied to this comparison**, not
+    #: as defaulted in the signature. `recall_tolerance` is resolved at call time
+    #: from the candidate's own variance block and the floors are derived from
+    #: both runs, so a reader holding only the reasons text cannot tell a measured
+    #: floor from `LEGACY_RECALL_TOLERANCE` standing in for one. Carried on the
+    #: decision rather than recomputed by whoever records it, for the reason
+    #: `VERDICT_EXIT_CODES` is defined here: a number derived in two places is a
+    #: number that drifts. Empty when there was no champion, where nothing was
+    #: compared and no threshold applied.
+    thresholds: dict[str, Any] = field(default_factory=dict)
 
     @property
     def promoted(self) -> bool:
@@ -359,26 +378,77 @@ def write_decision(path: Path, decision: PromotionDecision) -> None:
     the two. It also carries the reasons, so an unattended caller can say why a
     decision went the way it did instead of naming the verdict alone.
     """
-    path.write_text(
-        json.dumps(
-            {
-                "verdict": decision.verdict.value,
-                "reasons": decision.reasons,
-                "alarms": decision.alarms,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+    path.write_text(json.dumps(_decision_payload(decision), indent=2) + "\n")
+
+
+def write_promotion_log(
+    path: Path,
+    decision: PromotionDecision,
+    *,
+    candidate_run_id: str,
+    champion_run_id: str | None,
+    champion_summary: str | None = None,
+) -> None:
+    """The durable record: the decision, plus what it was a decision *about*.
+
+    `write_decision` serialises a verdict for a caller that already knows which
+    run it just gated, and nothing else on disk does. `models/registry.json`
+    records only what is currently served, so until this file existed the reason
+    a run was rejected survived exactly as long as the process that computed it —
+    the weekly refresh wrote it into a `TemporaryDirectory` — and `/runs` served
+    `verdict: null` for every row while the console printed "no reason is on
+    record", which was true.
+
+    A wrapper rather than more arguments on `write_decision`, because
+    `read_decision` has to stay a faithful inverse of what it reads: provenance
+    folded into the decision payload would come back as a `PromotionDecision`
+    that had silently dropped half the file. Additive keys instead — a promotion
+    log round-trips through `read_decision` unchanged, and a caller that wants
+    the provenance reads the JSON.
+
+    `champion_run_id` is the **registry's** served run, not the directory the
+    champion's metrics were read from. The weekly refresh gates against the
+    control lane, which re-measures whatever is served on this week's population
+    and writes into `models/cv/control-lane/`; naming that directory would record
+    "control-lane" as the champion, and control-lane is not a model.
+    `champion_summary` names the measurement, so both questions stay answerable.
+    """
+    payload = _decision_payload(decision) | {
+        "candidate_run_id": candidate_run_id,
+        "champion_run_id": champion_run_id,
+        "champion_summary": champion_summary,
+        # Wall-clock at the decision. Not the run directory's mtime, which
+        # `/runs` already documents as useless: in the serving container it is
+        # the DVC pull time, identical across every run and equal to the last
+        # deploy.
+        "decided_at": datetime.now(UTC).isoformat(),
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+def _decision_payload(decision: PromotionDecision) -> dict[str, Any]:
+    """The decision's own fields, shared by both writers so they cannot diverge."""
+    return {
+        "verdict": decision.verdict.value,
+        "reasons": decision.reasons,
+        "alarms": decision.alarms,
+        "thresholds": decision.thresholds,
+    }
 
 
 def read_decision(path: Path) -> PromotionDecision:
-    """The inverse of `write_decision`, for a caller that ran the gate."""
+    """The inverse of `write_decision`, for a caller that ran the gate.
+
+    Also the inverse of `write_promotion_log` for the decision half of that
+    file: the provenance keys are additive, so a log reads back as the exact
+    decision that produced it.
+    """
     payload = json.loads(path.read_text())
     return PromotionDecision(
         Verdict(payload["verdict"]),
         list(payload.get("reasons", [])),
         list(payload.get("alarms", [])),
+        dict(payload.get("thresholds") or {}),
     )
 
 
@@ -578,6 +648,28 @@ def evaluate_promotion(
     if recall_tolerance is None:
         recall_tolerance = floor.recall if floor.recall is not None else LEGACY_RECALL_TOLERANCE
 
+    gated_on_slice = cand_slice is not None and champ_slice is not None
+    thresholds: dict[str, Any] = {
+        # None here means the pooled fallback decided it. The header reason says
+        # so in prose; nobody auditing a year of logs should have to parse prose
+        # to find the runs that were not gated on the deployment population.
+        "gate_mission": GATE_MISSION if gated_on_slice else None,
+        "brier_tolerance": brier_tolerance,
+        "ece_tolerance": ece_tolerance,
+        "recall_tolerance": recall_tolerance,
+        # False means `LEGACY_RECALL_TOLERANCE` stood in for a measurement — a
+        # constant that predates stage 6 and is *tighter* than the floor it
+        # substitutes for. Recording only the number would read as a measurement
+        # either way, which is this project's recurring defect class.
+        "recall_tolerance_measured": floor.recall is not None,
+        "mission_alarm": mission_alarm,
+        "unresolved_band": UNRESOLVED_BAND,
+        "auc_floor": floor.auc,
+        "recall_floor": floor.recall,
+        "floor_source": floor.source,
+        "strict": strict,
+    }
+
     mismatch = _population_mismatch(candidate, champion)
     paired = paired_folds(candidate, champion)
     gate_size = _gate_population_drift(cand_slice, champ_slice)
@@ -612,7 +704,7 @@ def evaluate_promotion(
     ]
     if unmeasured:
         reasons.append(f"not measurable: {', '.join(unmeasured)}")
-        return PromotionDecision(Verdict.REJECT, reasons, alarms)
+        return PromotionDecision(Verdict.REJECT, reasons, alarms, thresholds)
 
     # Gating on the deployment slice compares one mission the two runs both
     # scored, so a mission only one of them has is worth reporting but does not
@@ -620,7 +712,6 @@ def evaluate_promotion(
     # compares each run's mean over its own rows, and this project has been
     # doing exactly that against a champion whose build predates K2.
     if mismatch:
-        gated_on_slice = cand_slice is not None and champ_slice is not None
         reasons.append(f"populations differ: {mismatch}")
         if gated_on_slice:
             alarms.append(
@@ -632,7 +723,7 @@ def evaluate_promotion(
                 "matched — re-baseline the champion on the current view set, or "
                 "pass allow_unmatched_populations=True to read it anyway"
             )
-            return PromotionDecision(Verdict.REJECT, reasons, alarms)
+            return PromotionDecision(Verdict.REJECT, reasons, alarms, thresholds)
 
     if cand_auc <= champ_auc:
         # A tie and a loss are not the same statement, and saying "does not beat"
@@ -656,16 +747,16 @@ def evaluate_promotion(
                 f"does not beat the champion's CV score (-{margin:.4f}, "
                 f"{floor.times(margin, floor.auc)})"
             )
-        return PromotionDecision(Verdict.REJECT, reasons, alarms)
+        return PromotionDecision(Verdict.REJECT, reasons, alarms, thresholds)
     if cand_brier > champ_brier + brier_tolerance:
         reasons.append(f"calibration degraded beyond tolerance (+{brier_tolerance})")
-        return PromotionDecision(Verdict.REJECT, reasons, alarms)
+        return PromotionDecision(Verdict.REJECT, reasons, alarms, thresholds)
 
     if cand_ece is not None and champ_ece is not None:
         reasons.append(f"ECE {cand_ece:.4f} vs champion {champ_ece:.4f}")
         if cand_ece > champ_ece + ece_tolerance:
             reasons.append(f"reliability degraded beyond tolerance (+{ece_tolerance})")
-            return PromotionDecision(Verdict.REJECT, reasons, alarms)
+            return PromotionDecision(Verdict.REJECT, reasons, alarms, thresholds)
     else:
         reasons.append("ECE guard skipped — summary predates the test_ece field")
 
@@ -684,7 +775,7 @@ def evaluate_promotion(
         # Only a margin clear of the band on the wrong side rejects.
         if margin < -recall_tolerance and not unresolved_against(margin, recall_tolerance):
             reasons.append(f"shortlist recall degraded beyond tolerance (-{recall_tolerance:.4f})")
-            return PromotionDecision(Verdict.REJECT, reasons, alarms)
+            return PromotionDecision(Verdict.REJECT, reasons, alarms, thresholds)
         if unresolved_against(margin, recall_tolerance):
             # Not a rejection and not a promotion: the margin and the floor it is
             # read against are the same size, and the floor is three draws wide.
@@ -727,7 +818,7 @@ def evaluate_promotion(
             "no criterion rejected, but the decision is not resolvable against a floor "
             "this wide — a stop-and-ask, per stage 6 caveat 2"
         )
-        return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms)
+        return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms, thresholds)
 
     reasons.append("beats champion with calibration and shortlist recall intact")
 
@@ -740,9 +831,9 @@ def evaluate_promotion(
             "explanation before promotion and no unattended run can give one, so this "
             "is a stop-and-ask rather than a promotion — and not a quality rejection"
         )
-        return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms)
+        return PromotionDecision(Verdict.UNRESOLVED, reasons, alarms, thresholds)
 
-    return PromotionDecision(Verdict.PROMOTE, reasons, alarms)
+    return PromotionDecision(Verdict.PROMOTE, reasons, alarms, thresholds)
 
 
 # ------------------------------------------------------------------ registry --

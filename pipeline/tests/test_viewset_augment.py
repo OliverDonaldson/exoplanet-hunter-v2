@@ -191,3 +191,46 @@ def test_masking_still_applies_to_folded_flux():
     assert float(tf.reduce_max(out[..., :-1])) == pytest.approx(0.0)
     # `present` untouched: the bin was measured.
     assert float(tf.reduce_min(out[..., -1])) == pytest.approx(1.0)
+
+
+class TestAnnotationChannels:
+    """The target marker rides through augmentation untouched, like presence.
+
+    Added 2026-08-27 with the fourth difference-image channel. The marker is the
+    star's catalogue position; noising it would invent a positional uncertainty
+    DV never reported, on the one channel the branch's centroid measurement is
+    taken *against*.
+    """
+
+    def _stamp(self):
+        shape = VIEW_SHAPES["difference_view"]
+        view = np.zeros(shape, dtype=np.float32)
+        view[0, ..., 0] = 0.5  # difference
+        view[0, ..., 1] = 1.0  # out of transit
+        view[0, 8, 9, 2] = 0.6  # target marker, split over two pixels
+        view[0, 9, 9, 2] = 0.4
+        view[0, ..., 3] = 1.0  # present
+        return tf.constant(view)
+
+    def test_the_marker_and_presence_survive_augmentation_unchanged(self):
+        view = self._stamp()
+        cfg = AugmentConfig(time_shift_frac=0.05, noise_std=0.1, scale_range=0.2, mask_prob=0.5)
+        out = augment_viewset({"difference_view": view}, cfg)["difference_view"].numpy()
+        original = view.numpy()
+        assert np.array_equal(out[..., 2], original[..., 2])
+        assert np.array_equal(out[..., 3], original[..., 3])
+
+    def test_the_flux_channels_are_still_noised(self):
+        view = self._stamp()
+        cfg = AugmentConfig(time_shift_frac=0.0, noise_std=0.1, scale_range=0.0, mask_prob=0.0)
+        out = augment_viewset({"difference_view": view}, cfg)["difference_view"].numpy()
+        assert not np.array_equal(out[..., :2], view.numpy()[..., :2])
+
+    def test_a_view_with_one_annotation_channel_is_unaffected_by_the_split(self):
+        # Every other view keeps the old behaviour: data is everything but the
+        # last channel, and the last channel is presence.
+        view = tf.constant(np.ones(VIEW_SHAPES["gap_view"], dtype=np.float32))
+        cfg = AugmentConfig(time_shift_frac=0.0, noise_std=0.1, scale_range=0.0, mask_prob=0.0)
+        out = augment_viewset({"gap_view": view}, cfg)["gap_view"].numpy()
+        assert np.array_equal(out[..., -1], np.ones(VIEW_SHAPES["gap_view"][0], dtype=np.float32))
+        assert not np.array_equal(out[..., 0], view.numpy()[..., 0])

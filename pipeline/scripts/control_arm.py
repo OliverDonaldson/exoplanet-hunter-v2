@@ -99,7 +99,13 @@ def control_scalars(rows: list[dict]) -> pd.DataFrame:
 
 
 def build_host_views(
-    tic_id: int, fits_path: Path, period: float, sigma_clip: float, window: int, polyorder: int
+    tic_id: int,
+    fits_path: Path,
+    period: float,
+    sigma_clip: float,
+    window: int,
+    polyorder: int,
+    momentum_dumps: np.ndarray | None = None,
 ) -> tuple[object, dict]:
     """Views and scalars for one host at a synthetic ephemeris, depth 0."""
     import lightkurve as lk
@@ -117,7 +123,21 @@ def build_host_views(
     # graded injection path in exactly one argument.
     flat.flux[:] = inject_box_transit(time, flux, period, t0, duration_d, depth=0.0)
 
-    views = build_view_set(flat, period=period, t0=t0, duration=duration_d, raw_lc=raw)
+    # `momentum_dumps` is passed and the DV inputs are not, and the asymmetry is
+    # the pre-registered limit read correctly rather than an exception to it.
+    # Limit 1 masks the DV columns because **no DV report exists at a synthetic
+    # ephemeris**. A reaction-wheel desaturation is not a DV product: it happened
+    # to the spacecraft at a real time, and folding it on a synthetic period is
+    # exactly as meaningful as folding this star's flux on one. Withholding it
+    # would gate the branch off and quietly measure a model the run did not build.
+    views = build_view_set(
+        flat,
+        period=period,
+        t0=t0,
+        duration=duration_d,
+        raw_lc=raw,
+        momentum_dumps=momentum_dumps,
+    )
     observed = int(views.observed_transit_count)
     expected = int(views.expected_transit_count)
     scalars = {
@@ -437,6 +457,14 @@ def main() -> None:
         "--viewset-index", type=Path, default=Path("data/processed/viewset_tfrecords/index.parquet")
     )
     parser.add_argument("--raw", type=Path, default=Path("data/raw/tess/lightcurves"))
+    parser.add_argument(
+        "--momentum-dumps",
+        type=Path,
+        default=None,
+        help="flagged cadence table (default data/tables/momentum_dumps.parquet). Unlike the "
+        "DV columns this is NOT masked by limit 1: a desaturation is a real event at a real "
+        "time, not a DV product that cannot exist at a synthetic ephemeris",
+    )
     parser.add_argument("--out", type=Path, default=Path("results/control_arm"))
     parser.add_argument(
         "--hosts",
@@ -544,6 +572,18 @@ def main() -> None:
             args.also_routable_in.name,
         )
 
+    dumps_path = args.momentum_dumps or (Path("data") / "tables" / "momentum_dumps.parquet")
+    if dumps_path.exists():
+        dumps = pd.read_parquet(dumps_path)["time"].to_numpy(dtype=float)
+        log.info("[control-arm] %d flagged cadences from %s", dumps.size, dumps_path)
+    else:
+        dumps = np.empty(0, dtype=float)
+        log.info(
+            "[control-arm] no momentum-dump table at %s — that branch reads absent, which is "
+            "correct for a run that has no momentum branch and wrong for one that has",
+            dumps_path,
+        )
+
     scalars_index = pd.read_parquet(args.viewset_index)
     joined = routable.merge(
         scalars_index[["tic_id", "expected_transit_count"]].drop_duplicates("tic_id"),
@@ -578,7 +618,13 @@ def main() -> None:
             try:
                 if kind == "branch":
                     views, scalars = build_host_views(
-                        tic_id, fits, period, args.sigma_clip, args.window_length, args.polyorder
+                        tic_id,
+                        fits,
+                        period,
+                        args.sigma_clip,
+                        args.window_length,
+                        args.polyorder,
+                        momentum_dumps=dumps,
                     )
                     view_sets.append(views)
                 else:

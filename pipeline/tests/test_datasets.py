@@ -1,6 +1,9 @@
 """Tests for the TFRecord shard set and the tf.data input pipeline."""
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pytest
 import tensorflow as tf
 
@@ -22,6 +25,11 @@ from exoplanet_hunter.datasets import (
 
 GLOBAL_BINS, LOCAL_BINS, AUX_DIM = 64, 16, 9
 
+#: Mission per star, cycled. TESS-weighted like the live catalogue, and sized so
+#: the gate's TESS slice carries both classes — `pooled_member_draws` raises on a
+#: single-class slice rather than reporting a NaN recall.
+MISSION_CYCLE = ["TESS", "TESS", "Kepler", "K2"]
+
 
 def synthetic_views(n: int = 30, seed: int = 0, with_aux: bool = True) -> ViewArrays:
     rng = np.random.default_rng(seed)
@@ -36,6 +44,26 @@ def synthetic_views(n: int = 30, seed: int = 0, with_aux: bool = True) -> ViewAr
         tic_ids=np.repeat(np.arange(100, 100 + n // 3), 3).astype(np.int64),
         aux_features=aux if with_aux else None,
     )
+
+
+def write_label_catalogue(root: Path, tic_ids: np.ndarray) -> None:
+    """The mission catalogue the CV summary joins from.
+
+    The trainer's `predictions.parquet` carries no mission column, so
+    `_aggregate_cv` resolves this file positionally from `models/cv/<run>` and
+    refuses to write a summary without it. Missions are assigned per star, not
+    per row: a star belongs to one mission, and the join is validated
+    `many_to_one` against exactly that.
+    """
+    stars = np.unique(tic_ids)
+    path = root / "data" / "tables" / "labels" / "labels.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "tic_id": stars,
+            "mission": [MISSION_CYCLE[i % len(MISSION_CYCLE)] for i in range(len(stars))],
+        }
+    ).to_parquet(path, index=False)
 
 
 @pytest.fixture(scope="module")
@@ -212,10 +240,10 @@ def test_end_to_end_mini_training(tmp_path):
     views = synthetic_views(n=60, seed=1)
     shard_dir = tmp_path / "data" / "processed" / "tfrecords"
     write_tfrecord_shards(views, shard_dir, examples_per_shard=16)
+    write_label_catalogue(tmp_path, views.tic_ids)
 
     conf_dir = str((tmp_path / "conf").resolve())
     import shutil
-    from pathlib import Path
 
     shutil.copytree(Path(__file__).resolve().parents[1] / "conf", conf_dir)
     with initialize_config_dir(version_base="1.3", config_dir=conf_dir):

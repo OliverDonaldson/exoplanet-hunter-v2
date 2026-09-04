@@ -19,6 +19,7 @@ from exoplanet_hunter.preprocess.diffimage import (
     DIFF_CHANNELS,
     DIFF_GRID,
     MAX_DIFF_SECTORS,
+    TARGET_CHANNEL,
     build_difference_views,
     empty_difference_views,
     regrid_stamp,
@@ -39,8 +40,15 @@ def make_image(
     uncertainty: float = 0.1,
     row0: int = 400,
     col0: int = 700,
+    target_row: float | None = None,
+    target_col: float | None = None,
 ) -> DVDifferenceImage:
-    """A dense stamp in the shape DV actually publishes: a filled bounding box."""
+    """A dense stamp in the shape DV actually publishes: a filled bounding box.
+
+    `target_row`/`target_col` default to the exact centre of that box, which is
+    the *degenerate* case — the one the archive says is rare. Tests that care
+    about the target channel pass their own, in CCD coordinates.
+    """
     rows, cols = np.meshgrid(np.arange(height), np.arange(width), indexing="ij")
     n = height * width
     diff = np.ones(n, dtype=np.float32) if difference is None else difference.ravel()
@@ -57,6 +65,8 @@ def make_image(
         quality_valid=quality_valid,
         n_transits=3,
         n_cadences_in_transit=30,
+        target_row=row0 + (height - 1) / 2 if target_row is None else target_row,
+        target_col=col0 + (width - 1) / 2 if target_col is None else target_col,
     )
 
 
@@ -64,7 +74,7 @@ class TestRegridStamp:
     def test_an_11px_stamp_lands_centred_and_the_rest_is_marked_absent(self):
         stamp = regrid_stamp(make_image(height=11, width=11))
         assert stamp.shape == (DIFF_GRID, DIFF_GRID, DIFF_CHANNELS)
-        present = stamp[..., 2]
+        present = stamp[..., -1]
         assert present.sum() == 11 * 11
         edge = (DIFF_GRID - 11) // 2
         assert present[edge : edge + 11, edge : edge + 11].all()
@@ -105,7 +115,7 @@ class TestRegridStamp:
         stamp = regrid_stamp(flat)
         assert stamp is not None
         assert (stamp[..., 0] == 0.0).all()
-        assert stamp[..., 2].sum() == 11 * 11
+        assert stamp[..., -1].sum() == 11 * 11
 
     def test_no_usable_brightness_scale_reads_as_absent(self):
         image = make_image(out_of_transit=np.zeros((11, 11), np.float32))
@@ -116,7 +126,7 @@ class TestRegridStamp:
         stamp = regrid_stamp(make_image(height=height, width=width))
         assert stamp.shape == (DIFF_GRID, DIFF_GRID, DIFF_CHANNELS)
         kept = min(height, DIFF_GRID) * min(width, DIFF_GRID)
-        assert stamp[..., 2].sum() == kept
+        assert stamp[..., -1].sum() == kept
 
     def test_an_oversized_stamp_is_cropped_about_its_centre(self):
         values = np.zeros((25, 25), dtype=np.float32)
@@ -148,6 +158,8 @@ class TestRegridStamp:
             quality_valid=image.quality_valid,
             n_transits=image.n_transits,
             n_cadences_in_transit=image.n_cadences_in_transit,
+            target_row=image.target_row,
+            target_col=image.target_col,
         )
         with pytest.raises(ValueError, match="fills its box exactly"):
             regrid_stamp(holed)
@@ -207,4 +219,84 @@ class TestBuildDifferenceViews:
         empty_stamps, empty_quality = empty_difference_views()
         assert np.array_equal(stamps, empty_stamps)
         assert np.array_equal(quality, empty_quality)
-        assert stamps[..., 2].sum() == 0.0
+        assert stamps[..., -1].sum() == 0.0
+
+
+class TestTargetChannel:
+    """The origin the branch was built without — roadmap 4.2b finding 2.
+
+    Stage 9's branch was fed a difference and a reference image and no target
+    position, so the only thing marking the star was where `_centred_slice`
+    happened to put the bounding box. These are the tests that the marker is a
+    *measurement* rather than that placement restated.
+    """
+
+    def test_the_marker_carries_the_subpixel_position_not_the_rounded_one(self):
+        # 0.3 px below and 0.25 px right of the box centre. A hard one-hot at the
+        # rounded pixel would put all the mass in one cell and lose both.
+        stamp = regrid_stamp(make_image(target_row=400 + 5 + 0.3, target_col=700 + 5 + 0.25))
+        marker = stamp[..., TARGET_CHANNEL]
+        rows = np.arange(DIFF_GRID)[:, None] * marker
+        cols = np.arange(DIFF_GRID)[None, :] * marker
+        centre = (DIFF_GRID - 11) // 2 + 5
+        assert marker.sum() == pytest.approx(1.0)
+        assert rows.sum() == pytest.approx(centre + 0.3, abs=1e-5)
+        assert cols.sum() == pytest.approx(centre + 0.25, abs=1e-5)
+        assert (marker > 0).sum() == 4
+
+    def test_a_target_at_a_pixel_centre_is_exominers_one_hot(self):
+        stamp = regrid_stamp(make_image())
+        marker = stamp[..., TARGET_CHANNEL]
+        assert (marker > 0).sum() == 1
+        assert marker.max() == pytest.approx(1.0)
+
+    def test_the_marker_moves_with_the_star_not_with_the_box(self):
+        # Same aperture, star two pixels north: the placement is identical and
+        # only the marker moves. This is the whole content of the channel.
+        centred = regrid_stamp(make_image())
+        offset = regrid_stamp(make_image(target_row=400 + 3.0))
+        assert np.array_equal(centred[..., 0], offset[..., 0])
+        assert np.array_equal(centred[..., -1], offset[..., -1])
+        assert not np.array_equal(centred[..., TARGET_CHANNEL], offset[..., TARGET_CHANNEL])
+        assert int(np.argmax(offset[..., TARGET_CHANNEL]) // DIFF_GRID) == (DIFF_GRID - 11) // 2 + 3
+
+    def test_presence_stays_the_last_channel(self):
+        # `cnn_branches._gated`, `SectorPresence` and `viewset_augment` all read
+        # `[..., -1]`. Inserting the marker after presence would silently make
+        # three modules gate on a position marker.
+        stamp = regrid_stamp(make_image())
+        assert stamp.shape[-1] == DIFF_CHANNELS == 4
+        assert stamp[..., -1].sum() == 11 * 11
+        assert TARGET_CHANNEL == DIFF_CHANNELS - 2
+
+    def test_a_stamp_with_no_target_position_is_absent_not_centred(self):
+        image = make_image()
+        blind = DVDifferenceImage(
+            sector=image.sector,
+            ccd_rows=image.ccd_rows,
+            ccd_cols=image.ccd_cols,
+            flux_difference=image.flux_difference,
+            flux_difference_uncertainty=image.flux_difference_uncertainty,
+            flux_in_transit=image.flux_in_transit,
+            flux_out_of_transit=image.flux_out_of_transit,
+            quality_metric=image.quality_metric,
+            quality_valid=image.quality_valid,
+            n_transits=image.n_transits,
+            n_cadences_in_transit=image.n_cadences_in_transit,
+        )
+        assert blind.target_position is None
+        assert regrid_stamp(blind) is None
+
+    def test_a_star_outside_the_frame_is_absent_rather_than_clipped_to_an_edge(self):
+        # Clipping would place the star on the border and let the branch read a
+        # centroid offset against a position the data does not support.
+        assert regrid_stamp(make_image(target_row=400 - 40.0)) is None
+
+    def test_mass_off_the_edge_is_dropped_and_not_renormalised(self):
+        # Half a pixel outside a 25px stamp cropped to 17: the marker keeps only
+        # the weight that landed, so its sum says how much of the star is in frame.
+        stamp = regrid_stamp(
+            make_image(height=25, width=25, target_row=400 + 3.5, target_col=700 + 12.0)
+        )
+        assert stamp is not None
+        assert 0.0 < stamp[..., TARGET_CHANNEL].sum() < 1.0

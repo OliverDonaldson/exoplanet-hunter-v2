@@ -33,7 +33,17 @@ from exoplanet_hunter.preprocess.diffimage import (
     build_difference_views,
     empty_difference_views,
 )
-from exoplanet_hunter.preprocess.viewset import GLOBAL_BINS, LOCAL_BINS, build_view_set
+from exoplanet_hunter.preprocess.momentum import (
+    build_momentum_dump_view,
+    empty_momentum_dump_view,
+)
+from exoplanet_hunter.preprocess.viewset import (
+    GLOBAL_BINS,
+    LOCAL_BINS,
+    LOCAL_DURATIONS,
+    _local_window,
+    build_view_set,
+)
 from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation.schemas import MISSIONS
 
@@ -116,6 +126,9 @@ def _build_one(path: Path, row: pd.Series) -> tuple[object, dict] | None:
         t0=t0,
         duration=duration,
     )
+    # No `momentum_dumps` and no `difference_images`: both are in
+    # `ASSEMBLED_VIEWS`, so the arrays this call returns for them are discarded
+    # by the `LIGHTCURVE_VIEWS` filter below and rebuilt at assemble time.
     views = build_view_set(
         flat, period=period, t0=t0, duration=duration, trend_lc=cleaned, raw_lc=raw
     )
@@ -158,18 +171,126 @@ def _difference_views(
     return build_difference_views(result.difference_images)
 
 
-def _add_dv_views(root: Path, source: Path, out: Path) -> None:
-    """Copy an existing view set and add only the views built from the DV report.
+def _momentum_dumps(root: Path, path: Path | None) -> np.ndarray:
+    """Flagged cadence times from `momentum_dumps.parquet`, or an empty array.
+
+    Empty is a real state — the table has not been fetched — and it makes every
+    momentum view absent rather than zero-with-presence-1. It is logged at the
+    call site rather than raising, so a rebuild of the other views on a machine
+    without the table still works and says what it left out.
+    """
+    table = path or (root / "data" / "tables" / "momentum_dumps.parquet")
+    if not table.exists():
+        log.warning("[viewset] no momentum-dump table at %s — that branch will be absent", table)
+        return np.empty(0, dtype=float)
+    return pd.read_parquet(table)["time"].to_numpy(dtype=float)
+
+
+def _momentum_view(
+    root: Path,
+    tic: int,
+    mission: str,
+    *,
+    period: float,
+    t0: float,
+    duration: float,
+    dumps: np.ndarray,
+) -> np.ndarray:
+    """One target's momentum-dump view, or the absent encoding.
+
+    Absent for Kepler and K2 without touching a file: those missions never saw
+    a TESS reaction wheel, so the branch has nothing to be present *for*, and
+    reading a Kepler FITS to build a view of zeros would only cost time and
+    invite the zeros to be mistaken for a measurement.
+    """
+    if mission != "TESS" or not dumps.size or not np.isfinite([period, t0, duration]).all():
+        return empty_momentum_dump_view(LOCAL_BINS)
+    path, _source = _lightcurve_path(root, tic, mission)
+    if path is None:
+        return empty_momentum_dump_view(LOCAL_BINS)
+    from astropy.io import fits
+
+    try:
+        with fits.open(path, memmap=True) as handle:
+            time = np.asarray(handle[1].data["TIME"], dtype=float)
+    except Exception as exc:  # a target without a readable cadence grid is absent
+        log.debug("[viewset] momentum view for %s %d failed: %s", mission, tic, exc)
+        return empty_momentum_dump_view(LOCAL_BINS)
+    return build_momentum_dump_view(
+        time,
+        dumps,
+        period=period,
+        t0=t0,
+        half_window=_local_window(duration, period, LOCAL_DURATIONS),
+        n_bins=LOCAL_BINS,
+    )
+
+
+def _recovered_epochs(scalars: pd.DataFrame, tables: list[Path]) -> dict[tuple[int, str], float]:
+    """`t0` for each row of an existing view set, matched out of a labels table.
+
+    `viewset_scalars.parquet` records the `period` and `duration` a row's views
+    were folded on but **not** the epoch, and the momentum view has to be folded
+    on the same ephemeris as the flux views or its dumps sit at a phase those
+    views disagree with. So the epoch is recovered by matching `(tic_id,
+    mission, period, duration)` exactly against the labels tables given.
+
+    **Why that identifies the epoch.** Across the 5,478 rows present in both
+    `labels.parquet` and `labels.previous.parquet` with identical period and
+    duration, `t0` differs on **0** — measured 2026-08-27. Period and duration
+    move together with the epoch in a catalogue refresh, so a row matching on
+    both is a row that did not move at all.
+
+    A row that matches nothing gets no entry, and its momentum view is absent.
+    Guessing from the nearest period is exactly the failure this returns
+    nothing for: a fold on the wrong epoch is a confident wrong measurement.
+    """
+    epochs: dict[tuple[int, str], float] = {}
+    wanted = {
+        (int(r.tic_id), str(r.mission)): (float(r.period), float(r.duration))
+        for r in scalars.itertuples(index=False)
+    }
+    for table in tables:
+        if not table.exists():
+            continue
+        labels = pd.read_parquet(table)
+        for row in labels.itertuples(index=False):
+            key = (int(row.tic_id), str(row.mission))
+            if key in epochs or key not in wanted:
+                continue
+            period, duration = wanted[key]
+            if np.isclose(float(row.period), period, rtol=1e-9) and np.isclose(
+                float(row.duration), duration, rtol=1e-9
+            ):
+                epochs[key] = float(row.t0)
+    return epochs
+
+
+def _add_dv_views(
+    root: Path,
+    source: Path,
+    out: Path,
+    *,
+    dumps: np.ndarray,
+    ephemeris_tables: list[Path],
+) -> None:
+    """Copy an existing view set and add only the views assembled from side tables.
 
     The DV-sourced views depend on neither the bin resolution nor the ephemeris
     the light-curve views are folded on, so they can be added to an existing set
-    without re-deriving anything from the FITS files.
+    without re-deriving anything from the FITS files. The momentum-dump view
+    *is* folded on the ephemeris, so it is rebuilt here from the epoch
+    `_recovered_epochs` matches back out of the labels tables and the target's
+    own cadence grid — which is read from the FITS but not re-folded, at about
+    10 ms a target.
 
     Worth having as a declared mode rather than a one-off script, because it is
     what makes a branch comparison clean: the light-curve views come through
     **byte for byte**, so a model trained here and one trained on the source set
-    differ in the new branch and in nothing else. Rebuilding from the light
-    curves instead would fold a rebuild into the same margin.
+    differ in the new branches and in nothing else. Rebuilding from the light
+    curves instead would fold a rebuild into the same margin — and would fold a
+    *labels refresh* into it too, since the epochs have moved since this set was
+    built.
     """
     arrays = ViewSetArrays.load(source)
     dv, _ruwe = _side_tables(root)
@@ -179,28 +300,55 @@ def _add_dv_views(root: Path, source: Path, out: Path) -> None:
         else {}
     )
     scalars = arrays.scalars
-    stamps, quality = [], []
+    epochs = _recovered_epochs(scalars, ephemeris_tables)
+    stamps, quality, momentum = [], [], []
+    no_epoch = 0
     for row in scalars.itertuples(index=False):
-        tic = int(row.tic_id)
+        tic, mission = int(row.tic_id), str(row.mission)
         stamp, q = _difference_views(root, tic, dv_files.get(tic), float(row.period))
         stamps.append(stamp)
         quality.append(q)
+        t0 = epochs.get((tic, mission))
+        if t0 is None and mission == "TESS":
+            no_epoch += 1
+        momentum.append(
+            _momentum_view(
+                root,
+                tic,
+                mission,
+                period=float(row.period),
+                t0=float("nan") if t0 is None else t0,
+                duration=float(row.duration),
+                dumps=dumps,
+            )
+        )
 
     views = dict(arrays.views)
     views["difference_view"] = np.stack(stamps).astype(np.float32)
     views["difference_quality_view"] = np.stack(quality).astype(np.float32)
+    views["momentum_dump_view"] = np.stack(momentum).astype(np.float32)
     rebuilt = ViewSetArrays(views=views, scalars=scalars)
     if problems := rebuilt.validate():
         raise SystemExit(f"view set is malformed: {problems}")
     rebuilt.save(out)
     present = int((views["difference_quality_view"][..., 1].sum(axis=1) > 0).sum())
+    dumped = views["momentum_dump_view"]
+    with_dumps = int(((dumped[..., 0] > 0).any(axis=1)).sum())
     log.info(
-        "[viewset] %d rows from %s + difference views -> %s  (%d carry a stamp, %.1f%%)",
+        "[viewset] %d rows from %s + assembled views -> %s  (%d carry a stamp, %.1f%%)",
         len(scalars),
         source,
         out,
         present,
         100.0 * present / max(len(scalars), 1),
+    )
+    log.info(
+        "[viewset] momentum view present on %d rows (%.1f%%), %d of them with a dump inside "
+        "the local window; %d TESS row(s) had no recoverable epoch and are absent",
+        int((dumped[..., 1].max(axis=1) > 0).sum()),
+        100.0 * float((dumped[..., 1].max(axis=1) > 0).mean()),
+        with_dumps,
+        no_epoch,
     )
 
 
@@ -261,9 +409,24 @@ def main() -> None:
         type=Path,
         default=None,
         help=(
-            "add only the DV-sourced views to an existing ViewSetArrays directory, "
-            "reusing its light-curve views byte for byte"
+            "add only the side-table views — the DV pair and the momentum dump — to an "
+            "existing ViewSetArrays directory, reusing its light-curve views byte for byte"
         ),
+    )
+    parser.add_argument(
+        "--momentum-dumps",
+        type=Path,
+        default=None,
+        help="flagged cadence table from fetch_momentum_dumps.py "
+        "(default data/tables/momentum_dumps.parquet). Absent, that branch is absent",
+    )
+    parser.add_argument(
+        "--ephemeris-from",
+        type=Path,
+        nargs="*",
+        default=None,
+        help="--views-from only: labels tables to recover each row's epoch from, tried in "
+        "order. Defaults to the catalogue and its .previous sibling",
     )
     parser.add_argument(
         "--include-candidates",
@@ -302,8 +465,19 @@ def main() -> None:
     _assert_missions_resolve(df, catalogue)
     log.info("[viewset] %d targets from %s", len(df), catalogue)
 
+    dumps = _momentum_dumps(args.root, args.momentum_dumps)
+
     if args.views_from is not None:
-        _add_dv_views(args.root, args.views_from, out)
+        tables = args.ephemeris_from
+        if not tables:
+            tables = [catalogue, catalogue.with_name(f"{catalogue.stem}.previous.parquet")]
+        _add_dv_views(
+            args.root,
+            args.views_from,
+            out,
+            dumps=dumps,
+            ephemeris_tables=[Path(t) for t in tables],
+        )
         return
 
     skips = {"missing_fits": 0, "missing_ephemeris": 0, "preprocess_error": 0}
@@ -388,6 +562,19 @@ def main() -> None:
             # costs a DV re-parse instead of re-folding every curve.
             views["difference_view"], views["difference_quality_view"] = _difference_views(
                 args.root, tic, dv_files.get(tic), float(row["period"])
+            )
+            # Built here for the same reason: the dump table is a side table, so
+            # a refetch of it must not invalidate a light-curve cache. Unlike the
+            # DV pair this one *is* folded on the ephemeris, and here the row
+            # carries its own — no recovery, unlike the `--views-from` path.
+            views["momentum_dump_view"] = _momentum_view(
+                args.root,
+                tic,
+                mission,
+                period=float(row["period"]),
+                t0=float(row["t0"]),
+                duration=float(row["duration"]),
+                dumps=dumps,
             )
             view_sets.append(views)
             rows.append(

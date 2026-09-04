@@ -16,6 +16,7 @@ from exoplanet_hunter.validation.leakage import (
 )
 from exoplanet_hunter.validation.promotion import (
     ACKNOWLEDGED_ALARMS,
+    PROMOTION_LOG_NAME,
     VERDICT_BY_EXIT_CODE,
     VERDICT_EXIT_CODES,
     PairedFolds,
@@ -32,6 +33,7 @@ from exoplanet_hunter.validation.promotion import (
     read_decision,
     unacknowledged_alarms,
     write_decision,
+    write_promotion_log,
 )
 from exoplanet_hunter.validation.schemas import (
     candidate_catalogue_schema,
@@ -45,6 +47,7 @@ from exoplanet_hunter.validation.trigger import RefreshDecision, evaluate_refres
 
 __all__ = [
     "ACKNOWLEDGED_ALARMS",
+    "PROMOTION_LOG_NAME",
     "VERDICT_BY_EXIT_CODE",
     "VERDICT_EXIT_CODES",
     "PairedFolds",
@@ -75,4 +78,5 @@ __all__ = [
     "record_quarantine",
     "unacknowledged_alarms",
     "write_decision",
+    "write_promotion_log",
 ]

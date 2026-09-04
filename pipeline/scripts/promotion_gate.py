@@ -7,6 +7,13 @@ Usage (from the repository root):
 
     # apply — update models/registry.json on success
     python pipeline/scripts/promotion_gate.py models/cv/<run_id>/cv_summary.json --promote
+
+Either way the decision is written to `models/cv/<run_id>/promotion_log.json`.
+Recording it is not promoting: the log says what was decided about a run, the
+registry says which run is served, and a REJECT writes the first and never the
+second. `/runs` reads the log to fill the console's Verdict and Reason columns,
+which is why it goes in the run directory rather than a caller-chosen path —
+`--verdict-out` had existed for a year and every caller pointed it at a tempdir.
 """
 
 from __future__ import annotations
@@ -18,11 +25,14 @@ from pathlib import Path
 
 from exoplanet_hunter.utils import get_logger
 from exoplanet_hunter.validation import (
+    PROMOTION_LOG_NAME,
     VERDICT_EXIT_CODES,
     evaluate_promotion,
     load_champion_summary,
+    load_registry,
     promote,
     write_decision,
+    write_promotion_log,
 )
 
 log = get_logger(__name__)
@@ -78,15 +88,18 @@ def main() -> None:
         type=Path,
         default=None,
         help=(
-            "write the decision here as JSON. A caller that reads only the exit code cannot "
-            "tell REJECT from a gate that crashed before deciding — both leave a non-zero "
-            "status. This file is written only once a verdict exists, so its absence is the "
-            "crash. The unattended refresh flow passes it and reports what it finds"
+            "ALSO write the decision here as JSON. A caller that reads only the exit code "
+            "cannot tell REJECT from a gate that crashed before deciding — both leave a "
+            "non-zero status. This file is written only once a verdict exists, so its "
+            "absence is the crash. The unattended refresh flow passes it and reports what "
+            f"it finds. The run directory's {PROMOTION_LOG_NAME} is written regardless, so "
+            "this is only needed when the decision must also land somewhere else"
         ),
     )
     args = parser.parse_args()
 
     candidate = json.loads(args.cv_summary.read_text())
+    registry = load_registry(args.models_dir)
     champion = load_champion_summary(args.models_dir, args.champion_summary)
 
     decision = evaluate_promotion(
@@ -102,7 +115,31 @@ def main() -> None:
     # Recorded the moment it exists, before the registry is touched. A promotion
     # that is decided and then fails to apply is a different event from a
     # rejection, and writing this afterwards would lose exactly that case.
-    if args.verdict_out is not None:
+    #
+    # Into the candidate's own run directory, unconditionally. --verdict-out has
+    # been able to carry this since it was added and every caller pointed it at a
+    # tempdir, so the verdict was computed weekly and deleted weekly. The run
+    # directory is the one location that outlives the process, travels with the
+    # run under DVC, and exists for runs the registry will never name.
+    champion_summary = args.champion_summary
+    if champion_summary is None and registry is not None:
+        champion_summary = registry.get("cv_summary")
+    log_path = args.cv_summary.parent / PROMOTION_LOG_NAME
+    write_promotion_log(
+        log_path,
+        decision,
+        # The same name --promote would register, so the log and the registry
+        # cannot disagree about which run this was.
+        candidate_run_id=args.cv_summary.parent.name,
+        champion_run_id=str(registry["run_id"]) if registry else None,
+        champion_summary=str(champion_summary) if champion_summary else None,
+    )
+
+    # An explicit --verdict-out is honoured on top of that, unless it names the
+    # file just written: a second write there would replace the log with the bare
+    # decision and drop the provenance. The refresh flow points it at exactly
+    # that path, so this is the normal case rather than a corner one.
+    if args.verdict_out is not None and args.verdict_out.resolve() != log_path.resolve():
         write_decision(args.verdict_out, decision)
 
     if decision.promoted and args.promote:

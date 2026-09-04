@@ -23,6 +23,7 @@ from exoplanet_hunter.models.cnn_branches import (
     build_cnn_branches,
     resolve_dropped_branches,
 )
+from exoplanet_hunter.preprocess.diffimage import TARGET_CHANNEL
 
 SCALARS = list(FEATURE_COLUMNS)
 MASKS = list(MASK_COLUMNS)
@@ -441,7 +442,7 @@ def test_every_named_branch_is_actually_built(model):
 
 @pytest.mark.parametrize("family", sorted(BRANCH_FAMILIES))
 def test_dropping_a_family_removes_its_branches_and_keeps_the_input_signature(family):
-    """The shard stream always yields all eleven views, so an ablation that also
+    """The shard stream always yields every view in `VIEW_SHAPES`, so an ablation that also
     changed the input contract would not be a controlled comparison — the
     dropped branch's `Input` stays, unused."""
     full = build_cnn_branches(SimpleNamespace(), scalar_columns=SCALARS, mask_columns=MASKS)
@@ -569,7 +570,11 @@ def diff_batch(n: int = 4, *, sectors: int = 0, seed: int = 0, quality: float = 
         batch[DIFF_VIEW][:, slot, edge : edge + 11, edge : edge + 11, 0] = rng.normal(
             0, 0.05, (n, 11, 11)
         )
-        batch[DIFF_VIEW][:, slot, edge : edge + 11, edge : edge + 11, 2] = 1.0
+        # The target marker sits at the middle of the stamp; presence is the
+        # LAST channel, which is what `SectorPresence` reads. Indexing either by
+        # a hard-coded 2 would silently mark the slot absent.
+        batch[DIFF_VIEW][:, slot, grid // 2, grid // 2, TARGET_CHANNEL] = 1.0
+        batch[DIFF_VIEW][:, slot, edge : edge + 11, edge : edge + 11, -1] = 1.0
         batch[QUALITY_VIEW][:, slot] = (quality, 1.0)
     return batch
 
@@ -640,7 +645,13 @@ def test_a_declined_sector_and_a_flat_one_are_not_the_same_input(model):
     flat = diff_batch(sectors=1, seed=9)
     flat[DIFF_VIEW][..., 0] = 0.0  # measured, and genuinely featureless
     declined = {k: v.copy() for k, v in flat.items()}
-    declined[DIFF_VIEW][..., 2] = 0.0  # DV produced nothing for this sector
+    # DV produced nothing for this sector, so the slot is all zeros: presence is
+    # the LAST channel, and the target marker goes with it — a declined sector
+    # has no origin either, DV writing `ticReferenceCentroid` as 0.0 with
+    # uncertainty -1.0. Zeroing a fixed channel index instead would have marked
+    # the slot absent right up until a channel was inserted in front of presence.
+    declined[DIFF_VIEW][..., TARGET_CHANNEL] = 0.0
+    declined[DIFF_VIEW][..., -1] = 0.0
     declined[QUALITY_VIEW][:] = 0.0
     assert np.abs(pool(flat, training=False).numpy()).sum() > 0
     assert np.abs(pool(declined, training=False).numpy()).sum() == pytest.approx(0.0)

@@ -53,10 +53,11 @@ class ViewKind(Enum):
     #: Period-indexed and peak-normalised; a phase shift is meaningless here.
     PERIODOGRAM = "periodogram"
     #: A stack of 2-D difference-image stamps on a CCD pixel grid: (sectors,
-    #: row, col, 3). Both spatial axes are sky, and the two data channels are on
+    #: row, col, 4). Both spatial axes are sky, and the two data channels are on
     #: different scales — the difference is a fraction of the star's brightness
     #: and the out-of-transit image is that brightness — so only the noise op
-    #: has a meaning that survives here.
+    #: has a meaning that survives here. The last **two** channels are
+    #: annotations rather than observations: see `_ANNOTATION_CHANNELS`.
     SKY_STAMP = "sky_stamp"
     #: DV's per-sector quality metric and its presence flag. Not an observation
     #: of the star at all, but an annotation about the data, and no augmentation
@@ -78,7 +79,23 @@ VIEW_KINDS: dict[str, ViewKind] = {
     "periodogram_masked_view": ViewKind.PERIODOGRAM,
     "difference_view": ViewKind.SKY_STAMP,
     "difference_quality_view": ViewKind.SECTOR_QUALITY,
+    "momentum_dump_view": ViewKind.PHASE_FRACTION,
 }
+
+#: Trailing channels that are annotations, not observations, and so are copied
+#: through every op untouched. One everywhere — the presence flag — and **two**
+#: on a difference stamp, where the target marker sits in front of it.
+#:
+#: The marker is the star's catalogue position at sub-pixel resolution. Adding
+#: Gaussian noise to it would invent a positional uncertainty DV did not report,
+#: on the one channel the branch's centroid measurement is taken *against* —
+#: jittering the origin is not a plausible alternative observation of the same
+#: star, it is a different star. The same argument the module docstring makes
+#: for `present`, applied to the channel added beside it on 2026-08-27.
+#:
+#: This leaves the noise op's draw shape on a stamp unchanged at (sectors, row,
+#: col, 2), which is what it was before the marker existed.
+_ANNOTATION_CHANNELS: dict[ViewKind, int] = {ViewKind.SKY_STAMP: 2}
 
 #: Views whose bin axis is phase, so the coherent shift applies.
 _SHIFTED = (ViewKind.FOLDED_FLUX, ViewKind.UNFOLDED_FLUX, ViewKind.PHASE_FRACTION)
@@ -124,7 +141,11 @@ def _phase_axis(kind: ViewKind) -> int:
 
 def _augment_view(view: tf.Tensor, kind: ViewKind, draw: _Draw, cfg: AugmentConfig) -> tf.Tensor:
     """One view, in `augment_views`' order: roll, noise, scale, mask."""
-    data, present = view[..., :-1], view[..., -1:]
+    annotations = _ANNOTATION_CHANNELS.get(kind, 1)
+    data, kept = view[..., :-annotations], view[..., -annotations:]
+    # Presence is the last channel on every view; anything else `kept` holds
+    # sits in front of it and rides through unchanged.
+    present = kept[..., -1:]
 
     if kind in _SHIFTED:
         axis = _phase_axis(kind)
@@ -139,7 +160,8 @@ def _augment_view(view: tf.Tensor, kind: ViewKind, draw: _Draw, cfg: AugmentConf
         # is a property of the phase grid, and leaving it behind would mark
         # measured bins empty. This moves presence, it does not create it.
         data = tf.roll(data, shift=shift, axis=axis)
-        present = tf.roll(present, shift=shift, axis=axis)
+        kept = tf.roll(kept, shift=shift, axis=axis)
+        present = kept[..., -1:]
 
     # Multiplied by presence: a bin that held no cadence is encoded as a zero
     # with present 0, and noise there invents a measurement that was never made.
@@ -158,7 +180,7 @@ def _augment_view(view: tf.Tensor, kind: ViewKind, draw: _Draw, cfg: AugmentConf
         keep = tf.random.uniform(tf.shape(data)[:-1]) > cfg.mask_prob
         data = data * tf.cast(keep, tf.float32)[..., None]
 
-    return tf.concat([data, present], axis=-1)
+    return tf.concat([data, kept], axis=-1)
 
 
 def augment_viewset(views: dict[str, tf.Tensor], cfg: AugmentConfig) -> dict[str, tf.Tensor]:

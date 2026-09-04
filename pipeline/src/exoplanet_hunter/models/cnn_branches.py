@@ -61,6 +61,10 @@ BRANCH_SCALARS: dict[str, tuple[str, ...]] = {
     # `centroid_view`. Moving them would change two branches at once and make
     # this branch's contribution unattributable, so they stay where they are.
     "difference_view": (),
+    # Nothing DV publishes qualifies a momentum dump — the flag is a fact about
+    # the spacecraft, and the branch's whole content is where the flagged
+    # cadences fall relative to the transit.
+    "momentum_dump_view": (),
 }
 
 #: Views that feed another branch rather than owning one. `difference_quality_
@@ -140,6 +144,11 @@ BRANCH_FAMILIES: dict[str, tuple[str, ...]] = {
     "centroid": ("centroid_view",),
     "gap": ("gap_view",),
     "difference": ("difference_view",),
+    # Its own family, not folded into "gap". `_gap_view` measures the hole a
+    # dump leaves and cannot tell it from any other lost cadence; this measures
+    # the dumps themselves. Dropping them together would answer neither
+    # question, and `docs/roadmap.md` 4.2c reads them separately.
+    "momentum": ("momentum_dump_view",),
     "scalar_only": tuple(SCALAR_BRANCHES),
 }
 

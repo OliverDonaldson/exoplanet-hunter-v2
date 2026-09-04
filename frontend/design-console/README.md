@@ -278,13 +278,67 @@ shows the answer; Vetting takes a target already on the page and shows the
 working. The result panel hands off to `#/vetting/<id>` rather than dropping the
 user on the catalogue.
 
+## View state in the URL
+
+The hash is the route. State that belongs to a view rather than to the route
+rides in a query string on that hash, so the address bar is the whole of what
+the screen is showing and can be pasted to someone else:
+
+```
+#/catalogue?q=TOI-43&disp=PC&src=TESS&sort=period&dir=asc&min=20
+#/vetting/TOI-4328.01?tab=diagnostics
+```
+
+`?api=` and `?boot=` are unaffected — they live in `location.search`, and a
+relative `replaceState` keeps them.
+
+**Written with `replaceState`, never by assigning `location.hash`.** Assigning
+the hash raises `hashchange`, which is `route()`, which would rebuild the page
+underneath the control that was just used: the search box would lose focus and
+its caret on every keystroke. Replacing also keeps filter changes out of the
+history stack, so Back leaves the catalogue rather than stepping back through
+fourteen keystrokes — and the single entry it does keep carries the current
+filters, so Back out of a candidate returns to the catalogue you were reading
+rather than to a reset one. `history.state` is passed through, so the parked
+scroll offset survives the rewrite.
+
+**Read on demand, not handed down through `page()`,** because a view can
+re-enter itself. Vetting does, when a slow `/score` finally lands. That re-entry
+used to throw you back to the default tab; it now reads the URL again and keeps
+the tab you switched to during the wait — which a 20-60 s cold score invites.
+The same change moved that repaint's guard off the whole hash and onto the route,
+because the tab now rides on the hash and comparing the whole thing would have
+made a score arrive to a hash that no longer matched and never paint at all.
+
+**Only what differs from the default is written,** so an untouched catalogue
+stays `#/catalogue` rather than carrying six parameters that say nothing.
+
+**Every value is checked against the set that produced it,** and the URL is
+normalised to what is actually on screen: `?min=999` becomes `min=90`, `?min=37`
+snaps to `min=35` (the slider's step), and `?disp=BOGUS`, `?dir=sideways` or
+`?sort=nonsense` are dropped. The sort key is the one that fails quietly rather
+than loudly if it is not checked — the comparator would read `undefined` on both
+rows, call every pair a tie, and render the catalogue in load order underneath a
+header with nothing marked, which is an arbitrary order presented as a sorted
+one. `score_std` is a spread rather than an order the table offers, and one
+predicate now decides both which headers are clickable and which `?sort=` values
+are accepted, so a URL cannot ask for a sort the header row has no way to show
+or undo.
+
+**Still open:** the pages with no view state of their own leave a stray query
+alone rather than stripping it. Nothing reads it, and stripping it would fight
+whatever wants to put state there next.
+
 ## Web Interface Guidelines
 
-`AGENTS.md` at the repo root is Vercel's Web Interface Guidelines. Eight gaps
+`AGENTS.md` at the repo root is Vercel's Web Interface Guidelines. Nine gaps
 against it were closed:
 
 - **Deep links work again.** Every load used to be rewritten to `#/`. Only a bare
   URL is now, and an unrecognised path falls through to Mission.
+- **The URL reflects view state.** Catalogue filters, search, sort and the
+  vetting tab are all in it, and all restore from it. See *View state in the URL*
+  above for the scheme and why it is written with `replaceState`.
 - **Scroll position survives Back.** `history.scrollRestoration` is `manual` and
   the offset is parked in the history entry itself, so it travels with the entry.
   Parked on a trailing timeout rather than `requestAnimationFrame`, because rAF

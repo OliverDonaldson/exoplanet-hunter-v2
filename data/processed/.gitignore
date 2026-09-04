@@ -5,3 +5,8 @@
 /viewset_scalars.parquet
 /viewset_tfrecords
 /candidates_viewset
+/viewset_phase1
+/viewset_tfrecords_phase1
+/viewset_stage9
+/viewset_tfrecords_stage9
+/viewset_tfrecords_synneg
