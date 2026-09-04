@@ -11,8 +11,10 @@ step, defect, decision and deferred item is an issue on the repository,
 collected on the [project board](https://github.com/users/OliverDonaldson/projects/2) (private, like the repository); a PR
 closes the issues it resolves.
 
-**Direction, decided 2026-09-04: freeze the science after Phase 1, finish the
-product, write the report.** Every attempt since August to replace the
+**Direction, decided 2026-09-04 and now executed: freeze the science after
+Phase 1, finish the product, write the report.** Phase 1 landed on 2026-09-05
+and falsified the last standing explanation for the branch line's null, so the
+line is [closed in writing](decisions.md) and steps 5 to 8 are all that remain. Every attempt since August to replace the
 dual-view champion was rejected. The two results that cleared their floors,
 stage 8's propensity weighting and stage 10.5's ensemble, improve on or
 complement the champion rather than replace it, and the roadmap's own forecast
@@ -40,7 +42,7 @@ and 11. This plan finishes Phase 1 and defers Phases 2 and 3.
 | 1 | Land the Phase 1 build | #3 | [#1](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/1) | merged to main, CI green | 2026-09-05 |
 | 2 | Repo hygiene: React console removed, README, commit-msg hook | #4 | [#2](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/2) merged into the stack base by mistake; [#45](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/45) re-targets it to main | open | 2026-09-05 |
 | 3 | Docs restructure: this file, `experiments/`, `known-limits.md`, `decisions.md` | #5 | [#46](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/46), stacked on #45 | open | 2026-09-05 |
-| 4 | Close the science: Phase 1 arms read, branch line closed, API floor fixed | #6 | — | arm C″ training since 2026-09-04 23:40, D″ queued behind it, seed 44's control arm alongside; compute is done when both arms carry `cv_summary.json` under `models/phase1/` | 2026-09-05 |
+| 4 | Close the science: Phase 1 arms read, branch line closed, API floor fixed | #6 | [#48](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/48) floor, #49 reading | both arms complete and gated UNRESOLVED; Phase 1 falsified and the branch line closed in writing; registry untouched | 2026-09-05 |
 | 5 | Console tells the truth: wrong before empty | #7 | — | not started |  |
 | 6 | Console: empty to filled | #8 | — | not started |  |
 | 7 | The report | #9 | — | not started |  |

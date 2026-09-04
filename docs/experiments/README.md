@@ -40,6 +40,8 @@ this index was published.
 | [`phase-1-build-4-2d.md`](phase-1-build-4-2d.md) | Phase 1 and Phase 1a build · §4.2d | 2026-08-27 to 2026-08-28 | built-not-run | Target-position channel and momentum-dump view built for Phase 1; neither arm has run. Box centre misses the target's pixel on 77.8% of stamps; stage-9 dv_usable baseline recorded (D−C −0.0075, 0.33x floor). |
 | [`standing-audits.md`](standing-audits.md) | standing audits · §5 | 2026-08-07 to 2026-08-15 | audit | Four audits done and acted on: ExoMiner delta 6/10, security clean with rate limiting added and protobuf CVE accepted, nothing to delete, DVC pointer move affects no measured number. |
 | [`change-log.md`](change-log.md) | change log · §7 | 2026-08-14 to 2026-08-17 | audit | Record restructure verified mechanically lossless; Champion rename left pre-registrations, recorded results and the DVC path unchanged; docs consolidated to eight, W14 closed; 3.11c's reproduction script untracked, pre-run authorship unverifiable. |
+| [`phase-1-reading-criterion.md`](phase-1-reading-criterion.md) | Phase 1 pre-registration · how it would be read | 2026-09-05 | plan | Which of the two candidate floors governs the Phase 1 contrast, fixed while arm D″ was still training, with an explicit UNRESOLVED if they disagreed. They did not. |
+| [`phase-1-result.md`](phase-1-result.md) | Phase 1 result · the mechanism test | 2026-09-04 to 2026-09-05 | falsified | The target-position channel changes nothing: TESS recall @1% FPR on dv_usable rows moves −0.0254 at 0.26x its floor, so the reference-frame explanation is falsified, no third stamp variant is commissioned and the branch line closes. |
 
 ## Adding to the record
 

@@ -20,6 +20,35 @@ is moved verbatim from `roadmap.md` §6 and frozen.
 | 2026-09-04 | Git history stays as it is; a commit-msg hook refuses assistant co-author trailers from now on | `scripts-dev/reject-assistant-trailer.sh` |
 | 2026-09-04 | The Phase 1 arms run once, from code pinned at `d93a1a0`, and their reading closes the branch line either way | `PLAN.md` step 4 |
 | 2026-09-04 | The React console (`frontend/src`) is deleted; `frontend/design-console` is the console | PR #2 |
+| 2026-09-05 | **The branch line is closed in writing.** Phase 1 falsified the last standing explanation for stage 9's null, so no third stamp variant is commissioned and no further branch architecture work is scheduled. `ca906040` stays served | [phase 1 result](experiments/phase-1-result.md) |
+
+### The branch line, closed 2026-09-05
+
+Recorded here because it is the decision the whole ExoMiner-inspired rebuild was
+built to reach, and because "we never found out" was the only outcome that would
+have been a failure.
+
+Five branch arms were rejected as **replacements** for the dual-view champion,
+every one on shortlist recall. Stage 10.5 then found the branch line's value as
+a **complement**: mean-of-logits ensembling clears its bar on both arms. Stage
+7i found no control-arm advantage. Stage 9 built the difference-image branch and
+could not run its own primary test. Phase 1 fed the branch the one input
+ExoMiner++ has and we did not, the star's own pixel position, and **the branch
+still carries no signal** — 0.26x of its floor on the pre-registered statistic,
+with the margin negative in every cell.
+
+So the branch line is closed as a replacement, banked as a complement, and no
+further architecture work is scheduled on it. What the project delivers is a
+calibrated, explainable, reproducible vetting service, the label-bias work that
+improves any model including the champion, and an evaluation apparatus that can
+tell a real improvement from noise. That was named in advance as one of the two
+finished states, and it is the one that happened.
+
+**What this does not close.** W2, the model scoring the star rather than the
+transit, is unresolved rather than solved — stage 9's instrument for it is
+unrunnable by its own pre-registered limit (#32). Stage 7ii's attribution and
+stage 11's serving parity are deferred (#40, #41), and they only matter if the
+branch line is ever reopened.
 
 ## Open
 

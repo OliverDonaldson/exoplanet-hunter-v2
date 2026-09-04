@@ -117,3 +117,11 @@ exception.
 > `branches-20260807-shared` 0.145; the capacity arm
 > `branches-20260808-capacity` 0.236; the re-baseline
 > `branches-20260808-rebaseline` 0.220. All against the champion's 0.307.
+
+> 2026-09-05. **W10 measured inside a single run.** The register records the
+> slowdown across repeated `run_cv` calls in one process. Phase 1's arm D''
+> shows the same pathology within one call: fold completion times of 25, 23,
+> 29, 36 and 78 minutes, the last fold 3.1x the first on identical work. That
+> accounts for most of the 74-minute gap between the two arms rather than the
+> one extra branch. The mitigation is unchanged and it held — one process per
+> CV run. See [phase 1 result](experiments/phase-1-result.md).
