@@ -139,7 +139,8 @@ Now implemented (kept here for provenance):
 Every headline number the project has measured, with the artefact it came from
 and where its full reading is recorded. **This table is the index; the
 narrative, the pre-registration each result was read against, and the
-qualifications all live in [roadmap.md](roadmap.md).** Nothing enters here that
+qualifications all live in [experiments/](experiments/README.md), indexed by
+[roadmap.md](roadmap.md).** Nothing enters here that
 was not measured from an artefact in this repository.
 
 Two conventions carry through all of it. A margin is reported against the noise

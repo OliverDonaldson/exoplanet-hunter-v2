@@ -11,8 +11,8 @@ Catalogue refresh → validation gates → phase-folded views → 5-fold CNN
 ensemble → Platt calibration → promotion gate → FastAPI scoring → vetting
 console. The governing rule is **beat the baseline before you cheer**: a model
 ships only if it beats the champion's cross-validated ROC-AUC without losing
-calibration or shortlist recall, and every margin is read against a noise floor
-measured in the same run.
+calibration or shortlist recall, and every margin is read against a noise floor, the
+seed-to-seed spread of the same metric measured in the same run.
 
 ## What is served
 
@@ -25,11 +25,17 @@ Platt scaling for calibration. Out-of-fold, per mission:
 | TESS (gates promotion) | 2,367 | 0.910 | 0.307 | 0.121 | 0.044 |
 | Kepler (diagnostic) | 2,238 | 0.991 | 0.799 | 0.036 | 0.041 |
 
-There is no pooled headline: the missions differ in label provenance and class
-balance, and TESS is the mission the service scores.
+Out of fold, from `models/cv/champion-rebaselined-today/cv_summary.json`, the
+champion re-scored on the current labelled set on 2026-08-17. The pooled figure
+(0.956 ROC-AUC across both missions) is recorded but not read as a headline: it
+averages two missions with different label provenance and class balance, and
+TESS is the mission the service scores. K2 (530 labelled rows) is in the
+catalogue, but the served run predates it and has no K2 slice; the promotion
+gate flags that permanently. The deployed Model page still prints a noise floor
+measured on a different architecture; that is issue #11.
 
 Live: the console at https://exoplanet-hunter-console.onrender.com and the API
-at https://exoplanet-hunter-api.fly.dev.
+at https://exoplanet-hunter-api.fly.dev. Maintained by Oliver Donaldson.
 
 ## Layout
 
@@ -50,7 +56,7 @@ docs/           start at docs/index.md
 ```bash
 conda env create -f environment.yml && conda activate exoplanet-hunter-v2
 pre-commit install --hook-type pre-commit --hook-type commit-msg
-dvc pull          # artefacts from R2
+dvc pull          # artefacts from R2; needs credentials (infra/README.md)
 make test         # the fast pipeline and API suites
 make api          # FastAPI on :8000
 make frontend     # build the console and serve it on :5173
@@ -58,8 +64,16 @@ make frontend     # build the console and serve it on :5173
 
 Always activate `exoplanet-hunter-v2` first. The V1 environment carries V1's
 code under the same package name and runs last year's pipeline without a word.
+The test suites run without the DVC artefacts; scoring, the console and the
+refresh need them pulled.
 
 ## Documentation
 
-[docs/index.md](docs/index.md) maps every document. `docs/roadmap.md` is the
-record of what was measured and, in its §2a table, where each stage stands.
+[docs/index.md](docs/index.md) maps every document. `docs/PLAN.md` is where the
+project stands; `docs/experiments/` is the record of what was measured.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). `pipeline/vendor/triceratops` is a patched copy of
+TRICERATOPS under its own licence, with the patches listed in its README.
+ExoMiner is reimplemented and credited, never vendored (NASA NOSA licence).
