@@ -1,9 +1,11 @@
 """`GET /runs` — the CV runs on disk, active first, so the history table
 follows the registry instead of a hardcoded list.
 
-`verdict` and `reason` are always null: nothing on disk records why a run was
-rejected, and synthesising it from the metrics would fabricate an audit trail.
-A `promotion_log.json` written by the gate is the fix.
+`verdict` and `reason` come from the `promotion_log.json` the promotion gate
+writes into each run directory. Both stay Optional and both stay absent rather
+than being derived here: a run gated before the log existed legitimately has no
+verdict, and reconstructing one from the metrics on disk would fabricate an
+audit trail rather than report one. A row without a log still renders.
 
 Only runs with a pooled ROC-AUC are listed — the directory also holds branch
 experiments and tuning trials that were never promotion candidates.
@@ -24,6 +26,44 @@ from app.schemas import RunRecord, RunsResponse
 router = APIRouter()
 
 _ROOT = Path(__file__).resolve().parents[3]
+
+#: Mirrors `exoplanet_hunter.validation.promotion.PROMOTION_LOG_NAME`. Named
+#: again rather than imported: reading it needs the filename and nothing else,
+#: and importing the validation package costs a pandera import on a route that
+#: is otherwise pure JSON and parquet.
+_PROMOTION_LOG = "promotion_log.json"
+
+
+def _promotion(run_dir: Path) -> tuple[str | None, str | None]:
+    """The gate's verdict for this run, and its reasons as one readable string.
+
+    Parsed as plain JSON rather than through `validation.read_decision`, which
+    raises on an unrecognised verdict: a corrupt or hand-edited log would take
+    the whole history table down with it, and on a display path eleven readable
+    rows beat a 500. Every failure here degrades to the same nulls a run with no
+    log produces.
+
+    The verdict string is passed through as written. Only the gate produces
+    these files, so an unfamiliar value means a corrupt or newer log, and
+    showing it is more use to whoever has to explain it than dropping it.
+
+    Reasons only. Alarms are advisory, and wherever one actually changed the
+    verdict the gate already says so in the reasons — including them too would
+    print them twice in the single column the console has for this.
+    """
+    path = run_dir / _PROMOTION_LOG
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    verdict = payload.get("verdict")
+    # `isinstance`, not truthiness: a corrupt log whose `reasons` is a bare
+    # string would iterate character by character and publish it letter-spaced.
+    raw = payload.get("reasons")
+    reasons = [str(r) for r in raw] if isinstance(raw, list) else []
+    return (str(verdict) if verdict else None), ("; ".join(reasons) or None)
 
 
 def _num(value: object) -> float | None:
@@ -89,6 +129,7 @@ def runs(limit: int = 12) -> RunsResponse:
             continue
         brier, _ = _metric(summary, "test_brier")
         tess_auc, tess_recall = tess_slice(run_dir)
+        verdict, reason = _promotion(run_dir)
         # An eight-character truncation suits a hex digest, not a named dir.
         name = run_dir.name
         short = name[:8] if len(name) == 32 and all(c in "0123456789abcdef" for c in name) else name
@@ -105,8 +146,8 @@ def runs(limit: int = 12) -> RunsResponse:
                 recall=tess_recall,
                 brier=brier,
                 status="active" if name == active else "archived",
-                verdict=None,  # see the module docstring
-                reason=None,
+                verdict=verdict,
+                reason=reason,
             )
         )
 

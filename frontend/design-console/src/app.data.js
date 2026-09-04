@@ -836,14 +836,46 @@ const parkScroll = () => {
 let restoreTo = null;
 window.addEventListener('popstate', e => { restoreTo = (e.state && e.state.y) || 0; });
 
+/* ── view state in the URL ───────────────────────────────── */
+/* The hash is the route. State that belongs to a view rather than to the route
+   — the catalogue's filters and sort, the vetting page's tab — rides in a query
+   string on that hash. `?api=` and `?boot=` live in location.search, which this
+   never touches; a relative replaceState keeps them.
+
+   Read on demand rather than handed down through page(), because a view can
+   re-enter itself. Vetting does, when a slow /score finally lands, and reading
+   the URL again there is what keeps the tab you switched to during the wait —
+   it used to be thrown back to the default at that moment. */
+const routeQuery = () => new URLSearchParams(location.hash.replace(/^#[^?]*\??/, ''));
+
+/* replaceState, not `location.hash = …`. Assigning the hash raises hashchange,
+   which is route(), which would rebuild the page underneath the control that
+   was just used — the search box would lose focus and its caret on every
+   keystroke. Replacing also keeps a filter change out of the history stack, so
+   Back leaves the catalogue rather than stepping back through fourteen
+   keystrokes, and the one entry it does keep now carries the filters: Back out
+   of a candidate returns to the catalogue you were reading rather than to a
+   reset one. history.state is passed through so the parked scroll offset
+   survives the rewrite. */
+function setRouteQuery(params) {
+  const path = location.hash.replace(/^#/, '').split('?')[0] || '/';
+  const qs = params.toString();
+  history.replaceState(history.state, '', '#' + path + (qs ? '?' + qs : ''));
+}
+
 function route() {
   clearCharts();
   stopHealth();
   stopScoreLoader();
   // The upload run keeps going; it just stops painting a page that is gone.
   detachUploadRender();
+  // The query is stripped before the route is resolved: `#/catalogue?src=TESS`
+  // is the catalogue, and a candidate id must not arrive with `?tab=…` glued
+  // to it. encodeURIComponent writes `?` as %3F, so the first literal one is
+  // always the separator.
   const raw = location.hash.replace(/^#/, '') || '/';
-  const path = raw.startsWith('/vetting/') || KNOWN_ROUTES.has(raw) ? raw : '/';
+  const bare = raw.split('?')[0] || '/';
+  const path = bare.startsWith('/vetting/') || KNOWN_ROUTES.has(bare) ? bare : '/';
   renderNav(path);
   document.title = SITE_TITLE;
 

@@ -94,3 +94,18 @@ frontend/tsconfig.tsbuildinfo
 # environment, so it is a local artefact, never shared. .slopconfig.yaml IS
 # tracked — CI and local runs must score the same code the same way.
 .slop-detector/
+
+# Stage scratch. `.phase1-scratch/` holds the Phase 1 drivers, their logs and a
+# 221 MB lightkurve download cache — the representative curves the momentum-dump
+# fetch reads and throws away. The table it produces
+# (data/tables/momentum_dumps.parquet, 2,647 rows) is the artefact worth keeping;
+# the curves are re-fetchable from MAST. Same argument data/raw/ is ignored under.
+.phase1-scratch/
+.stage8-scratch/
+
+# Experimental training arms. Written outside models/cv/ on purpose so the
+# weekly gate's `models/cv/*/cv_summary.json` glob cannot select one; ignored
+# here so a 300 MB run directory cannot be committed by accident either.
+models/phase1a/
+models/phase1/
+models/stage9/

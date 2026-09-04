@@ -223,7 +223,51 @@ const DISPOSITIONS = ['All', 'PC', 'CP', 'KP', 'FP'];
 const SOURCES = ['All', 'TESS', 'Kepler'];
 
 function Catalogue() {
-  const state = { search:'', disposition:'All', source:'All', sortKey:'prob', sortDir:'desc', minProb:0 };
+  const COLS = [
+    ['Candidate ID','id'], ['TIC / KIC','ticId'], ['Period (d)','period'], ['Depth','depth'],
+    ['P(planet)','prob'], ['σ','score_std'], ['Disp.','disposition'], ['Source','source'],
+    ['T-mag','tmag'], ['SNR','snr'], ['TSM','tsm'], ['ESM','esm'],
+    ['Baseline (d)','baselineDays'], ['Last Scored','lastScored'],
+  ];
+  /* score_std is a spread, not an order the table offers. One predicate decides
+     both which headers are clickable and which `?sort=` values are accepted, so
+     a URL can never ask for a sort the header row has no way to show or undo. */
+  const sortable = col => col !== 'score_std';
+  const SORT_KEYS = new Set(COLS.map(([, k]) => k).filter(sortable));
+
+  /* Filters, sort and search come from the hash query, so the URL in the address
+     bar is the whole of what the table is showing and can be pasted to someone
+     else. Every value is checked against the set that produced it. The sort key
+     is the one that fails quietly rather than loudly if it is not: the
+     comparator would read `undefined` on both rows, call every pair a tie, and
+     render the catalogue in load order underneath a header with nothing marked
+     — an arbitrary order presented as a sorted one. */
+  const q = routeQuery();
+  const pick = (v, allowed, dflt) => (allowed.includes(v) ? v : dflt);
+  const state = {
+    search: q.get('q') || '',
+    disposition: pick(q.get('disp'), DISPOSITIONS, 'All'),
+    source: pick(q.get('src'), SOURCES, 'All'),
+    sortKey: SORT_KEYS.has(q.get('sort')) ? q.get('sort') : 'prob',
+    sortDir: q.get('dir') === 'asc' ? 'asc' : 'desc',
+    // clamped and snapped to the slider's own range and step, so `min=999`
+    // filters to 90% rather than to nothing, and the thumb always has a
+    // position that matches the number beside it
+    minProb: Math.round(Math.min(90, Math.max(0, +q.get('min') || 0)) / 5) * 5,
+  };
+
+  /* Only what differs from the default is written, so an untouched catalogue
+     stays `#/catalogue` rather than carrying six parameters that say nothing. */
+  const syncURL = () => {
+    const p = new URLSearchParams();
+    if (state.search) p.set('q', state.search);
+    if (state.disposition !== 'All') p.set('disp', state.disposition);
+    if (state.source !== 'All') p.set('src', state.source);
+    if (state.sortKey !== 'prob') p.set('sort', state.sortKey);
+    if (state.sortDir !== 'desc') p.set('dir', state.sortDir);
+    if (state.minProb > 0) p.set('min', state.minProb);
+    setRouteQuery(p);
+  };
 
   const filtered = () => {
     let data = [...CANDIDATES];
@@ -249,13 +293,6 @@ function Catalogue() {
     return data;
   };
 
-  const COLS = [
-    ['Candidate ID','id'], ['TIC / KIC','ticId'], ['Period (d)','period'], ['Depth','depth'],
-    ['P(planet)','prob'], ['σ','score_std'], ['Disp.','disposition'], ['Source','source'],
-    ['T-mag','tmag'], ['SNR','snr'], ['TSM','tsm'], ['ESM','esm'],
-    ['Baseline (d)','baselineDays'], ['Last Scored','lastScored'],
-  ];
-
   app.innerHTML = `
   <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
     <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0;position:relative">
@@ -279,7 +316,7 @@ function Catalogue() {
           <svg style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%)" width="12" height="12" viewBox="0 0 12 12" fill="none">
             <circle cx="5" cy="5" r="4" stroke="#8A8FA8" stroke-width="1.2"/><path d="M8 8l2.5 2.5" stroke="#8A8FA8" stroke-width="1.2" stroke-linecap="round"/>
           </svg>
-          <input type="text" id="cat-search" placeholder="Search by ID or TIC..." aria-label="Search candidates"
+          <input type="text" id="cat-search" placeholder="Search by ID or TIC..." aria-label="Search candidates" value="${esc(state.search)}"
             style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#F0EEE8;font-family:'JetBrains Mono';font-size:0.75rem;padding:0.6rem 0.75rem 0.6rem 2rem">
         </div>
         <div style="display:flex;gap:0.4rem" id="cat-disp">
@@ -290,8 +327,8 @@ function Catalogue() {
         </div>
         <div style="display:flex;align-items:center;gap:0.75rem">
           <span class="stat-label">Min P(planet)</span>
-          <input type="range" id="cat-range" min="0" max="90" step="5" value="0" aria-label="Minimum probability" style="width:80px">
-          <span id="cat-range-v" style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;min-width:3rem">0.00</span>
+          <input type="range" id="cat-range" min="0" max="90" step="5" value="${state.minProb}" aria-label="Minimum probability" style="width:80px">
+          <span id="cat-range-v" style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;min-width:3rem">${(state.minProb / 100).toFixed(2)}</span>
         </div>
       </div>
 
@@ -318,15 +355,16 @@ function Catalogue() {
   const bodyEl = document.getElementById('cat-body');
 
   const paint = () => {
+    syncURL();
     const data = filtered();
     document.getElementById('cat-count').textContent = `${data.length} WORLDS`;
     document.getElementById('cat-sub').textContent = `${CANDIDATES.length} total · sorted by ${state.sortKey} ${state.sortDir}`;
 
     headEl.innerHTML = COLS.map(([label, col]) => {
-      const sortable = col !== 'score_std';
+      const canSort = sortable(col);
       const on = state.sortKey === col;
-      const icon = !sortable ? '' : on ? (state.sortDir === 'asc' ? '↑' : '↓') : '↕';
-      return `<th ${sortable ? `data-col="${col}"` : ''} style="padding:0.75rem 1rem;text-align:left;font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${on ? '#4DFFD2' : '#8A8FA8'};cursor:${sortable ? 'pointer' : 'default'};white-space:nowrap;user-select:none;border-bottom:1px solid rgba(255,255,255,0.08)">${label}<span style="margin-left:4px;color:${on ? '#4DFFD2' : 'rgba(138,143,168,0.4)'};font-size:0.6rem">${icon}</span></th>`;
+      const icon = !canSort ? '' : on ? (state.sortDir === 'asc' ? '↑' : '↓') : '↕';
+      return `<th ${canSort ? `data-col="${col}"` : ''} style="padding:0.75rem 1rem;text-align:left;font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${on ? '#4DFFD2' : '#8A8FA8'};cursor:${canSort ? 'pointer' : 'default'};white-space:nowrap;user-select:none;border-bottom:1px solid rgba(255,255,255,0.08)">${label}<span style="margin-left:4px;color:${on ? '#4DFFD2' : 'rgba(138,143,168,0.4)'};font-size:0.6rem">${icon}</span></th>`;
     }).join('') + `<th style="padding:0.75rem 1rem;border-bottom:1px solid rgba(255,255,255,0.08)"></th>`;
 
     bodyEl.innerHTML = data.map(c => {

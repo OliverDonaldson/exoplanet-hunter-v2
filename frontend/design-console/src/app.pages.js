@@ -2,6 +2,10 @@
    VETTING · MODEL PERFORMANCE · UPLOAD
    ═══════════════════════════════════════════════════════════ */
 
+// Three verdicts, three chips. An unrecognised verdict is one this console
+// cannot interpret, and the honest rendering of that is the amber chip, not red.
+const VERDICT_CHIP = { PROMOTE: 'tag-promote', UNRESOLVED: 'tag-unresolved', REJECT: 'tag-reject' };
+
 /* The views the pipeline actually returns. No fitted transit model:
    this project classifies, it does not solve for orbital parameters. */
 function generateViews(c) {
@@ -111,13 +115,18 @@ function Vetting(candidateId) {
      landing after the user has navigated away does not repaint over them. */
   if (API.mode === 'live' && !c.live && !c.scoring && !c.scoreError) {
     c.scoring = true;
-    const wanted = location.hash;
+    /* Guarded on the route, not on the whole hash. The tab now rides in a query
+       string on that hash, and switching tabs during the wait is exactly what a
+       20-60 s score invites — comparing the whole thing would have made the
+       result arrive to a hash that no longer matched and never paint at all,
+       leaving P(planet) at `···` until the page was left and re-entered. */
+    const wanted = location.hash.split('?')[0];
     loadScore(c.ticNumeric, ephemerisFor(c))
       .then(s => { c.live = s; c.prob = s.prob; })
       .catch(e => { c.scoreError = e.message; })
       .finally(() => {
         c.scoring = false;
-        if (location.hash === wanted) Vetting(candidateId);
+        if (location.hash.split('?')[0] === wanted) Vetting(candidateId);
       });
   }
   const views = generateViews(c);
@@ -130,12 +139,6 @@ function Vetting(candidateId) {
   const canFollowUp = has(c.depth) && c.depth > 0 && has(c.tmag) && c.tmag > 0 && has(c.period) && c.period > 0;
   const fu = canFollowUp ? followUp(c) : null;
   const dispColor = getDispositionColor(c.disposition);
-  // The timeline opens the page: it is the account of where the headline number
-  // came from, and every other tab is one stage of it in detail. It is read
-  // back from a real score response, so in prototype mode there is nothing for
-  // it to describe and the phase-folded views lead instead.
-  let activeTab = API.mode === 'live' ? 'pipeline' : 'lightcurve';
-
   const TABS = [
     ['pipeline',    'Pipeline'],
     ['lightcurve',  'Phase-Folded Views'],
@@ -143,6 +146,22 @@ function Vetting(candidateId) {
     ['agreement',   'Model Agreement'],
     ['diagnostics', 'Diagnostic Flags'],
   ];
+
+  // The timeline opens the page: it is the account of where the headline number
+  // came from, and every other tab is one stage of it in detail. It is read
+  // back from a real score response, so in prototype mode there is nothing for
+  // it to describe and the phase-folded views lead instead.
+  //
+  // `?tab=` outranks that default, which is what makes a link to one stage of
+  // one candidate's vetting hold. It also survives the re-entry above: a cold
+  // /score takes 20-60 s, switching tabs while it runs is the obvious thing to
+  // do, and the repaint that lands the score used to throw you back here.
+  // An unrecognised tab falls through to the default rather than to a blank
+  // panel, on the same rule as an unrecognised route.
+  const tabFromURL = routeQuery().get('tab');
+  let activeTab = TABS.some(([k]) => k === tabFromURL)
+    ? tabFromURL
+    : (API.mode === 'live' ? 'pipeline' : 'lightcurve');
 
   /* An ad-hoc target from Upload carries the score's ephemeris and nothing
      else, so every catalogue column below can legitimately be absent. */
@@ -645,7 +664,15 @@ function Vetting(candidateId) {
   };
 
   document.querySelectorAll('#vet-tabs button').forEach(b => b.addEventListener('click', () => {
-    activeTab = b.dataset.tab; paintTabs(); paintPanel();
+    activeTab = b.dataset.tab;
+    // Written for every tab including the one that is this mode's default,
+    // because the default is not the same in live and prototype and a shared
+    // link has to open on the stage the sender was reading rather than on
+    // whichever one the recipient's mode would have picked.
+    const p = routeQuery();
+    p.set('tab', activeTab);
+    setRouteQuery(p);
+    paintTabs(); paintPanel();
   }));
   paintTabs(); paintPanel(); bindNavButtons();
 }
@@ -834,7 +861,7 @@ function ModelPerformance() {
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.auc) ? v.auc.toFixed(4) : '—'} ${has(v.aucErr) ? `<span style="color:#8A8FA8">±${v.aucErr.toFixed(4)}</span>` : ''}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.recall) ? v.recall.toFixed(4) : '—'}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.brier) ? v.brier.toFixed(4) : '—'}</span></td>
-                  <td style="padding:0.85rem 0.75rem;vertical-align:top">${v.verdict ? `<span class="tag-chip ${v.verdict === 'PROMOTE' ? 'tag-promote' : 'tag-reject'}">${v.verdict}</span>` : `<span style="color:#8A8FA8;font-family:'JetBrains Mono';font-size:0.65rem">—</span>`}</td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top">${v.verdict ? `<span class="tag-chip ${VERDICT_CHIP[v.verdict] || 'tag-unresolved'}">${esc(v.verdict)}</span>` : `<span style="color:#8A8FA8;font-family:'JetBrains Mono';font-size:0.65rem">—</span>`}</td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top;max-width:30rem"><span style="font-family:'Inter';font-size:0.75rem;line-height:1.5;color:rgba(240,238,232,0.55)">${esc(v.reason || 'No promotion log is written yet, so no reason is on record.')}</span></td>
                 </tr>`).join('')}
             </tbody>

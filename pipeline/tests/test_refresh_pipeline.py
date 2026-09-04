@@ -150,6 +150,31 @@ def test_alarms_come_back_too(gate):
     assert decision.alarms == ["Kepler AUC fell"]
 
 
+def test_the_verdict_is_written_somewhere_that_outlives_the_flow(gate, tmp_path):
+    """This pointed at a TemporaryDirectory, so the gate computed a full verdict
+    with its reasons every week and deleted it — `/runs` had nothing to serve and
+    the console said so on every row. The flow must name the candidate's own run
+    directory, which is where the API looks."""
+    from exoplanet_hunter.validation import PROMOTION_LOG_NAME
+
+    _, recorded = gate("REJECT")
+    out = Path(recorded["cmd"][recorded["cmd"].index("--verdict-out") + 1])
+    assert out == tmp_path / "models" / "cv" / "candidate" / PROMOTION_LOG_NAME
+    assert out.is_file()
+
+
+def test_a_stale_log_from_a_previous_gating_is_not_read_as_this_run_s_verdict(gate, tmp_path):
+    """The durable path persists between runs, unlike the tempdir it replaced.
+    A leftover file would satisfy the existence check that is the flow's only
+    way to tell a decision from a gate that died before reaching one."""
+    from exoplanet_hunter.validation import PROMOTION_LOG_NAME
+
+    stale = tmp_path / "models" / "cv" / "candidate" / PROMOTION_LOG_NAME
+    stale.write_text(json.dumps({"verdict": "PROMOTE", "reasons": ["last week"], "alarms": []}))
+    with pytest.raises(RuntimeError, match="without reaching a verdict"):
+        gate("REJECT", exit_code=1, write=False)
+
+
 def test_only_promote_reads_as_a_promotion(gate):
     """`promoted` is what decides whether the message claims a new model is
     served, and UNRESOLVED must not reach it."""

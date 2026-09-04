@@ -121,13 +121,21 @@ Sources, tables and their exact roles are in
 
 ## 2. Validation gates
 
-Five Pandera-based gates run before anything trains:
+Seven gates run before anything trains, named as `validate_data.py` reports
+them. Only the first two are Pandera schemas; the rest are structural checks and
+guards:
 
-- schema checks on the label and candidate catalogues
-- structural checks on the processed views
-- a leakage guard that quarantines label flips into a prospective holdout
-- a shrink guard that fails the run if the catalogue loses more than 10% of its
+- `label-catalogue` and `candidate-catalogue` — Pandera schema validation
+- `views` and `view-set` — structural checks on the processed arrays
+- `dv-archive` — completeness against the TESS targets the catalogue knows
+  about, so an interrupted fetch reads as "never queried" rather than "no DV
+  products for this target"
+- `label-shrink` — fails the run if the catalogue loses more than 10% of its
   rows, or drops a mission entirely
+- `refresh-leakage` — quarantines label flips into a prospective holdout
+
+The last two compare against the previous catalogue, so they run only when
+`--previous-labels` is passed. CI passes it, so all seven run there.
 
 The shrink guard exists because a bug once silently rewrote the catalogue from
 5,686 rows to 1,000.

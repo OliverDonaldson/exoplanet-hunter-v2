@@ -302,7 +302,11 @@ class ModelSummaryResponse(BaseModel):
 
 
 class RunRecord(BaseModel):
-    """One CV run on disk. `verdict`/`reason` are null — see routes/runs.py."""
+    """One CV run on disk.
+
+    `verdict`/`reason` are Optional because the promotion log postdates most of
+    the runs on disk — see routes/runs.py.
+    """
 
     run_id: str
     short_id: str

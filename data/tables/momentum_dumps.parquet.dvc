@@ -1,0 +1,5 @@
+outs:
+- md5: 3f3c81e8dd58cdd420a81a55c6deb275
+  size: 27566
+  hash: md5
+  path: momentum_dumps.parquet

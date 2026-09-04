@@ -342,8 +342,8 @@ async function hydrate() {
   // while the endpoint was returning one, which showed a measured figure as
   // not measured — the same defect as inventing one, pointed the other way.
   if (runs.status === 'fulfilled' && Array.isArray(runs.value.runs)) {
-    // verdict and reason come back null: registry.json records only what is
-    // served, so nothing on disk says why an earlier run was rejected.
+    // verdict and reason come from each run's promotion_log.json. Still null for
+    // every run gated before that file existed, which is most of models/cv/.
     RUNS.length = 0;
     RUNS.push(...runs.value.runs.map(r => ({
       runId: r.short_id, date: r.date, auc: r.auc, aucErr: r.aucErr,

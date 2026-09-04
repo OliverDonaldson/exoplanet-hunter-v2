@@ -329,6 +329,10 @@ select option{background:#0A0C10;color:#F0EEE8;}
 .tag-soon{color:#8A8FA8;background:transparent;border:1px dashed rgba(138,143,168,0.45);}
 .tag-promote{color:#4DFFD2;background:rgba(77,255,210,0.10);border:1px solid rgba(77,255,210,0.30);}
 .tag-reject{color:#FF4D4D;background:rgba(255,77,77,0.08);border:1px solid rgba(255,77,77,0.30);}
+/* Amber, matching .tag-zeroshot: UNRESOLVED is a stop-and-ask, not a failure.
+   Red would publish a quality rejection the gate did not make. Unknown verdicts
+   land here too. */
+.tag-unresolved{color:#F5A623;background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.35);}
 
 .interval{position:relative;height:3px;background:rgba(255,255,255,0.07);margin-top:0.55rem;}
 .interval span{position:absolute;top:0;bottom:0;background:rgba(77,255,210,0.45);}

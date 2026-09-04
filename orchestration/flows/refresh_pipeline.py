@@ -30,7 +30,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -339,7 +338,11 @@ def promotion_gate(champion_summary: Path) -> PromotionDecision:
     either neighbour is what made every non-promotion read as a quality
     rejection in the one message anybody sees.
     """
-    from exoplanet_hunter.validation import VERDICT_EXIT_CODES, read_decision
+    from exoplanet_hunter.validation import (
+        PROMOTION_LOG_NAME,
+        VERDICT_EXIT_CODES,
+        read_decision,
+    )
 
     cv_root = REPO_ROOT / "models" / "cv"
     # The candidate is the newest summary that is not the control lane's. The
@@ -388,16 +391,28 @@ def promotion_gate(champion_summary: Path) -> PromotionDecision:
     # malformed summary is indistinguishable from one that judged the candidate
     # worse. --verdict-out is written only once a verdict exists, so its absence
     # is the crash and its contents are the decision.
-    with tempfile.TemporaryDirectory() as tmp:
-        verdict_out = Path(tmp) / "decision.json"
-        result = subprocess.run([*cmd, "--verdict-out", str(verdict_out)], cwd=REPO_ROOT)
-        if not verdict_out.exists():
-            _fail(
-                f"the promotion gate exited {result.returncode} without reaching a verdict "
-                "— it crashed before deciding, so nothing was compared and nothing was "
-                "promoted. This is NOT a quality rejection"
-            )
-        decision = read_decision(verdict_out)
+    #
+    # This pointed at a TemporaryDirectory until 2026-08-28, so every week the
+    # gate computed a full verdict with its reasons and then deleted it — nothing
+    # on disk recorded why any run was or was not promoted, and `/runs` served
+    # `verdict: null` for every row. It now names the candidate's own run
+    # directory, which is where the gate writes its log anyway and where the API
+    # reads it from; the gate recognises the path as its own and writes the file
+    # once, with the provenance attached.
+    verdict_out = newest.parent / PROMOTION_LOG_NAME
+    # A log left by an earlier gating of this same run would satisfy the check
+    # below and be read as this week's verdict. Removed first so "absent" still
+    # means "crashed before deciding", which is the only thing that check can
+    # tell us and the whole reason the file is consulted rather than the status.
+    verdict_out.unlink(missing_ok=True)
+    result = subprocess.run([*cmd, "--verdict-out", str(verdict_out)], cwd=REPO_ROOT)
+    if not verdict_out.exists():
+        _fail(
+            f"the promotion gate exited {result.returncode} without reaching a verdict "
+            "— it crashed before deciding, so nothing was compared and nothing was "
+            "promoted. This is NOT a quality rejection"
+        )
+    decision = read_decision(verdict_out)
 
     expected = VERDICT_EXIT_CODES[decision.verdict]
     if result.returncode != expected:

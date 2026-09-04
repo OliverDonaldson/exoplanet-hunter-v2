@@ -1242,6 +1242,172 @@ def test_the_gate_script_writes_the_verdict_it_exits_with(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# The promotion log. The registry names only the served run, so before this
+# file existed a rejected run left nothing on disk saying it had ever been
+# judged — the weekly refresh computed a full verdict into a TemporaryDirectory
+# and deleted it, and `/runs` served `verdict: null` for every row.
+# ---------------------------------------------------------------------------
+
+
+def test_the_applied_thresholds_survive_the_round_trip(tmp_path):
+    """The floors are resolved at call time from the runs being compared, so a
+    log that dropped them would record a verdict nobody could re-derive — and
+    the legacy 0.02 constant would read on disk exactly like a measured floor."""
+    from exoplanet_hunter.validation import Verdict, read_decision, write_decision
+
+    decision = evaluate_promotion(
+        _summary(0.917, 0.113, 0.033, 0.257), _summary(0.910, 0.121, 0.044, 0.307)
+    )
+    assert decision.thresholds["recall_tolerance_measured"] is True
+
+    path = tmp_path / "decision.json"
+    write_decision(path, decision)
+    restored = read_decision(path)
+    assert restored.verdict is Verdict.UNRESOLVED
+    assert restored.thresholds == decision.thresholds
+
+
+def test_a_promotion_log_still_reads_back_as_its_decision(tmp_path):
+    """`write_promotion_log` adds provenance keys around the same payload. If
+    `read_decision` stopped being a faithful inverse of the file, the refresh
+    flow — which reads exactly this file back — would silently lose reasons."""
+    from exoplanet_hunter.validation import (
+        PromotionDecision,
+        Verdict,
+        read_decision,
+        write_promotion_log,
+    )
+
+    original = PromotionDecision(
+        Verdict.UNRESOLVED, ["margin is inside its floor"], ["K2 absent"], {"auc_floor": 0.007}
+    )
+    path = tmp_path / "promotion_log.json"
+    write_promotion_log(
+        path,
+        original,
+        candidate_run_id="cand",
+        champion_run_id="ca906040",
+        champion_summary="s.json",
+    )
+    restored = read_decision(path)
+    assert restored == original
+
+
+def test_the_gate_writes_its_log_into_the_run_directory(tmp_path):
+    """Without --verdict-out at all: the decision has to land beside the run it
+    judged, or a rejected run leaves no record that it was ever gated. Runs
+    through the real script, since the default path is the script's choice."""
+    from exoplanet_hunter.validation import PROMOTION_LOG_NAME, Verdict, read_decision
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fixtures = tmp_path / "fx"
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / ".github" / "scripts" / "make_gate_fixtures.py"),
+            str(fixtures),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    run_dir = tmp_path / "cv" / "run-abc"
+    run_dir.mkdir(parents=True)
+    (run_dir / "cv_summary.json").write_text((fixtures / "candidate_worse.json").read_text())
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "pipeline" / "scripts" / "promotion_gate.py"),
+            str(run_dir / "cv_summary.json"),
+            "--models-dir",
+            str(fixtures / "models"),
+        ],
+        capture_output=True,
+    )
+
+    log_path = run_dir / PROMOTION_LOG_NAME
+    assert read_decision(log_path).verdict is Verdict.REJECT
+    payload = json.loads(log_path.read_text())
+    # The candidate id is the name --promote would have registered, so the log
+    # and the registry can never disagree about which run this was.
+    assert payload["candidate_run_id"] == "run-abc"
+    assert payload["champion_run_id"] == "champion"
+    assert payload["decided_at"].endswith("+00:00")
+    assert payload["thresholds"]["gate_mission"] == "TESS"
+
+
+def test_the_registry_is_untouched_by_writing_a_log(tmp_path):
+    """Recording a verdict is not promoting. A gate run without --promote that
+    moved the registry would replace the served model on a REJECT."""
+    repo_root = Path(__file__).resolve().parents[2]
+    fixtures = tmp_path / "fx"
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / ".github" / "scripts" / "make_gate_fixtures.py"),
+            str(fixtures),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    registry = fixtures / "models" / "registry.json"
+    before = registry.read_text()
+    run_dir = tmp_path / "cv" / "run-better"
+    run_dir.mkdir(parents=True)
+    (run_dir / "cv_summary.json").write_text((fixtures / "candidate_better.json").read_text())
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "pipeline" / "scripts" / "promotion_gate.py"),
+            str(run_dir / "cv_summary.json"),
+            "--models-dir",
+            str(fixtures / "models"),
+        ],
+        capture_output=True,
+    )
+    assert (run_dir / "promotion_log.json").is_file()
+    assert registry.read_text() == before
+
+
+def test_verdict_out_naming_the_log_does_not_strip_its_provenance(tmp_path):
+    """The refresh flow points --verdict-out at the log's own path. A second
+    write there would overwrite the log with the bare decision, quietly undoing
+    the whole point of the file on exactly the weekly run that matters."""
+    from exoplanet_hunter.validation import PROMOTION_LOG_NAME
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fixtures = tmp_path / "fx"
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / ".github" / "scripts" / "make_gate_fixtures.py"),
+            str(fixtures),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    run_dir = tmp_path / "cv" / "run-xyz"
+    run_dir.mkdir(parents=True)
+    (run_dir / "cv_summary.json").write_text((fixtures / "candidate_better.json").read_text())
+    log_path = run_dir / PROMOTION_LOG_NAME
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "pipeline" / "scripts" / "promotion_gate.py"),
+            str(run_dir / "cv_summary.json"),
+            "--models-dir",
+            str(fixtures / "models"),
+            "--verdict-out",
+            str(log_path),
+        ],
+        capture_output=True,
+    )
+    assert json.loads(log_path.read_text())["candidate_run_id"] == "run-xyz"
+
+
+# ---------------------------------------------------------------------------
 # Strict alarms. An alarm is documented as owing a written explanation before
 # promotion — a condition nobody is present to satisfy on the weekly run, so
 # left advisory the loop promotes straight past every one of them.

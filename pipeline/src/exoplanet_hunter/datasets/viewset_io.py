@@ -25,6 +25,7 @@ from exoplanet_hunter.preprocess.diffimage import (
     DIFF_GRID,
     MAX_DIFF_SECTORS,
 )
+from exoplanet_hunter.preprocess.momentum import MOMENTUM_CHANNELS
 from exoplanet_hunter.preprocess.viewset import (
     GLOBAL_BINS,
     LOCAL_BINS,
@@ -52,6 +53,7 @@ VIEW_SHAPES: dict[str, tuple[int, ...]] = {
     # Not a branch of its own — it is how the difference branch weights its
     # sectors, and `cnn_branches.ATTENTION_VIEWS` keeps it out of the fusion.
     "difference_quality_view": (MAX_DIFF_SECTORS, 2),
+    "momentum_dump_view": (LOCAL_BINS, MOMENTUM_CHANNELS),
 }
 
 #: Views built from the DV report rather than from the light curve. They depend
@@ -62,8 +64,18 @@ VIEW_SHAPES: dict[str, tuple[int, ...]] = {
 #: from the FITS files again (~95 min), and it stops a cache keyed on an
 #: ephemeris from implying these arrays were folded on one.
 DV_VIEWS: frozenset[str] = frozenset({"difference_view", "difference_quality_view"})
+
+#: Views assembled from a side table rather than folded out of the light curve
+#: alone, and so **not** written to the per-target cache. `momentum_dump_view`
+#: joins the DV pair here for the same reason they are in it: its source is
+#: `data/tables/momentum_dumps.parquet`, which can be refetched without touching
+#: a single FITS file, and a cache keyed on bin resolution and ephemeris would
+#: imply the array was derived from the curve it is keyed beside. It *is* folded
+#: on the ephemeris, unlike the DV pair, so a rebuild at a new ephemeris must
+#: rebuild it — which is exactly what the assemble step does every time.
+ASSEMBLED_VIEWS: frozenset[str] = DV_VIEWS | {"momentum_dump_view"}
 #: The rest: everything a `_build_one` pass produces from a light curve.
-LIGHTCURVE_VIEWS: tuple[str, ...] = tuple(n for n in VIEW_SHAPES if n not in DV_VIEWS)
+LIGHTCURVE_VIEWS: tuple[str, ...] = tuple(n for n in VIEW_SHAPES if n not in ASSEMBLED_VIEWS)
 
 NPZ_NAME = "viewset.npz"
 SCALARS_NAME = "viewset_scalars.parquet"

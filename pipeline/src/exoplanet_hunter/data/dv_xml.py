@@ -89,6 +89,20 @@ class DVDifferenceImage:
     flux_difference_uncertainty: np.ndarray = field(
         default_factory=lambda: np.zeros(0, dtype=np.float32)
     )
+    #: The target star's catalogue position on the CCD for this sector, from
+    #: `ticReferenceCentroid`, in the same row/column frame as `ccd_rows` and
+    #: `ccd_cols` and with sub-pixel precision. None when DV did not define it.
+    #:
+    #: This is the **origin** the difference image is read against. Without it a
+    #: stamp says only that flux moved, not whether it moved away from the star,
+    #: and roadmap 4.2b finding 2 records its absence as the mechanism behind
+    #: stage 9's null. Measured 2026-08-27 over all 38,964 non-declined images in
+    #: the archive: the target sits a median 0.84 px from the bounding box's
+    #: centre, sd 0.61 px in row and 0.64 in column, and lands in a **different
+    #: pixel** than that centre on 77.8% of stamps — so the centred placement
+    #: `preprocess/diffimage.py` performs is not a stand-in for it.
+    target_row: float | None = None
+    target_col: float | None = None
 
     @property
     def n_pixels(self) -> int:
@@ -113,6 +127,17 @@ class DVDifferenceImage:
         if not self.n_pixels or not self.flux_difference_uncertainty.size:
             return True
         return bool(np.all(self.flux_difference_uncertainty == _SENTINEL))
+
+    @property
+    def target_position(self) -> tuple[float, float] | None:
+        """`(row, column)` of the target on the CCD, or None if DV left it undefined.
+
+        Both halves must be defined for the pair to locate anything, so this is
+        all-or-nothing rather than two independently-missing floats.
+        """
+        if self.target_row is None or self.target_col is None:
+            return None
+        return (self.target_row, self.target_col)
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -210,6 +235,27 @@ def _sectors_from_bitmask(bitmask: str | None) -> list[int]:
     return [i for i, c in enumerate(bitmask) if c == "1"]
 
 
+def _centroid_coordinate(block: ET.Element | None, tag: str) -> float | None:
+    """One axis of a DV centroid, or None where DV attempted it and failed.
+
+    **The sentinel here is on the uncertainty, not the value.** On a sector DV
+    declined to measure it writes `ticReferenceCentroid` as row 0.0, column 0.0,
+    uncertainty -1.0 — verified on every one of the 14,154 declined images in
+    the archive, where the row value is *exactly* 0.0 and never anything else.
+    Reading the value alone would put the target at CCD row 0 of a stamp whose
+    pixels start near row 2000, which is a confident placement 2,000 px away
+    rather than a missing one. The same trap `_nan` exists for, one level up.
+    """
+    if block is None:
+        return None
+    element = block.find(f"{NS}{tag}")
+    if element is None:
+        return None
+    if _f(element, "uncertainty") == _SENTINEL:
+        return None
+    return _f(element, "value")
+
+
 def _difference_images(planet: ET.Element) -> list[DVDifferenceImage]:
     images: list[DVDifferenceImage] = []
     for block in planet.findall(f"{NS}differenceImageResults"):
@@ -233,6 +279,13 @@ def _difference_images(planet: ET.Element) -> list[DVDifferenceImage]:
             in_tr.append(_nan(_f(pixel.find(f"{NS}meanFluxInTransit"), "value")))
             out_tr.append(_nan(_f(pixel.find(f"{NS}meanFluxOutOfTransit"), "value")))
         quality = block.find(f"{NS}qualityMetric")
+        # The catalogue position of the star this stamp is of — the frame the
+        # difference is read against. `ticReferenceCentroid` rather than
+        # `controlImageCentroid`: the control centroid is *measured from the
+        # out-of-transit image*, so an offset computed against it would be
+        # partly the thing being measured, while the TIC reference is
+        # independent of this sector's photometry.
+        reference = block.find(f"{NS}ticReferenceCentroid")
         images.append(
             DVDifferenceImage(
                 sector=_i(block, "sector") or -1,
@@ -246,6 +299,8 @@ def _difference_images(planet: ET.Element) -> list[DVDifferenceImage]:
                 quality_valid=(quality is not None and quality.get("valid") == "true"),
                 n_transits=_i(block, "numberOfTransits"),
                 n_cadences_in_transit=_i(block, "numberOfCadencesInTransit"),
+                target_row=_centroid_coordinate(reference, "row"),
+                target_col=_centroid_coordinate(reference, "column"),
             )
         )
     return images

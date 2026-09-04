@@ -2,11 +2,41 @@
 
 from __future__ import annotations
 
+import os
+
+import mlflow
 import numpy as np
 import pandas as pd
 import pytest
+from mlflow.tracking import _tracking_service, fluent
 
 from exoplanet_hunter.datasets.viewset_io import VIEW_SHAPES, ViewSetArrays
+
+
+@pytest.fixture(autouse=True)
+def isolate_mlflow_globals():
+    """Keep one test's MLflow tracking state out of the next one's.
+
+    The tracking URI and the active experiment are process globals, so a test
+    that trains through `setup_mlflow` leaves both pointing into its own
+    `tmp_path`. `set_experiment` records the id in a module global *and* in
+    `MLFLOW_EXPERIMENT_ID`, so a later test that points MLflow at a fresh
+    sqlite store still asks it for an experiment id that store has never heard
+    of, and fails on "No Experiment with id=1 exists" — a failure in a test
+    that has nothing to do with the one that caused it.
+    """
+    tracking_uri = _tracking_service.utils._tracking_uri
+    experiment_id = fluent._active_experiment_id
+    experiment_env = os.environ.get("MLFLOW_EXPERIMENT_ID")
+    try:
+        yield
+    finally:
+        mlflow.set_tracking_uri(tracking_uri)
+        fluent._active_experiment_id = experiment_id
+        if experiment_env is None:
+            os.environ.pop("MLFLOW_EXPERIMENT_ID", None)
+        else:
+            os.environ["MLFLOW_EXPERIMENT_ID"] = experiment_env
 
 
 def _make_view_set(n: int = 6, *, seed: int = 0, hosts: int | None = None) -> ViewSetArrays:

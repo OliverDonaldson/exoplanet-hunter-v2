@@ -20,6 +20,10 @@ from exoplanet_hunter.preprocess.diffimage import (
     empty_difference_views,
 )
 from exoplanet_hunter.preprocess.fold import bin_profile
+from exoplanet_hunter.preprocess.momentum import (
+    build_momentum_dump_view,
+    empty_momentum_dump_view,
+)
 
 if TYPE_CHECKING:
     import lightkurve as lk
@@ -54,12 +58,16 @@ class ViewSet:
     gap_view: np.ndarray  # (301, 2) [missing fraction, present]
     periodogram_view: np.ndarray  # (256, 2) [BLS power, present], fixed grid
     periodogram_masked_view: np.ndarray  # (256, 2) same, transits removed
-    #: (8, 17, 17, 3) per-sector difference-image stamps, and (8, 2) the quality
+    #: (8, 17, 17, 4) per-sector difference-image stamps, and (8, 2) the quality
     #: DV assigns each one. The only view sourced from the DV report rather than
     #: the light curve, so it is absent for every Kepler and K2 row by
     #: construction — 58.9% of the set carries presence 0 here.
     difference_view: np.ndarray
     difference_quality_view: np.ndarray
+    #: (201, 2) [dump fraction, present] over the local window. TESS-only: the
+    #: spacecraft systematic has no Kepler or K2 analogue, so those rows carry
+    #: presence 0 by construction rather than by a fetch failure.
+    momentum_dump_view: np.ndarray
     #: Coverage the folded views cannot express: a single-transit candidate and
     #: a 40-transit one look identical once folded.
     observed_transit_count: int
@@ -338,6 +346,7 @@ def build_view_set(
     max_transits: int = MAX_TRANSITS,
     periodogram_bins: int = PERIODOGRAM_BINS,
     difference_images: list[DVDifferenceImage] | None = None,
+    momentum_dumps: np.ndarray | None = None,
 ) -> ViewSet:
     """Build every view for one (light curve, ephemeris).
 
@@ -355,6 +364,14 @@ def build_view_set(
                       `clean_lightcurve` drops `MOM_CENTR1/2`, so it cannot be
                       recovered downstream. Omitted, that branch reads as absent
                       rather than as flat.
+    momentum_dumps  : flagged cadence times from `momentum_dumps.parquet`, in
+                      the light curve's own time system. Omitted, that branch is
+                      all zeros with `present` 0 — correct for Kepler and K2,
+                      which never saw a TESS reaction wheel, and the honest
+                      encoding for a TESS row whose dump table was not supplied.
+                      Folded on `raw_lc`'s cadence grid when one is given, so it
+                      counts the cadences the target actually had rather than
+                      the ones that survived cleaning.
     difference_images : this target's per-sector DV difference images. Omitted,
                       the branch is all zeros with `present` 0 — which is the
                       right encoding for the majority of the set, since Kepler
@@ -427,6 +444,23 @@ def build_view_set(
     else:
         difference_view, difference_quality_view = empty_difference_views()
 
+    if momentum_dumps is not None and len(momentum_dumps):
+        # The *raw* cadence grid, matching `_centroid_view`'s reason for taking
+        # one: a dump fraction is a count over cadences, and cleaning removes
+        # some, so measuring the denominator on the cleaned curve would report a
+        # fraction of a grid the spacecraft never flew.
+        cadence_source = raw_lc if raw_lc is not None else lc
+        momentum_dump_view = build_momentum_dump_view(
+            np.asarray(cadence_source.time.value, dtype=float),
+            momentum_dumps,
+            period=period,
+            t0=t0,
+            half_window=half,
+            n_bins=local_bins,
+        )
+    else:
+        momentum_dump_view = empty_momentum_dump_view(local_bins)
+
     return ViewSet(
         global_view=global_view,
         local_view=local_view,
@@ -441,6 +475,7 @@ def build_view_set(
         periodogram_masked_view=periodogram_masked_view,
         difference_view=difference_view,
         difference_quality_view=difference_quality_view,
+        momentum_dump_view=momentum_dump_view,
         observed_transit_count=observed,
         expected_transit_count=expected,
         secondary_phase=sec_phase,
