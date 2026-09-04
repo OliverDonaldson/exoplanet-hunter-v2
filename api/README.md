@@ -20,10 +20,11 @@ There is no `/` route — `{"detail":"Not Found"}` at the root is expected.
 
 ## The pinned contract
 
-`app/schemas.py` and `frontend/src/api/types.ts` describe the same wire format
-and **change together or not at all**. Adding an optional field to
-`ScoreResponse` without the matching TypeScript is how the console silently
-stops rendering a panel.
+`app/schemas.py` is the wire format. The console reads it in
+`frontend/design-console/src/app.api.js`, and the two **change together or not
+at all**: a field added here without its mapping there is invisible in the
+console, and a field the console expects that the API stops sending renders as
+"not measured" rather than failing.
 
 ## Serving shape
 

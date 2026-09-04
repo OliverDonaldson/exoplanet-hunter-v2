@@ -66,7 +66,7 @@ flowchart TB
     EP["GET /healthz · /reliability · /candidates"]
   end
 
-  subgraph UICONSOLE["9 · Console — React on Render"]
+  subgraph UICONSOLE["9 · Console — static site on Render"]
     direction LR
     TABLE["candidate table"]
     PANEL["vetting panel"]
@@ -178,7 +178,7 @@ The gate has rejected multiple retrains. That is the gate working.
 FastAPI on Fly.io, scale-to-zero. `GET /score/{tic_id}` fetches the light curve,
 resolves an ephemeris (user-supplied, then catalogue, then BLS), runs the full
 preprocessing path and the ensemble, and returns a calibrated probability with
-the diagnostic panels. A React console renders it for human vetting.
+the diagnostic panels. The console renders it for human vetting.
 
 Response fields are documented in [overview.md](overview.md) §4.
 

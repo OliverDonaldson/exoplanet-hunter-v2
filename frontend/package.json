@@ -1,23 +1,12 @@
 {
-  "name": "exoplanet-vetting-console",
+  "name": "exoplanet-hunter-console",
   "private": true,
   "version": "2.0.0-dev.0",
-  "type": "module",
+  "description": "npm install provides anime.js, which design-console/build.py inlines into the one static file the console is.",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "build": "python3 design-console/build.py"
   },
   "dependencies": {
-    "animejs": "^4.5.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "typescript": "^5.5.3",
-    "vite": "^7.3.6"
+    "animejs": "^4.5.0"
   }
 }

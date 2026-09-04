@@ -1,7 +1,7 @@
 """Contract tests for the serving layer.
 
 These pin the `/score/{tic_id}` JSON shape so the FastAPI endpoint and the
-React console evolve against the same target instead of drifting apart.
+console evolve against the same target instead of drifting apart.
 Route behaviour is covered in test_score_route.py; here we only exercise
 the schema and the health/degraded states, with MODEL_DIR pointed at
 controlled directories so results don't depend on what's on this machine.

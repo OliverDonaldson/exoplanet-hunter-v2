@@ -1,41 +1,20 @@
 # Console
 
-React + Vite vetting console. Live at
-`https://exoplanet-hunter-console.onrender.com`.
+The vetting console lives in [`design-console/`](design-console/README.md) and
+is live at `https://exoplanet-hunter-console.onrender.com`. It is plain HTML
+and JavaScript built into one static file; there is no bundler.
 
 ```bash
-make frontend     # Vite dev server on :5173
-npm run build     # what Render deploys
+make frontend     # npm install (anime.js), build.py, then serve dist/ on :5173
 ```
 
-Talks to the API via `VITE_API_BASE` (defaults to the local `:8000`).
+Open `http://localhost:5173/?api=http://localhost:8000` with `make api`
+running. The `?api=` query overrides the API base for one session; Render bakes
+the production base in through `EH_API_BASE` (see `render.yaml`).
 
-## Layout
+`package.json` exists only to fetch anime.js, which `build.py` inlines. The wire
+contract the console reads is `api/app/schemas.py`; the client that reads it is
+`design-console/src/app.api.js`, and the two change together.
 
-| file | what it is |
-|---|---|
-| `src/App.tsx` | shell and routing |
-| `src/api/client.ts` | every call to the API |
-| `src/api/types.ts` | **the pinned wire contract** — mirrors `api/app/schemas.py` |
-| `src/components/CandidatesTable.tsx` | sortable catalogue with the follow-up columns |
-| `src/components/VettingPanel.tsx` | per-target vetting: phase views, diagnostics, verdict |
-| `src/components/ReliabilityChart.tsx` | calibration curve for the promoted run |
-
-## Two things that will bite
-
-**`types.ts` and `api/app/schemas.py` change together.** An optional field
-added server-side without its TypeScript is invisible here — the panel just
-stops rendering that piece.
-
-**The console converts BJD to BTJD before calling `/score`**
-(`VettingPanel.tsx`, `epoch_bjd - 2_457_000`). The catalogue stores full BJD;
-the API takes BTJD. Three CTOIs carry malformed epochs that convert to ~2.2e7
-BTJD, which is why the API's `t0` bound is 1e8 and not something tighter — it
-exists to reject `inf`, not to filter data quality.
-
-## Status
-
-This is the functional console, not the final design. The Mission Control
-redesign is Stage 5 of [the roadmap](../docs/roadmap.md) — deliberately last,
-so it lands on top of the per-branch vetting evidence the model rebuild
-produces rather than being rebuilt around it twice.
+The earlier React console (`frontend/src`) was removed on 2026-09-04. It had not
+shipped since 2026-08-20.

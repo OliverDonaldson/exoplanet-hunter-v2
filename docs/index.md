@@ -2,7 +2,7 @@
 
 A self-refreshing, self-validating transit-vetting platform: catalogue refresh →
 validation gates → tf.data pipeline → calibrated cross-validated CNN ensemble →
-promotion gate → live FastAPI scoring → React vetting console.
+promotion gate → live FastAPI scoring → the vetting console.
 
 ## Documents
 
@@ -33,15 +33,16 @@ Each module carries its own README with the detail.
 | `pipeline/vendor/` | third-party source patched and shipped |
 | `orchestration/` | the Prefect refresh DAG and its schedule |
 | `api/` | FastAPI serving |
-| `frontend/` | React vetting console |
+| `frontend/` | the vetting console: `design-console/`, built by `build.py` into one static file |
 | `docker/`, `infra/` | images and deployment config |
 
 ## The rules that do not bend
 
 1. **Fresh data only.** Raw FITS are an evictable cache of immutable archive
    files; every derived artefact is rebuilt by current code and versioned in DVC.
-2. **The `/score/{tic_id}` contract is pinned.** `api/app/schemas.py` and
-   `frontend/src/api/types.ts` change together or not at all.
+2. **The `/score/{tic_id}` contract is pinned.** `api/app/schemas.py` and the
+   console's client, `frontend/design-console/src/app.api.js`, change together
+   or not at all.
 3. **Models ship only through the promotion gate.** Beat the champion's
    cross-validated ROC-AUC without degrading Brier or ECE, or it does not become
    the champion. The gate has correctly rejected several retrains; that is it

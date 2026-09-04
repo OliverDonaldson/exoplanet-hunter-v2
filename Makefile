@@ -64,8 +64,10 @@ mlflow:         ## MLflow UI on :5001 (5000 collides with macOS AirPlay)
 api:            ## Run the FastAPI dev server on :8000
 	cd api && uvicorn app.main:app --reload --port 8000
 
-frontend:       ## Run the Vite dev server on :5173 (proxies /api -> :8000)
-	cd frontend && npm run dev
+frontend:       ## Build the console into frontend/design-console/dist, serve it on :5173
+	cd frontend && npm install --no-audit --no-fund && python3 design-console/build.py
+	@echo "open http://localhost:5173/?api=http://localhost:8000  (with 'make api' running)"
+	cd frontend/design-console/dist && python3 -m http.server 5173
 
-up:             ## Full local stack via Docker
+up:             ## The API container via Docker (the console is a static build)
 	docker compose up --build
