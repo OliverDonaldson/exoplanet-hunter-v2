@@ -299,7 +299,7 @@ async function hydrate() {
     SERVED.arch = `${m.n_folds || 5}-fold dual-view CNN ensemble · MC-dropout · Platt calibration`;
     SERVED.metrics = met;
 
-    SERVED.noiseFloor = m.noise_floor || { auc: null, recall: null };
+    SERVED.noiseFloor = m.noise_floor || { auc: null, recall: null, measured: false, source: null };
     SERVED.nScored = m.n_scored || 0;
     SERVED.nHighConfidence = m.n_high_confidence || 0;
 
@@ -329,7 +329,7 @@ async function hydrate() {
       brier: null, brierErr: null, ece: null, eceErr: null,
     }];
     SERVED.metrics = {};
-    SERVED.noiseFloor = { auc: null, recall: null };
+    SERVED.noiseFloor = { auc: null, recall: null, measured: false, source: null };
     SERVED.nScored = 0;
     SERVED.nHighConfidence = 0;
     GATING = SERVED.missions[0];

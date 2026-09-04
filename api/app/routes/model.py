@@ -14,6 +14,7 @@ on the page; a bootstrap mixed in would not be comparable.
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -43,11 +44,53 @@ _METRICS = {
 #: The mission whose numbers decide promotion. Everything else is diagnostic.
 _GATING_MISSION = "TESS"
 
-#: Seed-to-seed spread measured in stage 6 (2026-08-09): a margin under this is
-#: not a decision. A property of the training procedure, not of one run, hence a
-#: constant rather than a `cv_summary.json` read.
-_NOISE_FLOOR_AUC = 0.0070
-_NOISE_FLOOR_RECALL = 0.0337
+#: The floor rule, `2 * sd / sqrt(n_models_per_fold)`, over the per-member
+#: spread the trainer records in `summary.variance`. Stage 6 measured it on the
+#: branch model; 4.1a measured the dual-view protocol separately. The two are
+#: different numbers for different architectures, so this is read from the run
+#: rather than held as a constant — the constants that used to sit here were
+#: branch-model figures published under a dual-view run.
+_FLOOR_MULTIPLIER = 2.0
+
+
+def _noise_floor(doc: dict) -> NoiseFloor:
+    """This run's own floor, or an explicit "not measured".
+
+    `summary.variance` is written only where a run trains more than one model
+    per fold; the served champion trains one, so it has no seed spread of its
+    own and gets nulls with the reason attached. Deriving one from another run
+    would publish a floor for an architecture and a protocol this run did not
+    use, which is the defect this function replaced.
+    """
+    variance = (doc.get("summary") or {}).get("variance") or {}
+    n = variance.get("n_models_per_fold")
+    if not isinstance(n, int) or n < 2:
+        return NoiseFloor(
+            measured=False,
+            n_models_per_fold=n if isinstance(n, int) else 1,
+            source=(
+                "not measured: this run trains one model per fold, so it has no "
+                "seed spread of its own"
+            ),
+        )
+
+    def floor(sd: object) -> float | None:
+        return (
+            _FLOOR_MULTIPLIER * float(sd) / math.sqrt(n)
+            if isinstance(sd, int | float) and math.isfinite(float(sd))
+            else None
+        )
+
+    # The pooled gate draw is the one the promotion gate reads, so it is the one
+    # published; `gate_recall_seed_sd` is the per-fold version of the same thing.
+    recall_sd = variance.get("pooled_gate_recall_seed_sd", variance.get("gate_recall_seed_sd"))
+    return NoiseFloor(
+        auc=floor(variance.get("seed_sd")),
+        recall=floor(recall_sd),
+        measured=True,
+        n_models_per_fold=n,
+        source=f"this run's own members, 2 x sd / sqrt({n})",
+    )
 
 
 def _recall_at_fpr(y: np.ndarray, p: np.ndarray, fpr: float = 0.01) -> float | None:
@@ -190,7 +233,7 @@ def model_summary() -> ModelSummaryResponse:
         n_folds=len(folds) if isinstance(folds, list) else None,
         metrics=metrics,
         per_mission=per_mission or None,
-        noise_floor=NoiseFloor(auc=_NOISE_FLOOR_AUC, recall=_NOISE_FLOOR_RECALL),
+        noise_floor=_noise_floor(doc),
         n_scored=n_scored,
         n_high_confidence=n_high_confidence,
     )
