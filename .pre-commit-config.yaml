@@ -26,6 +26,14 @@ repos:
       - id: check-merge-conflict
       - id: debug-statements
 
+  - repo: local
+    hooks:
+      - id: no-assistant-trailer
+        name: no assistant co-author trailer
+        entry: scripts-dev/reject-assistant-trailer.sh
+        language: script
+        stages: [commit-msg]
+
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.10.1
     hooks:

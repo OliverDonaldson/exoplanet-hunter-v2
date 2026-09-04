@@ -23,7 +23,11 @@ git clone <repo> && cd v2
 conda env create -f environment.yml
 conda activate exoplanet-hunter-v2
 dvc pull                     # or: make data-pull
+pre-commit install --hook-type pre-commit --hook-type commit-msg
 ```
+
+The hooks lint on commit and refuse a commit message that credits an
+assistant as co-author.
 
 Code lives in git. Data and models are DVC-tracked — git holds small `.dvc`
 pointer files and the bytes live in a Cloudflare R2 bucket. Raw FITS light
@@ -41,7 +45,7 @@ it re-downloads on demand.
 | Models | One CNN per CV fold, each with a Platt calibrator | `models/cv/<run_id>/` |
 | Registry | JSON pointing at the promoted run — the one being served | `models/registry.json` |
 | API | FastAPI: `/candidates`, `/score/{tic_id}`, `/reliability`, `/healthz` | `api/` |
-| Console | React: catalogue table, vetting pane, reliability diagram | `frontend/` |
+| Console | Mission, Catalogue, Vetting, Model, Upload pages, one static file | `frontend/design-console/` |
 | Orchestrator | The loop that refreshes, validates, retrains, promotes | `orchestration/` |
 
 ## 4. Everyday commands
@@ -50,7 +54,7 @@ it re-downloads on demand.
 make test          # full fast test suite (pipeline + API)
 make validate      # data gates: catalogue schemas, no dead columns
 make api           # FastAPI on :8000  (docs at /docs)
-make frontend      # console on :5173  (needs the api running)
+make frontend      # build the console, serve it on :5173 (open /?api=http://localhost:8000)
 make mlflow        # experiment UI on :5001
 make refresh       # the loop: refresh -> gates -> train-if-warranted -> publish
 ```

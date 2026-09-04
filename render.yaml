@@ -1,11 +1,8 @@
 # Render Blueprint: deploys the vetting console as a static site.
 #
-# The published console is `frontend/design-console` — the full five-page
-# console (Mission, Catalogue, Vetting, Model Performance, Upload), built by
-# `build.py` into one self-contained HTML file with fonts and anime.js
-# inlined. `frontend/src` is the earlier React two-pane console and is no
-# longer what ships; it is kept because it holds the pinned API client the
-# design console's api layer was written against.
+# The console is `frontend/design-console`, built by `build.py` into one
+# self-contained HTML file with fonts and anime.js inlined. The API contract it
+# reads is `api/app/schemas.py`; the client that reads it is `src/app.api.js`.
 #
 # The API is NOT here — it runs on Fly (`exoplanet-hunter-api.fly.dev`),
 # where suspend-when-idle machines snapshot RAM and keep the TensorFlow

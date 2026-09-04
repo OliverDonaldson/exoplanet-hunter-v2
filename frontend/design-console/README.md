@@ -1,16 +1,15 @@
 # Design console
 
-A self-contained design prototype of the Exoplanet Hunter vetting console:
-Mission, Catalogue, Vetting, Model Performance and Upload, built as one HTML
-file with no network dependencies.
+The Exoplanet Hunter vetting console: Mission, Catalogue, Vetting, Model
+Performance, Discovery, Upload and About, built as one HTML file with fonts and
+anime.js inlined.
 
-This is **not** the shipping frontend (that is `frontend/src`). It is the
-reference the shipping frontend is meant to be built against — the design
-system, the page structures, the copy, and the interaction states, in a form
-you can open in a browser and click through.
-
-All data is mock data. The numbers are shaped to match the real pipeline's
-contracts and orders of magnitude, but nothing here talks to the API.
+This is the shipping console: Render builds it with `build.py` and serves
+`dist/index.html` (see `render.yaml`). It talks to the API through
+`src/app.api.js`, live or mock decided once per load by probing `/healthz`.
+With no service reachable it falls back to mock data shaped like the real
+contracts, and any figure the API does not serve renders as "not measured"
+rather than as a number.
 
 ## Build
 
@@ -24,12 +23,13 @@ open dist/preview.html
 base64-inlines the three woff2 subsets in `assets/fonts/`, then concatenates
 `src/app.*.js` in a fixed order into a single `<script type="module">`.
 
-Two outputs:
+Three outputs:
 
 | file | purpose |
 | --- | --- |
-| `dist/exoplanet-hunter.html` | body-only; what gets published as the Claude artifact |
-| `dist/preview.html` | same content wrapped in `<html>`/`<body>` for opening from disk |
+| `dist/index.html` | the deployed page; what Render serves at `/` |
+| `dist/preview.html` | the same bytes, for opening from disk |
+| `dist/exoplanet-hunter.html` | body-only, for a host that supplies its own `<html>`/`<body>` |
 
 The fonts are vendored rather than linked because the artifact host applies a
 strict CSP that blocks external font hosts — a `<link>` to Google Fonts would
@@ -392,49 +392,3 @@ below which the type stops resolving at all; past it the wrapper scrolls.
 The fit runs on `route()` and on every catalogue repaint — sorting and filtering
 change the widest cell in several columns — and is coalesced onto a frame only
 for resize.
-
-## Porting to React
-
-The prototype is plain DOM because it has to build to a single file. In
-`frontend/src` the same animations belong inside a `createScope()` bound to a
-root ref, so every instance is scoped to the component and torn down with it:
-
-```jsx
-import { animate, createScope, stagger, svg } from 'animejs';
-import { useEffect, useRef } from 'react';
-
-export function BootOverlay({ onDone }) {
-  const root = useRef(null);
-  const scope = useRef(null);
-
-  useEffect(() => {
-    scope.current = createScope({ root }).add(() => {
-      // selectors resolve inside <div ref={root}> only
-      animate(svg.createDrawable('.boot-seg'), {
-        draw: ['0 0', '0 1'],
-        delay: stagger(55),
-        ease: 'out(3)',
-        duration: 900,
-        onComplete: onDone,
-      });
-    });
-    // reverts every animation declared in the scope, and restores inline styles
-    return () => scope.current.revert();
-  }, [onDone]);
-
-  return <div ref={root}>{/* dial markup */}</div>;
-}
-```
-
-Two things that matter when moving this over:
-
-- **`revert()`, not `cancel()`.** `cancel()` stops an animation but leaves the
-  inline styles anime.js wrote on the element; `revert()` puts them back. In a
-  component that mounts more than once, `cancel()` leaves stuck transforms.
-- **Scope the selectors.** `createScope({ root })` makes `'.boot-seg'` resolve
-  inside the component, so two instances on one page cannot animate each other's
-  nodes.
-
-`createScope` also takes `mediaQueries`, which is the tidiest place to handle
-`prefers-reduced-motion` — `self.matches.reduced` inside the scope callback,
-rather than a `matchMedia` check scattered through the animation code.

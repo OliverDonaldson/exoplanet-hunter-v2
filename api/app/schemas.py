@@ -1,8 +1,9 @@
 """Pinned JSON contract for the serving layer.
 
 This module is the single source of truth for the shape of the
-`/score/{tic_id}` response. The React console's `src/api/types.ts` mirrors it
-field-for-field; change them together or not at all. Field names follow the
+`/score/{tic_id}` response. The console's client,
+`frontend/design-console/src/app.api.js`, reads it field by field; change them
+together or not at all. Field names follow the
 V1 quantities they carry: `prob_mean`/`prob_std` from `mc_dropout_predict`,
 `centroid_snr` from `extract_centroid_offset`, the BLS ephemeris from
 `bls_period_search`.

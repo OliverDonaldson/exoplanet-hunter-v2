@@ -1,101 +1,65 @@
 # Exoplanet Hunter V2
 
-Self-refreshing, self-validating, self-serving transit-detection platform:
-catalogue refresh → validation gates → tf.data training on an on-demand GPU
-burst → calibrated 5-fold ensemble → live FastAPI scoring → interactive
-React vetting console. Governing principle: **beat the baseline before you
-cheer** — every component must beat the simplest thing that already works,
-or it doesn't ship.
+A calibrated deep-learning pipeline for **vetting** transit candidates in NASA
+TESS, Kepler and K2 photometry. Given a known signal, a TOI or a KOI, it returns
+the probability that the signal is a planet together with the diagnostic
+evidence behind it, so that follow-up telescope time goes to the candidates
+that deserve it. It classifies signals other pipelines detected; it does not
+search for new ones.
 
-Architecture reference: [docs/model_pipeline.md](docs/model_pipeline.md) and [docs/model_specs.md](docs/model_specs.md).
+Catalogue refresh → validation gates → phase-folded views → 5-fold CNN
+ensemble → Platt calibration → promotion gate → FastAPI scoring → vetting
+console. The governing rule is **beat the baseline before you cheer**: a model
+ships only if it beats the champion's cross-validated ROC-AUC without losing
+calibration or shortlist recall, and every margin is read against a noise floor
+measured in the same run.
+
+## What is served
+
+Run `ca906040`, promoted 2026-07-19: a dual-view CNN over the global and local
+phase-folded views plus nine scalars, five folds, MC-dropout for uncertainty,
+Platt scaling for calibration. Out-of-fold, per mission:
+
+| Mission | n | ROC-AUC | Recall @1% FPR | Brier | ECE |
+|---|---:|---:|---:|---:|---:|
+| TESS (gates promotion) | 2,367 | 0.910 | 0.307 | 0.121 | 0.044 |
+| Kepler (diagnostic) | 2,238 | 0.991 | 0.799 | 0.036 | 0.041 |
+
+There is no pooled headline: the missions differ in label provenance and class
+balance, and TESS is the mission the service scores.
+
+Live: the console at https://exoplanet-hunter-console.onrender.com and the API
+at https://exoplanet-hunter-api.fly.dev.
 
 ## Layout
 
 ```
-pipeline/    ML pipeline package (exoplanet_hunter) + Hydra conf + scripts
-api/         FastAPI serving layer — /score/{tic_id}, pinned contract in app/schemas.py
-frontend/    React vetting console (Vite + TypeScript)
-docker/      api / frontend / GPU-burst-train images  (compose file at root)
-orchestration/  Prefect|Dagster DAG            (lands in feat/orchestrator)
-infra/       R2 layout, secrets policy, hosting notes
-data/        fresh artefacts only — regenerated, DVC-tracked, never committed
+pipeline/       the science: ingest, preprocess, features, models, training, eval, validation
+api/            FastAPI serving; the wire contract is app/schemas.py
+frontend/       the vetting console (design-console/, one static file)
+orchestration/  the weekly Prefect refresh: gates, train if warranted, promotion gate, publish
+docker/         the API image (Fly) and the on-demand training image
+infra/          R2 layout and secrets policy
+data/           DVC-tracked artefacts; nothing here is committed
+models/         registry.json; promoted runs are DVC-tracked
+docs/           start at docs/index.md
 ```
-
-## Provenance
-
-Seeded by clean-slate extraction from V1 (`main` @ a5faabc plus working-tree
-improvements) — the battle-tested science core only:
-
-| Salvaged | Rewritten in V2 (not ported) |
-|---|---|
-| preprocess: clean / flatten / fold / views | trainer + in-RAM data module → `feat/tfdata-pipeline` |
-| models: dual-view CNN (SE + MHA), focal loss, MC-Dropout, RF baseline | Optuna tuning, MLflow utils (rebuilt against tf.data) |
-| features: centroid (BEB vetting), handcrafted (RF) | Dash/`viz` dashboard → Streamlit + React console |
-| search: BLS / TLS | attention diagnostics (V1 report artefact) |
-| training/calibration: temperature scaling (upgraded to Platt scaling post-audit) | registries/paths tied to V1 disk layout |
-| eval: metrics, six-panel vetting figure | all preprocessed data artefacts (fresh data only) |
-| data: catalogue TAP builder, downloader, stellar params | |
-| scripts: build_dataset, score_candidates, render_vetting | |
-
-**No data artefacts were ported.** The first V2 milestone regenerates the
-catalogue and views from NASA sources so the new pipeline is validated
-end-to-end on data it produced itself.
-
-## Build order (all seven merged — the system is complete and self-running)
-
-1. ✅ `feat/tfdata-pipeline` — tf.data (map→cache→shuffle→batch→prefetch),
-   TFRecord shards, mixed precision; rewrite trainer on top.
-2. ✅ `feat/validation-gates` — Pandera catalogue checks in CI + the
-   beats-current-best promotion gate + leakage guard.
-3. ✅ `feat/dvc-versioning` — catalogue + views under DVC, R2 remote.
-4. ✅ `feat/fastapi-serving` — refactor `scripts/score_target.py` into the
-   `/score/{tic_id}` service (container deploy still pending — Fly.io).
-5. ✅ `feat/dashboard` — the React console against the pinned contract;
-   reliability diagram (sky map still pending).
-6. ✅ `feat/orchestrator` — Prefect DAG with conditional GPU burst.
-7. ✅ `feat/data-scaling` — full-pool expansion (5,155 targets: TESS
-   uncapped + balanced Kepler block, 9-dim aux with centroid restored).
-
-**Served model** (run `cebb0fe6`, promoted 2026-07-12, recalibrated
-2026-07-13): 5-fold CV ROC-AUC **0.951 ± 0.008**, Brier **0.087**, pooled
-OOF ECE **0.006** on 4,813 examples (2,448 Kepler + 2,365 TESS).
-
-## Performance
-
-Rendered from the promoted run's artefacts by
-`python pipeline/scripts/make_performance_figures.py`; all evaluation is
-out-of-fold (each target scored by the one model that never trained on it).
-
-*Per-fold learning curves — five folds converge consistently:*
-
-![Training curves](docs/figures/training_curves.png)
-
-*Discrimination — ROC and precision–recall, folds + pooled:*
-
-![ROC and PR curves](docs/figures/roc_pr.png)
-
-*Calibration — the raw scores were shifted wholesale (red); the served
-Platt-calibrated probabilities sit on the diagonal (blue), so "0.9" from
-this model means 90%:*
-
-![Calibration](docs/figures/calibration.png)
-
-*What the network learned — penultimate-layer activations of out-of-fold
-targets, PCA-projected to 3D. Planets and false positives separate cleanly;
-the misclassified targets (red rings) live exactly on the class boundary:*
-
-![Learned representation](docs/figures/embedding_3d.png)
 
 ## Quickstart
 
 ```bash
 conda env create -f environment.yml && conda activate exoplanet-hunter-v2
-make test        # salvage smoke tests + API contract tests
-python pipeline/scripts/ingest_exofop.py   # build the candidate catalogue
-make api         # FastAPI on :8000 (docs at /docs)
-make frontend    # console on :5173 (needs: cd frontend && npm install)
+pre-commit install --hook-type pre-commit --hook-type commit-msg
+dvc pull          # artefacts from R2
+make test         # the fast pipeline and API suites
+make api          # FastAPI on :8000
+make frontend     # build the console and serve it on :5173
 ```
 
-The console's catalogue page (and `GET /candidates` + `/candidates.csv`)
-serves the normalised ExoFOP TOI+CTOI table — see `data/README.md` for the
-source exports and rebuild command.
+Always activate `exoplanet-hunter-v2` first. The V1 environment carries V1's
+code under the same package name and runs last year's pipeline without a word.
+
+## Documentation
+
+[docs/index.md](docs/index.md) maps every document. `docs/roadmap.md` is the
+record of what was measured and, in its §2a table, where each stage stands.

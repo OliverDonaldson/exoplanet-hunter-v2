@@ -41,9 +41,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Build
+      - name: Build the console (what Render deploys)
         working-directory: frontend
-        run: npm install && npm run build
+        run: npm install --no-audit --no-fund && python3 design-console/build.py
+      - name: The build produced the file Render serves
+        run: test -s frontend/design-console/dist/index.html
 
   # These run the same scripts the refresh DAG runs, so refresh_pipeline's
   # "gates are the same code CI runs" is literally true. CI has no R2

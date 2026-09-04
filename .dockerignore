@@ -21,7 +21,7 @@ results/*
 outputs/
 multirun/
 node_modules/
-frontend/dist/
+frontend/design-console/dist/
 frontend/node_modules/
 .dvc/cache/
 .dvc/tmp/
