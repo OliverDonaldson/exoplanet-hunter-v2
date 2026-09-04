@@ -30,10 +30,17 @@ function missionStats() {
     // `|| 5388` and `|| 146` used to stand behind these two. A run that
     // reported neither then printed the prototype's figures in the same type
     // as the four measured tiles beside them.
-    { label:'Candidates Scored', value:SERVED.nScored ? SERVED.nScored.toLocaleString() : NOT_MEASURED,
-      accent:false, count:SERVED.nScored || 0, dur:2000 },
-    { label:'High Confidence',   value:SERVED.nHighConfidence ? SERVED.nHighConfidence.toLocaleString() : NOT_MEASURED,
-      accent:true,  count:SERVED.nHighConfidence || 0,  dur:1500 },
+    // These two count the LABELLED set this run was evaluated on, out of fold —
+    // not candidates in the catalogue. /model derives both from the run's
+    // predictions.parquet, which holds one row per labelled target. Labelled
+    // "Candidates Scored" they read as the size of the vetting queue, which is
+    // a different number entirely.
+    { label:'Targets Evaluated', value:SERVED.nScored ? SERVED.nScored.toLocaleString() : NOT_MEASURED,
+      accent:false, count:SERVED.nScored || 0, dur:2000,
+      sub: SERVED.nScored ? 'labelled set, out of fold' : 'not measured for this run' },
+    { label:'Scored Above 0.85',   value:SERVED.nHighConfidence ? SERVED.nHighConfidence.toLocaleString() : NOT_MEASURED,
+      accent:true,  count:SERVED.nHighConfidence || 0,  dur:1500,
+      sub: SERVED.nHighConfidence ? 'of those, out of fold' : 'not measured for this run' },
     // the pooled 0.955 is gone: the gating mission is the number that decides promotion
     { label:`${g.mission || 'TESS'} ROC-AUC`,
       value: has(g.auc) ? g.auc.toFixed(4) : NOT_MEASURED, accent:false,
@@ -63,10 +70,10 @@ const heroNotes = () => topScored(HERO_NOTE_POSITIONS.length).map((c, i) => ({
 }));
 
 const PIPELINE = [
-  { step:'01', title:'Catalog Refresh',  desc:'Automated ingestion from NASA ExoFOP, MAST, and Kepler archive. Nightly delta sync.' },
+  { step:'01', title:'Catalog Refresh',  desc:'Automated ingestion from NASA ExoFOP, MAST, and the Kepler archive. Refreshed weekly, behind seven validation gates.' },
   { step:'02', title:'Validation Gates', desc:'Multi-stage quality filters: centroid shift, secondary eclipse, odd-even depth, ghost diagnostic.' },
   { step:'03', title:'GPU Training',     desc:'On-demand 11-branch CNN training on phase-folded light curves. Platt scaling for calibration.' },
-  { step:'04', title:'Live Scoring',     desc:'Calibrated probability with per-fold agreement and MC-dropout spread. Every candidate scored in <2s.' },
+  { step:'04', title:'Live Scoring',     desc:'Calibrated probability with per-fold agreement and MC-dropout spread. A cold score fetches photometry from MAST: 20-60 s.' },
 ];
 
 const H1 = 'font-family:\'Anurati\', sans-serif;font-size:clamp(3.5rem, 7vw, 6rem);line-height:1.0;letter-spacing:-0.03em;margin-bottom:0';
@@ -93,7 +100,7 @@ function Home() {
       <div class="page-pad" style="position:relative;z-index:2;padding:0 3rem;max-width:1440px;margin:0 auto;width:100%">
         <div class="hero-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4rem;align-items:center">
           <div>
-            <div class="section-label rv" style="margin-bottom:2rem;transform:translateY(16px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s">Exoplanet Hunter V2 · Transit Detection Console</div>
+            <div class="section-label rv" style="margin-bottom:2rem;transform:translateY(16px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.1s">Exoplanet Hunter V2 · Transit Vetting Console</div>
             <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.2s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.2s">HUNTING</h1>
             <h1 class="rv" style="${H1};font-weight:700;color:#F0EEE8;transform:translateY(24px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.3s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.3s">WORLDS</h1>
             <h1 class="rv" style="${H1};font-weight:300;color:rgba(240,238,232,0.25);margin-bottom:2.5rem;transform:translateY(24px);transition:opacity 0.8s cubic-bezier(0.23,1,0.32,1) 0.4s,transform 0.8s cubic-bezier(0.23,1,0.32,1) 0.4s">BEYOND</h1>
@@ -156,7 +163,7 @@ function Home() {
             Every component must outperform the simplest baseline.
           </h2>
           <p style="font-family:'Inter';font-size:0.95rem;line-height:1.8;color:rgba(240,238,232,0.55);margin-bottom:1rem">
-            Exoplanet Hunter V2 is a fully automated, cloud-first machine learning platform for detecting exoplanet transits in NASA TESS and Kepler light curves.
+            Exoplanet Hunter V2 vets transit candidates that NASA&#39;s own pipelines have already detected: given a TOI or KOI and its ephemeris, it returns a calibrated probability that the signal is a planet, with the diagnostic evidence behind it. It does not search light curves for new signals.
           </p>
           <p style="font-family:'Inter';font-size:0.95rem;line-height:1.8;color:rgba(240,238,232,0.55)">
             It chains together catalog refresh → validation gates → on-demand GPU training → live calibrated probability scoring → interactive web-based vetting console.
@@ -219,8 +226,29 @@ function countUp(el) {
 }
 
 /* ── CATALOGUE ───────────────────────────────────────────── */
-const DISPOSITIONS = ['All', 'PC', 'CP', 'KP', 'FP'];
-const SOURCES = ['All', 'TESS', 'Kepler'];
+/* Both chip rows are built from the rows on screen rather than from a fixed
+   list, on the same rule as the model page's mission cards: a chip that can
+   never match is indistinguishable from a filter that is broken. The fixed
+   lists offered `Kepler`, which the live catalogue can never contain — it is
+   ExoFOP's TOI + CTOI table and every row of it is a TESS product — while
+   omitting `APC` (485 rows) and `FA` (102), so those were reachable only by
+   search. Order is fixed where it is meaningful and alphabetical after that,
+   so the chips do not reshuffle when the page does.
+
+   `catalogue` is which ExoFOP table a live row came from, TOI or CTOI;
+   prototype rows carry no such field and fall back to their mission. One
+   expression builds the chips and filters on them, so the two cannot
+   disagree. */
+const DISPOSITION_ORDER = ['PC', 'APC', 'CP', 'KP', 'FP', 'FA'];
+const sourceOf = c => c.catalogue || c.source || null;
+const chips = (values, order = []) => {
+  const seen = [...new Set(values.filter(Boolean))];
+  const known = order.filter(v => seen.includes(v));
+  const rest = seen.filter(v => !order.includes(v)).sort();
+  return ['All', ...known, ...rest];
+};
+const dispositionChips = () => chips(CANDIDATES.map(c => c.disposition).filter(d => d && d !== '—'), DISPOSITION_ORDER);
+const sourceChips = () => chips(CANDIDATES.map(sourceOf));
 
 function Catalogue() {
   const COLS = [
@@ -232,6 +260,7 @@ function Catalogue() {
   /* score_std is a spread, not an order the table offers. One predicate decides
      both which headers are clickable and which `?sort=` values are accepted, so
      a URL can never ask for a sort the header row has no way to show or undo. */
+  const cellValue = (c, key) => (key === 'source' ? sourceOf(c) : c[key]);
   const sortable = col => col !== 'score_std';
   const SORT_KEYS = new Set(COLS.map(([, k]) => k).filter(sortable));
 
@@ -246,8 +275,8 @@ function Catalogue() {
   const pick = (v, allowed, dflt) => (allowed.includes(v) ? v : dflt);
   const state = {
     search: q.get('q') || '',
-    disposition: pick(q.get('disp'), DISPOSITIONS, 'All'),
-    source: pick(q.get('src'), SOURCES, 'All'),
+    disposition: pick(q.get('disp'), dispositionChips(), 'All'),
+    source: pick(q.get('src'), sourceChips(), 'All'),
     sortKey: SORT_KEYS.has(q.get('sort')) ? q.get('sort') : 'prob',
     sortDir: q.get('dir') === 'asc' ? 'asc' : 'desc',
     // clamped and snapped to the slider's own range and step, so `min=999`
@@ -276,10 +305,14 @@ function Catalogue() {
       data = data.filter(c => c.id.toLowerCase().includes(q) || c.ticId.toLowerCase().includes(q));
     }
     if (state.disposition !== 'All') data = data.filter(c => c.disposition === state.disposition);
-    if (state.source !== 'All') data = data.filter(c => c.source === state.source);
+    if (state.source !== 'All') data = data.filter(c => sourceOf(c) === state.source);
     if (state.minProb > 0) data = data.filter(c => has(c.prob) && c.prob >= state.minProb / 100);
     data.sort((a, b) => {
-      const av = a[state.sortKey], bv = b[state.sortKey];
+      // Through the same accessor the column and the chips use: sorting on the
+      // row field would order by a value the table does not show, and for
+      // `source` that field is 'TESS' on every live row, so the header would
+      // look sortable and do nothing.
+      const av = cellValue(a, state.sortKey), bv = cellValue(b, state.sortKey);
       // Nulls sink to the bottom in either direction: an unscored row is not
       // the lowest-scoring row, and sorting it there would read as one.
       const an = !has(av) || (typeof av === 'number' && !Number.isFinite(av));
@@ -320,10 +353,10 @@ function Catalogue() {
             style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#F0EEE8;font-family:'JetBrains Mono';font-size:0.75rem;padding:0.6rem 0.75rem 0.6rem 2rem">
         </div>
         <div style="display:flex;gap:0.4rem" id="cat-disp">
-          ${DISPOSITIONS.map(d => `<button data-d="${d}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">${d}</button>`).join('')}
+          ${dispositionChips().map(d => `<button data-d="${d}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">${d}</button>`).join('')}
         </div>
         <div style="display:flex;gap:0.4rem" id="cat-src">
-          ${SOURCES.map(s => `<button data-s="${s}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">${s}</button>`).join('')}
+          ${sourceChips().map(s => `<button data-s="${s}" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;padding:0.4rem 0.75rem;transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">${s}</button>`).join('')}
         </div>
         <div style="display:flex;align-items:center;gap:0.75rem">
           <span class="stat-label">Min P(planet)</span>
@@ -358,7 +391,13 @@ function Catalogue() {
     syncURL();
     const data = filtered();
     document.getElementById('cat-count').textContent = `${data.length} WORLDS`;
-    document.getElementById('cat-sub').textContent = `${CANDIDATES.length} total · sorted by ${state.sortKey} ${state.sortDir}`;
+    // CANDIDATES is one page, not the catalogue. CATALOGUE_TOTAL is what /candidates
+    // reports for the whole table; saying "500 total" under a 500-row page claimed
+    // the catalogue was 22x smaller than it is.
+    const shown = CANDIDATES.length, total = SERVED.catalogueTotal || shown;
+    document.getElementById('cat-sub').textContent = total > shown
+      ? `${shown.toLocaleString()} of ${total.toLocaleString()} candidates, highest scoring first · sorted by ${state.sortKey} ${state.sortDir}`
+      : `${total.toLocaleString()} total · sorted by ${state.sortKey} ${state.sortDir}`;
 
     headEl.innerHTML = COLS.map(([label, col]) => {
       const canSort = sortable(col);
@@ -384,7 +423,7 @@ function Catalogue() {
             : `<span class="${getProbClass(c.prob)}">${c.prob.toFixed(3)}</span>`}</td>
         <td style="${td}"><span style="${dim}${!has(c.probStd) ? ';color:rgba(138,143,168,0.5)' : ''}" title="${!has(c.probStd) ? 'not scored' : 'ensemble spread over the five folds'}">${!has(c.probStd) ? '—' : c.probStd.toFixed(3)}</span></td>
         <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;font-weight:600;color:${dc};background:${dc}18;border:1px solid ${dc}44;padding:0.15rem 0.5rem;border-radius:2px">${c.disposition}</span></td>
-        <td style="${td}"><span style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.08em;color:#8A8FA8">${c.source}</span></td>
+        <td style="${td}"><span style="font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.08em;color:#8A8FA8">${sourceOf(c) || '—'}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.tmag, 1)}</span></td>
         <td style="${td}"><span style="${mono}">${n(c.snr, 1)}</span></td>
         <td style="${td}"><span style="${mono};color:${fu.tsmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.tsm, 1)}</span></td>
@@ -439,7 +478,7 @@ function Catalogue() {
     const headers = ['ID','TIC ID','Period (d)','Duration (h)','Depth','Probability','Score std','Disposition','Source','T-mag','SNR','TSM','ESM','Baseline (d)','Last Scored'];
     const rows = filtered().map(c => {
       const fu = followUp(c);
-      return [c.id, c.ticId, c.period, c.duration, c.depth, c.prob, '', c.disposition, c.source, c.tmag, c.snr,
+      return [c.id, c.ticId, c.period, c.duration, c.depth, c.prob, '', c.disposition, sourceOf(c) || '', c.tmag, c.snr,
               fu.tsm.toFixed(1), fu.esm.toFixed(2), c.baselineDays, c.lastScored];
     });
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');

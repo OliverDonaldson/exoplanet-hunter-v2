@@ -130,6 +130,11 @@ function mapCandidate(row) {
     // console shows a baseline warning wherever a score is, so this stays null
     // and the warning is suppressed rather than shown against a guess.
     baselineDays: null,
+    // Published by the API from the star's own radius, Teff and logg, so they
+    // do not assume a Sun. followUp() prefers them over its own estimates.
+    insolation: row.insolation_earth ?? null,
+    hzInner: row.hz_inner_au ?? null,
+    hzOuter: row.hz_outer_au ?? null,
     radiusRe: row.planet_radius_re ?? null,
     teqK: row.teq_k ?? null,
     stellarRadius: row.stellar_radius_rsun ?? null,

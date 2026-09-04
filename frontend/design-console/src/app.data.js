@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   Exoplanet Hunter — Transit Detection Console (design prototype)
+   Exoplanet Hunter — Transit Vetting Console
    Deep Space Cinematic · Electric Teal #4DFFD2
 
    Part 1/2 — data model, shared components, Home, Catalogue.
@@ -361,7 +361,29 @@ function followUp(c) {
               * Math.pow(rp / R_EARTH_PER_R_SUN, 2) * Math.pow(10, -mk / 5);
 
   const tsmCut = rp < 1.5 ? 12 : rp < 2.75 ? 92 : rp < 4 ? 84 : 96;
-  const hz = { inner: 0.95, outer: 1.67 };
+
+  /* Insolation and the habitable zone come from the catalogue wherever the row
+     carries them. The API computes both from the star's own radius, Teff and
+     logg (`_add_poe_observables`); the estimates above assume M* = 1 M☉, which
+     puts a planet round an M dwarf at the wrong distance and then calls it
+     temperate. The HZ edges are the luminosity-scaled Kasting limits
+     r = r☉ · sqrt(L), so 0.75 and 1.77 AU for a Sun.
+
+     `a` is recovered rather than re-estimated: the same L sets both the HZ
+     edges and the insolation, so a = hz_inner · sqrt(S_inner / S) with
+     S_inner = 1/0.75² = 1.778 S⊕ fixed by that definition. That keeps the
+     distance, the flux and the zone on one set of stellar parameters instead
+     of mixing a published flux with a solar-mass orbit. */
+  const HZ_INNER_FLUX = 1 / (0.75 * 0.75);     // 1.778 S⊕ at the recent-Venus edge
+  const pubInsol = Number.isFinite(c.insolation) && c.insolation > 0 ? c.insolation : null;
+  const pubHz = Number.isFinite(c.hzInner) && Number.isFinite(c.hzOuter) && c.hzInner > 0
+    ? { inner: c.hzInner, outer: c.hzOuter } : null;
+  const outInsol = pubInsol !== null ? pubInsol : insol;
+  const outA = (pubInsol !== null && pubHz)
+    ? pubHz.inner * Math.sqrt(HZ_INNER_FLUX / pubInsol)
+    : a;
+  const hz = pubHz || { inner: 0.75, outer: 1.77 };
+  const starMeasured = pubInsol !== null && pubHz !== null;
 
   // The archive publishes TSM/ESM for TOIs; those are computed from real J/K
   // magnitudes and a real stellar radius, where the estimates above assume
@@ -373,9 +395,10 @@ function followUp(c) {
   const outTeq = Number.isFinite(c.teqK) ? c.teqK : (Number.isFinite(teq) ? teq : null);
   const outRp  = Number.isFinite(c.radiusRe) ? c.radiusRe : (Number.isFinite(rp) ? rp : null);
 
-  return { rp: outRp, a, teq: outTeq, insol, tsm: outTsm, esm: outEsm, tsmCut, hz,
+  return { rp: outRp, a: outA, teq: outTeq, insol: outInsol, tsm: outTsm, esm: outEsm, tsmCut, hz,
            estimated: !Number.isFinite(c.tsm),
-           inHz: a >= hz.inner && a <= hz.outer,
+           starMeasured,
+           inHz: outA >= hz.inner && outA <= hz.outer,
            tsmPass: has(outTsm) && outTsm >= tsmCut,
            esmPass: has(outEsm) && outEsm >= 7.5 };
 }

@@ -261,12 +261,15 @@ function Vetting(candidateId) {
           <div class="fu-cell">
             <div class="stat-label" style="margin-bottom:0.4rem">Insolation</div>
             <div class="stat-value" style="font-size:1.35rem">${fu.insol < 1000 ? fu.insol.toFixed(1) : fu.insol.toExponential(1)}</div>
-            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">S⊕ · a = ${fu.a.toFixed(3)} AU</div>
+            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">S⊕ · a = ${fu.a.toFixed(3)} AU${fu.starMeasured ? '' : ' · assumes a Sun'}</div>
           </div>
           <div class="fu-cell">
             <div class="stat-label" style="margin-bottom:0.4rem">Habitable Zone</div>
-            <div class="stat-value" style="font-size:1.35rem;color:${fu.inHz ? '#4DFFD2' : '#F0EEE8'}">${fu.inHz ? 'Inside' : 'Outside'}</div>
-            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">${fu.hz.inner}–${fu.hz.outer} AU conservative</div>
+            ${fu.starMeasured
+              ? `<div class="stat-value" style="font-size:1.35rem;color:${fu.inHz ? '#4DFFD2' : '#F0EEE8'}">${fu.inHz ? 'Inside' : 'Outside'}</div>
+            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">${fu.hz.inner.toFixed(2)}–${fu.hz.outer.toFixed(2)} AU · this star</div>`
+              : `<div class="stat-value" style="font-size:1.35rem;color:#8A8FA8">not published</div>
+            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">needs the star's radius, Teff and logg</div>`}
           </div>
         </div>
       </div>
