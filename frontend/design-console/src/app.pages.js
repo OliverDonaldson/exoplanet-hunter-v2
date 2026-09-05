@@ -142,7 +142,7 @@ function Vetting(candidateId) {
   const TABS = [
     ['pipeline',    'Pipeline'],
     ['lightcurve',  'Phase-Folded Views'],
-    ['branches',    'Branch Evidence <span class="tag-chip tag-soon" style="margin-left:0.4rem">in progress</span>'],
+    ['branches',    'Branch Evidence <span class="tag-chip tag-soon" style="margin-left:0.4rem">deferred</span>'],
     ['agreement',   'Model Agreement'],
     ['diagnostics', 'Diagnostic Flags'],
   ];
@@ -308,12 +308,16 @@ function Vetting(candidateId) {
     if (API.mode === 'live') {
       return `
       <div class="soon" style="margin-bottom:1.5rem">
-        <div class="h">Per-branch contributions not measured yet <span class="tag-chip tag-soon" style="margin-left:0.4rem">in progress</span></div>
+        <div class="h">Per-branch contributions are deferred, not pending <span class="tag-chip tag-soon" style="margin-left:0.4rem">deferred</span></div>
         <div class="d">
           The score on this page is real. Attributing it across the eleven input
-          views needs branch-occlusion at serving time, which is not built. Rather
-          than show a plausible split, this tab shows none. What each view
-          feeds the model is listed below.
+          views needs branch-occlusion at serving time, and the served model is
+          the dual-view CNN, which has no branches to occlude. The branch
+          architecture that does was closed on 2026-09-05: it was rejected as a
+          replacement on five arms and its last standing explanation was
+          falsified, so this tab is waiting on a decision that has been taken
+          rather than on work in progress. It shows no split rather than a
+          plausible one. What each view feeds the model is listed below.
         </div>
       </div>
       <div style="display:grid;gap:0.5rem">
@@ -849,6 +853,38 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
             : `Noise floor: not measured for this run. It trains one model per fold, so there is no seed spread to take the floor from, and a floor measured on another architecture would not apply to these numbers.`}
         </span>
       </div>
+
+      ${(() => {
+        /* PR-AUC, F1 and the operating threshold arrive on /model and were
+           fetched onto SERVED.metrics and never read once. They are pooled
+           over every out-of-fold row, which is a different population from the
+           per-mission cards below, so they get their own panel and say so
+           rather than sitting in a mission column.
+
+           The F1 here is each fold's own F1-optimal threshold, averaged. The
+           per-mission F1 below is at the shortlist cut. Two different numbers
+           that would both answer to "F1", so neither is labelled bare. */
+        const met = SERVED.metrics || {};
+        const cell = (key) => (met[key] && has(met[key].mean) ? met[key] : null);
+        const rows = [
+          ['PR-AUC', 'pr_auc', 'average precision, pooled over all missions'],
+          ['F1 at each fold&rsquo;s own best threshold', 'f1', 'not the shortlist cut used per mission below'],
+          ['Operating threshold', 'threshold', 'the F1-optimal cut the folds chose'],
+        ].filter(([, key]) => cell(key));
+        if (!rows.length) return '';
+        return `
+      <div class="panel" style="padding:1.5rem;margin-bottom:2.5rem">
+        <div class="stat-label" style="margin-bottom:0.35rem">Run-Level Summary</div>
+        <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-bottom:1.5rem">pooled over every out-of-fold row · &plusmn;1&sigma; across the five folds</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:2rem">
+          ${rows.map(([label, key, note]) => `
+            <div>
+              ${metricBlock(label, cell(key).mean, has(cell(key).std) ? cell(key).std : null, false)}
+              <div style="font-family:'Inter';font-size:0.7rem;line-height:1.5;color:rgba(240,238,232,0.45);margin-top:0.4rem">${note}</div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+      })()}
 
       <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem">
         <div class="section-label">Per-Mission Detail</div>
