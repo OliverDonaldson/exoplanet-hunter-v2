@@ -5,7 +5,12 @@
 data/raw/
 data/interim/
 data/tables/labels/
-data/processed/
+# Same trailing-slash trick as models/cv below: exclude the bulk, re-include
+# the pointers. The entrypoint pulls one 1.3 MB file out of
+# candidates_viewset/ to derive the observation baseline, and it cannot
+# resolve a pointer that never reached the image.
+data/processed/*
+!data/processed/*.dvc
 data/tables/catalogue/
 data/csv/exofop/
 # Docker strips the trailing slash, so this also swallows the *.dvc pointer

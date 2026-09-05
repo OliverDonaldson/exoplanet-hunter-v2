@@ -28,6 +28,15 @@ else
     # boot, because /score and /healthz do not depend on either.
     dvc pull -v data/tables/labels.dvc results/candidates_scored.parquet.dvc || \
         echo "[entrypoint] WARNING: optional artefacts unavailable — per-mission metrics and catalogue scores will be absent"
+    # One file out of a tracked directory, not the directory. The view set is
+    # 295 MB and this parquet is 1.3 MB of it; the API needs three columns from
+    # it — tic_id, period, expected_transit_count — to derive the observation
+    # baseline, and pulling the 294 MB viewset.npz beside it onto a 2 GB
+    # machine to reach them would be absurd. Without this the baseline is null
+    # everywhere, which renders honestly as "not derivable" but leaves W1, the
+    # largest defect this project has measured, invisible on the live site.
+    dvc pull -v data/processed/candidates_viewset/viewset_scalars.parquet || \
+        echo "[entrypoint] WARNING: view-set scalars unavailable — observation baseline will read as not derivable"
 fi
 echo "[entrypoint] artefacts ready:"
 ls models/cv/ data/tables/catalogue/
