@@ -59,6 +59,10 @@ const SERVED = {
      absent: no prototype curve is measured, so the chart falls back to the
      binormal stand-in and labels itself as such, which is what a run serving
      no per-threshold points should look like. */
+  // Present so prototype and live share one code path. Deliberately empty: no
+  // prototype run measured these, and the panel that reads them renders
+  // nothing rather than inventing three numbers.
+  metrics: {},
   missions: [
     { mission:'TESS',   role:'gating',     evaluation:'out-of-fold', n:5156,
       auc:0.9100, aucErr:0.0070, recall:0.6120, recallErr:0.0337, brier:0.0871, brierErr:0.0042, ece:0.0130, eceErr:0.0031,
@@ -292,6 +296,12 @@ const DIAGNOSTICS = [
   { key:'secondary', name:'Secondary Eclipse', field:'weak_secondary_max_mes', unit:'', dp:2, threshold:'< 7.10',
     pass:'No significant secondary eclipse at phase 0.5',
     fail:'Secondary eclipse above threshold, indicating a self-luminous companion' },
+  { key:'duration', name:'Transit Duration', field:'duration_check', unit:'', dp:3, threshold:'q / q_circ > 0.60',
+    pass:'Transit duration is physical for this orbit',
+    fail:'Duration is too short for the orbit implied by the period, which a grazing or blended eclipse produces' },
+  { key:'falsealarm', name:'Low-Trust Detection', field:'false_alarms', unit:'', dp:2, threshold:'no sub-test flagged',
+    pass:'No systematic-artefact test flagged this detection',
+    fail:'A systematic-artefact test flagged this detection' },
   { key:'ghost', name:'Ghost Diagnostic', field:'ghost_core_statistic / ghost_halo_statistic', unit:'', dp:2, threshold:'core > halo',
     pass:'Signal is stronger in the core aperture than the halo',
     fail:'Halo statistic exceeds core, indicating a contaminating source outside the aperture' },
@@ -331,6 +341,41 @@ function liveDiagnostics(c) {
       return { ...spec, state: d.secondary.suspicious ? 'fail' : 'pass',
                value: d.secondary.secondary_significance, unit: 'σ', dp: 2,
                threshold: `< ${d.secondary.fa_threshold.toFixed(1)} σ FA` };
+    }
+    if (spec.key === 'duration' && d.duration) {
+      /* q_ratio compares the duration to the circular-orbit duration and needs
+         the star's radius and logg. Without them only q, the raw phase
+         fraction, exists — a different quantity, so it is shown under its own
+         name rather than passed off as the ratio. */
+      const hasRatio = has(d.duration.q_ratio) && Number.isFinite(d.duration.q_ratio);
+      if (!hasRatio && !(has(d.duration.q) && Number.isFinite(d.duration.q))) {
+        return { ...spec, state: 'unmeasured' };
+      }
+      return { ...spec, state: d.duration.suspicious ? 'fail' : 'pass',
+               value: hasRatio ? d.duration.q_ratio : d.duration.q,
+               field: hasRatio ? 'duration_check.q_ratio' : 'duration_check.q (no stellar radius or logg)',
+               threshold: hasRatio ? '> 0.60' : 'ratio needs stellar parameters',
+               dp: 3 };
+    }
+    if (spec.key === 'falsealarm' && d.falseAlarms) {
+      /* `suspicious` is false both when every sub-test passed and when every
+         sub-test returned null — each *_suspicious defaults false on a null
+         metric. Keying the card on it alone would print "clear" for a target
+         where nothing was measured, which is the one thing this panel exists
+         to prevent. So the state comes from the metrics being present. */
+      const sub = [
+        ['sweet_significance', 'sweet_suspicious'],
+        ['asymmetry_sigma', 'asymmetry_suspicious'],
+        ['depth_mean_median_ratio', 'dmm_suspicious'],
+        ['gap_fraction', 'gap_suspicious'],
+      ].filter(([metric]) => has(d.falseAlarms[metric]) && Number.isFinite(d.falseAlarms[metric]));
+      if (!sub.length) return { ...spec, state: 'unmeasured' };
+      const flagged = sub.filter(([, flag]) => d.falseAlarms[flag] === true);
+      return { ...spec, state: flagged.length ? 'fail' : 'pass',
+               value: flagged.length,
+               field: `${sub.length} of 4 sub-tests measured`,
+               threshold: 'none flagged',
+               dp: 0, unit: flagged.length === 1 ? ' flagged' : ' flagged' };
     }
     return { ...spec, state: 'unmeasured' };
   });
@@ -373,6 +418,9 @@ function diagValue(d) {
   if (!has(d.value) || !Number.isFinite(d.value)) return 'not measured';
   if (d.key === 'bootstrap') return d.value.toExponential(1);
   if (d.key === 'ghost') return `${d.value.toFixed(2)} / ${(d.value * 0.75).toFixed(2)}`;
+  // The false-alarm card counts flagged sub-tests, so its "value" is a count
+  // and toFixed(2) on it would read as a measurement.
+  if (d.key === 'falsealarm') return `${d.value}${d.unit || ''}`;
   return d.value.toFixed(d.dp) + (d.unit ? ` ${d.unit}` : '');
 }
 
