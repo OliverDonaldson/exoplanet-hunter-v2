@@ -277,10 +277,25 @@ class MissionMetrics(BaseModel):
 
 
 class NoiseFloor(BaseModel):
-    """Seed-to-seed spread. A margin under it is not a decision."""
+    """This run's own seed-to-seed spread. A margin under it is not a decision.
+
+    Null is the honest answer for a run that trains one model per fold: the
+    rule is `2 * sd / sqrt(n_models_per_fold)` over the per-member scores, and
+    one member has no spread to take. `measured` says which case this is, so a
+    client renders "not measured for this run" rather than a blank that reads
+    as zero, and `source` says what produced the numbers.
+
+    A floor belongs to the architecture and the run it was measured on. Until
+    2026-09-05 this carried two constants from a *branch*-model calibration
+    (stage 6, 2026-08-09) and the console printed them under the *dual-view*
+    champion's metrics, which is a category error rather than a stale number.
+    """
 
     auc: float | None = None
     recall: float | None = None
+    measured: bool = False
+    n_models_per_fold: int | None = None
+    source: str | None = None
 
 
 class ModelSummaryResponse(BaseModel):

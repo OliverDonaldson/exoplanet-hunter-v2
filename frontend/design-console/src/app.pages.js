@@ -261,12 +261,15 @@ function Vetting(candidateId) {
           <div class="fu-cell">
             <div class="stat-label" style="margin-bottom:0.4rem">Insolation</div>
             <div class="stat-value" style="font-size:1.35rem">${fu.insol < 1000 ? fu.insol.toFixed(1) : fu.insol.toExponential(1)}</div>
-            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">S⊕ · a = ${fu.a.toFixed(3)} AU</div>
+            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">S⊕ · a = ${fu.a.toFixed(3)} AU${fu.starMeasured ? '' : ' · assumes a Sun'}</div>
           </div>
           <div class="fu-cell">
             <div class="stat-label" style="margin-bottom:0.4rem">Habitable Zone</div>
-            <div class="stat-value" style="font-size:1.35rem;color:${fu.inHz ? '#4DFFD2' : '#F0EEE8'}">${fu.inHz ? 'Inside' : 'Outside'}</div>
-            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">${fu.hz.inner}–${fu.hz.outer} AU conservative</div>
+            ${fu.starMeasured
+              ? `<div class="stat-value" style="font-size:1.35rem;color:${fu.inHz ? '#4DFFD2' : '#F0EEE8'}">${fu.inHz ? 'Inside' : 'Outside'}</div>
+            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">${fu.hz.inner.toFixed(2)}–${fu.hz.outer.toFixed(2)} AU · this star</div>`
+              : `<div class="stat-value" style="font-size:1.35rem;color:#8A8FA8">not published</div>
+            <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-top:0.35rem">needs the star's radius, Teff and logg</div>`}
           </div>
         </div>
       </div>
@@ -818,7 +821,9 @@ function ModelPerformance() {
           There is no pooled headline: the missions have different label provenance and different class balance, so a single averaged figure would not mean anything.
           <b style="color:rgba(240,238,232,0.85);font-weight:500">${SERVED.missions.filter(m => m.evaluation === 'zero-shot').map(m => m.mission).join(', ') || 'None'}</b>
           ${SERVED.missions.some(m => m.evaluation === 'zero-shot') ? 'has no out-of-fold evaluation for this run, so its numbers are zero-shot transfer and are not comparable with the out-of-fold columns.' : 'runs are all out-of-fold.'}
-          Measured noise floor: AUC ±${has(SERVED.noiseFloor.auc) ? SERVED.noiseFloor.auc.toFixed(4) : '—'}, shortlist recall ±${has(SERVED.noiseFloor.recall) ? SERVED.noiseFloor.recall.toFixed(4) : '—'}. Differences smaller than these are not differences.
+${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
+            ? `Noise floor, measured on this run over ${SERVED.noiseFloor.n_models_per_fold} members per fold: AUC ±${SERVED.noiseFloor.auc.toFixed(4)}, shortlist recall ±${has(SERVED.noiseFloor.recall) ? SERVED.noiseFloor.recall.toFixed(4) : '—'}. Differences smaller than these are not differences.`
+            : `Noise floor: not measured for this run. It trains one model per fold, so there is no seed spread to take the floor from, and a floor measured on another architecture would not apply to these numbers.`}
         </span>
       </div>
 
