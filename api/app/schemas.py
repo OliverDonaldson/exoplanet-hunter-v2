@@ -257,6 +257,16 @@ class MetricSummary(BaseModel):
     std: float
 
 
+class RocPoint(BaseModel):
+    """One point of a measured ROC curve. `threshold` is the score at or above
+    which a target is called a planet, so a client can say what any point on
+    the curve would cost."""
+
+    fpr: float
+    tpr: float
+    threshold: float
+
+
 class MissionMetrics(BaseModel):
     """One mission's slice of the run's out-of-fold predictions. Every metric
     is nullable — recall is undefined without negatives, a spread needs two
@@ -274,6 +284,33 @@ class MissionMetrics(BaseModel):
     brierErr: float | None = None
     ece: float | None = None
     eceErr: float | None = None
+
+    #: The confusion matrix at the shortlist operating point, and what that
+    #: point actually is. All four cells are null together: a partial matrix
+    #: cannot be rendered honestly, and the console gates on all four.
+    #:
+    #: `fprActual` is not decoration. The threshold is a quantile of the
+    #: negatives, so on a finite slice the realised false-positive rate lands
+    #: near 1% rather than on it, and a panel captioned "at the 1% FPR
+    #: operating point" while showing cells from a 1.03% cut would misdescribe
+    #: its own numbers.
+    nPositive: int | None = None
+    tp: int | None = None
+    fp: int | None = None
+    fn: int | None = None
+    tn: int | None = None
+    threshold: float | None = None
+    fprActual: float | None = None
+    precision: float | None = None
+    precisionErr: float | None = None
+    f1: float | None = None
+    f1Err: float | None = None
+
+    #: The measured ROC, thinned for the wire. Until 2026-09-05 the console
+    #: drew a binormal curve implied by the AUC because no endpoint carried
+    #: per-threshold points; it said so on the chart, but a drawn curve reads
+    #: as a measurement whatever the caption says.
+    roc: list[RocPoint] | None = None
 
 
 class NoiseFloor(BaseModel):

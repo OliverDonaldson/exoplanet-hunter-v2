@@ -52,13 +52,26 @@ const SERVED = {
   arch: '5-fold dual-view CNN ensemble · MC-dropout · Platt calibration',
   noiseFloor: { auc: 0.0070, recall: 0.0337 },
   // The panel is built from this list, not from three hardcoded columns.
+  /* Prototype missions. The confusion cells are internally consistent with
+     n, nPositive and recall — tp = round(nPositive x recall), fp = round of
+     the negatives at the stated fprActual — so the prototype exercises the
+     same render path as live rather than a second one. `roc` is deliberately
+     absent: no prototype curve is measured, so the chart falls back to the
+     binormal stand-in and labels itself as such, which is what a run serving
+     no per-threshold points should look like. */
   missions: [
     { mission:'TESS',   role:'gating',     evaluation:'out-of-fold', n:5156,
-      auc:0.9100, aucErr:0.0070, recall:0.6120, recallErr:0.0337, brier:0.0871, brierErr:0.0042, ece:0.0130, eceErr:0.0031 },
+      auc:0.9100, aucErr:0.0070, recall:0.6120, recallErr:0.0337, brier:0.0871, brierErr:0.0042, ece:0.0130, eceErr:0.0031,
+      nPositive:2542, tp:1556, fp:26, fn:986, tn:2588, threshold:0.9312, fprActual:0.0100,
+      precision:0.9836, precisionErr:0.0041, f1:0.7548, f1Err:0.0260 },
     { mission:'Kepler', role:'diagnostic', evaluation:'out-of-fold', n:2500,
-      auc:0.9914, aucErr:0.0038, recall:0.9410, recallErr:0.0180, brier:0.0212, brierErr:0.0019, ece:0.0084, eceErr:0.0022 },
+      auc:0.9914, aucErr:0.0038, recall:0.9410, recallErr:0.0180, brier:0.0212, brierErr:0.0019, ece:0.0084, eceErr:0.0022,
+      nPositive:1345, tp:1266, fp:12, fn:79, tn:1143, threshold:0.8210, fprActual:0.0104,
+      precision:0.9906, precisionErr:0.0022, f1:0.9653, f1Err:0.0094 },
     { mission:'K2',     role:'diagnostic', evaluation:'zero-shot',   n:412,
-      auc:0.8480, aucErr:0.0210, recall:0.4030, recallErr:0.0610, brier:0.1420, brierErr:0.0090, ece:0.0410, eceErr:0.0070 },
+      auc:0.8480, aucErr:0.0210, recall:0.4030, recallErr:0.0610, brier:0.1420, brierErr:0.0090, ece:0.0410, eceErr:0.0070,
+      nPositive:196, tp:79, fp:2, fn:117, tn:214, threshold:0.7405, fprActual:0.0093,
+      precision:0.9753, precisionErr:0.0130, f1:0.5702, f1Err:0.0520 },
   ],
 };
 let GATING = SERVED.missions.find(m => m.role === 'gating');
