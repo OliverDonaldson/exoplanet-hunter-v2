@@ -220,15 +220,36 @@ function foldAgreement(c) {
     const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
     const foldStd = Math.sqrt(scores.reduce((s, v) => s + (v - mean) ** 2, 0) / scores.length);
     return {
-      folds, foldStd, probStd: c.live.probStd,
+      source: 'live', folds, foldStd, probStd: c.live.probStd,
       range: [Math.min(...scores), Math.max(...scores)],
       mean,
     };
   }
-  // A live service and no attached score means the members are simply not
-  // measured for this row — /candidates has no per-fold column. Returning the
-  // simulation here is the exact failure the comment above describes, because
-  // the catalogue's bulk mean is already a real number on the same panel.
+  // No live score attached, but the bulk scorer measured this row's members
+  // offline and /candidates now serves them. They are a different measurement
+  // from the live one — uncalibrated ensemble means, a different MC draw count
+  // — so `source` travels with them and the panel says which it is showing.
+  // The two are never mixed.
+  if (c.foldMeans && c.foldMeans.length) {
+    const scores = c.foldMeans;
+    const mean = scores.reduce((s, v) => s + v, 0) / scores.length;
+    return {
+      source: 'bulk',
+      folds: scores.map((score, i) => ({ fold: i, score })),
+      // Measured by the scorer rather than recomputed here: fold_disagree is
+      // the spread across folds, mc_disagree the mean spread within them.
+      foldStd: has(c.foldDisagree) ? c.foldDisagree : null,
+      probStd: has(c.mcDisagree) ? c.mcDisagree : null,
+      p10: has(c.probP10) ? c.probP10 : null,
+      p90: has(c.probP90) ? c.probP90 : null,
+      range: [Math.min(...scores), Math.max(...scores)],
+      mean,
+    };
+  }
+  // A live service, no attached score and no bulk row: the members are simply
+  // not measured for this target. Returning the simulation here is the exact
+  // failure the comment above describes, because the catalogue's bulk mean is
+  // already a real number on the same panel.
   if (API.mode === 'live') return null;
 
   const r = rngFor(c.id + '|folds');

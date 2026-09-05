@@ -240,6 +240,23 @@ class CandidateRow(BaseModel):
     prob_std: float | None = None
     scored_at: str | None = None
     score_source: str | None = None
+    # The uncertainty the bulk scorer already measured and nothing surfaced.
+    # `fold_disagree` is the spread ACROSS the five folds and `mc_disagree` the
+    # mean MC-dropout spread WITHIN them: one says the answer depends on the
+    # split, the other that the model is unsure. They are not interchangeable
+    # and must not be rendered under one label.
+    prob_p10: float | None = None
+    prob_p90: float | None = None
+    fold_disagree: float | None = None
+    mc_disagree: float | None = None
+    fold_means: list[float] | None = None
+    # Observation baseline, DERIVED as `(expected_transit_count - 1) * period`
+    # from the candidates view set — the quantity every recorded W1 figure was
+    # measured on. Quantised to whole periods, and null rather than zero where
+    # only one transit is predicted, so `baseline_source` travels with it and a
+    # client can say what kind of number it is.
+    baseline_days: float | None = None
+    baseline_source: str | None = None
 
 
 class CandidatesPage(BaseModel):

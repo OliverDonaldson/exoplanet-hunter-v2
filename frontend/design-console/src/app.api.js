@@ -122,14 +122,27 @@ function mapCandidate(row) {
     catalogue: row.source,                   // 'TOI' | 'CTOI', kept for display
     tmag: row.tess_mag ?? 0,
     sectors: row.sectors || '—',
-    lastScored: row.date_modified ? String(row.date_modified).slice(0, 10) : '—',
+    // When this row was SCORED. `date_modified` is when ExoFOP last edited the
+    // catalogue entry, which is a different event and was displayed under this
+    // label; it stays available as `catalogueEdited`.
+    lastScored: row.scored_at ? String(row.scored_at).slice(0, 10) : null,
+    catalogueEdited: row.date_modified ? String(row.date_modified).slice(0, 10) : null,
     snr: row.planet_snr ?? 0,
     tsm: row.tsm ?? null,
     esm: row.esm ?? null,
-    // No observing-baseline column exists on the catalogue contract. The
-    // console shows a baseline warning wherever a score is, so this stays null
-    // and the warning is suppressed rather than shown against a guess.
-    baselineDays: null,
+    // Derived, not observed: (expected_transit_count - 1) x period, quantised
+    // to whole periods, and null rather than 0 where only one transit is
+    // predicted. `baselineSource` travels with it so the page can say what
+    // kind of number it is instead of implying a measured span.
+    baselineDays: row.baseline_days ?? null,
+    baselineSource: row.baseline_source ?? null,
+    // Two different uncertainties: across the folds, and within them. Kept
+    // apart on purpose — see the panel that renders them.
+    probP10: row.prob_p10 ?? null,
+    probP90: row.prob_p90 ?? null,
+    foldDisagree: row.fold_disagree ?? null,
+    mcDisagree: row.mc_disagree ?? null,
+    foldMeans: Array.isArray(row.fold_means) ? row.fold_means : null,
     // Published by the API from the star's own radius, Teff and logg, so they
     // do not assume a Sun. followUp() prefers them over its own estimates.
     insolation: row.insolation_earth ?? null,
@@ -226,7 +239,10 @@ async function loadScore(ticId, opts = {}, { signal } = {}) {
   if (has(opts.periodDays)) p.set('period_days', String(opts.periodDays));
   if (has(opts.t0Btjd)) p.set('t0_btjd', String(opts.t0Btjd));
   if (has(opts.durationHours)) p.set('duration_hours', String(opts.durationHours));
-  if (opts.includePeriodogram) p.set('include_periodogram', 'true');
+  // Always. It is in the /score cache key, so fetching it on demand is a full
+  // cache miss and a second 20-60 s round trip; measured cost inline is a
+  // bounded BLS, ~0.15-0.3 s and ~16 kB.
+  p.set('include_periodogram', 'true');
   const qs = p.size ? `?${p}` : '';
   const body = await apiFetch(`/score/${ticId}${qs}`, { timeoutMs: API.scoreTimeoutMs, signal });
   return mapScore(body);

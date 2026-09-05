@@ -248,7 +248,7 @@ const chips = (values, order = []) => {
   return ['All', ...known, ...rest];
 };
 const dispositionChips = () => chips(CANDIDATES.map(c => c.disposition).filter(d => d && d !== '—'), DISPOSITION_ORDER);
-const sourceChips = () => chips(CANDIDATES.map(sourceOf));
+const sourceChips = () => chips(CANDIDATES.map(sourceOf), ['TOI', 'CTOI', 'TESS', 'Kepler', 'K2']);
 
 function Catalogue() {
   const COLS = [
@@ -428,8 +428,8 @@ function Catalogue() {
         <td style="${td}"><span style="${mono}">${n(c.snr, 1)}</span></td>
         <td style="${td}"><span style="${mono};color:${fu.tsmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.tsm, 1)}</span></td>
         <td style="${td}"><span style="${mono};color:${fu.esmPass ? '#4DFFD2' : '#F0EEE8'}">${n(fu.esm, 2)}</span></td>
-        <td style="${td}"><span style="${mono};color:${c.baselineDays >= 1000 ? '#F5A623' : '#F0EEE8'}">${!has(c.baselineDays) ? '—' : c.baselineDays.toLocaleString()}</span></td>
-        <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${c.lastScored}</span></td>
+        <td style="${td}"><span style="${mono};color:${c.baselineDays >= 1000 ? '#F5A623' : '#F0EEE8'}">${!has(c.baselineDays) ? '—' : Math.round(c.baselineDays).toLocaleString()}</span></td>
+        <td style="${td}"><span style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">${c.lastScored || '—'}</span></td>
         <td style="${td}"><span style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.1em;color:#4DFFD2;text-transform:uppercase">Vet →</span></td>
       </tr>`;
     }).join('');
@@ -479,7 +479,7 @@ function Catalogue() {
     const rows = filtered().map(c => {
       const fu = followUp(c);
       return [c.id, c.ticId, c.period, c.duration, c.depth, c.prob, '', c.disposition, sourceOf(c) || '', c.tmag, c.snr,
-              fu.tsm.toFixed(1), fu.esm.toFixed(2), c.baselineDays, c.lastScored];
+              fu.tsm.toFixed(1), fu.esm.toFixed(2), has(c.baselineDays) ? Math.round(c.baselineDays) : '', c.lastScored || ''];
     });
     const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));

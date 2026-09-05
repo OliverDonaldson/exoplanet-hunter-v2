@@ -33,6 +33,13 @@ _DEFAULT_PATH = (
 #: pipeline/scripts/score_candidates.py. Absent on a fresh checkout, in which
 #: case every row is simply unscored.
 _DEFAULT_SCORES = Path(__file__).resolve().parents[3] / "results" / "candidates_scored.parquet"
+_DEFAULT_VIEWSET = (
+    Path(__file__).resolve().parents[3]
+    / "data"
+    / "processed"
+    / "candidates_viewset"
+    / "viewset_scalars.parquet"
+)
 
 _SORTABLE = {
     "prob_mean",
@@ -58,7 +65,24 @@ _SORTABLE = {
 # Keyed on (catalogue mtime, scores mtime): the frame is a join of the two, so
 # either changing on disk has to invalidate it. Re-running the bulk scorer
 # therefore shows up without a restart.
-_cache: dict[str, tuple[tuple[float, float], pd.DataFrame]] = {}
+_cache: dict[str, tuple[tuple[float, float, float], pd.DataFrame]] = {}
+
+#: Columns lifted from the bulk-score parquet. `prob_p10`/`prob_p90` bound the
+#: MC-dropout draw, `fold_disagree` is the spread across the five folds and
+#: `mc_disagree` the mean within-fold MC spread — two different uncertainties
+#: that the console must not merge, since one is about the split and the other
+#: about the model. All were computed by `score_candidates.py` and reached
+#: nothing.
+_SCORE_COLUMNS = (
+    "prob_mean",
+    "prob_std",
+    "scored_at",
+    "prob_p10",
+    "prob_p90",
+    "fold_disagree",
+    "mc_disagree",
+    "fold_means",
+)
 
 
 def _load_catalogue() -> pd.DataFrame:
@@ -75,10 +99,13 @@ def _load_catalogue() -> pd.DataFrame:
     key = str(path)
     scores_path = Path(os.environ.get("SCORES_PATH", _DEFAULT_SCORES))
     scores_mtime = scores_path.stat().st_mtime if scores_path.exists() else 0.0
+    viewset_path = Path(os.environ.get("VIEWSET_SCALARS_PATH", _DEFAULT_VIEWSET))
+    viewset_mtime = viewset_path.stat().st_mtime if viewset_path.exists() else 0.0
     cached = _cache.get(key)
-    if cached is None or cached[0] != (mtime, scores_mtime):
+    if cached is None or cached[0] != (mtime, scores_mtime, viewset_mtime):
         frame = pd.read_parquet(path)
-        _cache[key] = ((mtime, scores_mtime), _attach_scores(frame, scores_path))
+        frame = _attach_baseline(_attach_scores(frame, scores_path), viewset_path)
+        _cache[key] = ((mtime, scores_mtime, viewset_mtime), frame)
     return _cache[key][1]
 
 
@@ -98,14 +125,12 @@ def _attach_scores(catalogue: pd.DataFrame, scores_path: Path) -> pd.DataFrame:
     re-running the scorer is what closes the gap.
     """
     catalogue = catalogue.copy()
-    for column in ("prob_mean", "prob_std", "scored_at", "score_source"):
+    for column in (*_SCORE_COLUMNS, "score_source"):
         catalogue[column] = None
     if not scores_path.exists():
         return catalogue
     try:
-        scored = pd.read_parquet(
-            scores_path, columns=["tic_id", "status", "prob_mean", "prob_std", "scored_at"]
-        )
+        scored = pd.read_parquet(scores_path, columns=["tic_id", "status", *_SCORE_COLUMNS])
     except (OSError, ValueError, KeyError):
         log.warning("[candidates] could not read scores at %s", scores_path)
         return catalogue
@@ -113,14 +138,69 @@ def _attach_scores(catalogue: pd.DataFrame, scores_path: Path) -> pd.DataFrame:
     # carry no probability and must not read as a low one.
     scored = scored[(scored["status"] == "ok") & scored["prob_mean"].notna()]
     scored = scored.drop_duplicates("tic_id")
-    merged = catalogue.drop(columns=["prob_mean", "prob_std", "scored_at"]).merge(
+    merged = catalogue.drop(columns=list(_SCORE_COLUMNS)).merge(
         scored.drop(columns=["status"]), on="tic_id", how="left"
     )
-    merged["scored_at"] = (
-        merged["scored_at"].astype(object).where(merged["scored_at"].notna(), None)
-    )
+    # Unmatched rows come back NaN, which fails `float | None` and, for
+    # `fold_means`, `list[float] | None`. None is also the honest value: the
+    # scorer did not reach the row.
+    for column in ("scored_at", "fold_means"):
+        merged[column] = merged[column].astype(object).where(merged[column].notna(), None)
     merged["score_source"] = (
         merged["prob_mean"].notna().map({True: "bulk-ensemble-mean", False: None})
+    )
+    return merged
+
+
+def _attach_baseline(catalogue: pd.DataFrame, viewset_path: Path) -> pd.DataFrame:
+    """Attach the observation baseline, reconstructed from the ephemeris.
+
+    W1 — ranking is driven by how long a target was watched, and the signal is
+    in the labels — is the largest defect this project has measured in itself,
+    and until now it was represented nowhere per candidate. It is *derived*,
+    not observed: `(expected_transit_count - 1) * period` from the candidates
+    view set, which `eval.observation_bias.baseline_days` computes and every
+    recorded W1 figure was measured on.
+
+    Two properties travel with it and are why `baseline_source` is served
+    beside the number rather than left to a caption. It is **quantised to
+    whole periods**, so on a 700-day candidate the granularity is 700 days and
+    a bare figure implies a precision it does not have. And it is **exactly
+    zero when only one transit is predicted**, which is a floor on the
+    long-period tail rather than a target nobody observed — so zero is mapped
+    to null, because "0 d" on screen states something false.
+
+    The sector string on the catalogue is deliberately not used as a fallback.
+    It is a list of labels, not a span, and counting them would produce a
+    number of a different kind under the same label.
+    """
+    catalogue = catalogue.copy()
+    catalogue["baseline_days"] = None
+    catalogue["baseline_source"] = None
+    if not viewset_path.exists():
+        log.warning("[candidates] view-set scalars missing at %s — no baseline", viewset_path)
+        return catalogue
+    try:
+        scalars = pd.read_parquet(
+            viewset_path, columns=["tic_id", "period", "expected_transit_count"]
+        )
+    except (OSError, ValueError, KeyError):
+        log.warning("[candidates] could not read view-set scalars at %s", viewset_path)
+        return catalogue
+
+    from exoplanet_hunter.eval.observation_bias import baseline_days
+
+    scalars = scalars.dropna(subset=["tic_id", "period", "expected_transit_count"])
+    scalars = scalars.drop_duplicates("tic_id")
+    derived = pd.DataFrame({"tic_id": scalars["tic_id"], "baseline_days": baseline_days(scalars)})
+    # <= 0 is one predicted transit, not zero observing.
+    derived = derived[derived["baseline_days"] > 0]
+    merged = catalogue.drop(columns=["baseline_days"]).merge(derived, on="tic_id", how="left")
+    merged["baseline_days"] = (
+        merged["baseline_days"].astype(object).where(merged["baseline_days"].notna(), None)
+    )
+    merged["baseline_source"] = (
+        merged["baseline_days"].notna().map({True: "ephemeris-derived", False: None})
     )
     return merged
 
