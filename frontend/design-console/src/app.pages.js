@@ -174,7 +174,7 @@ function Vetting(candidateId) {
     { label:'Depth',       value:num(c.depth, 4) },
     { label:'T-mag',       value:num(c.tmag, 1) },
     { label:'SNR',         value:num(c.snr, 1) },
-    { label:'Last Scored', value:c.lastScored || 'not measured' },
+    { label:'Last Scored', value:c.lastScored || 'not measured' },  // scored_at, not the catalogue edit date
   ];
 
   const longBaseline = has(c.baselineDays) && c.baselineDays >= 1000;
@@ -209,12 +209,14 @@ function Vetting(candidateId) {
           <div style="font-family:'JetBrains Mono';font-size:0.68rem;color:#8A8FA8;margin-top:0.35rem">${
             !has(c.prob)
               ? (c.scoring ? 'scoring: light curve → 5-fold ensemble' : (c.scoreError ? esc(c.scoreError) : 'not scored'))
-              : agree ? `± ${agree.probStd.toFixed(3)} MC-dropout · Platt-calibrated` : 'spread not measured'}</div>
+              : agree && has(agree.probStd)
+                ? `± ${agree.probStd.toFixed(3)} ${agree.source === 'bulk' ? 'within-fold · bulk ensemble mean' : 'MC-dropout · Platt-calibrated'}`
+                : 'spread not measured'}</div>
           <div style="margin-top:0.75rem;display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.65rem;border:1px solid ${longBaseline ? 'rgba(245,166,35,0.35)' : 'rgba(255,255,255,0.10)'};background:${longBaseline ? 'rgba(245,166,35,0.05)' : 'transparent'}">
             <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:${longBaseline ? '#F5A623' : '#8A8FA8'}">
               ${!has(c.baselineDays)
-                ? 'baseline not published for this row'
-                : `${c.baselineDays.toLocaleString()} d baseline${longBaseline ? ' · well-observed targets may score high' : ''}`}
+                ? 'baseline not derivable for this row'
+                : `${Math.round(c.baselineDays).toLocaleString()} d observed span, ${c.baselineSource === 'ephemeris-derived' ? 'ephemeris-derived, whole periods' : 'source not stated'}${longBaseline ? ' · long baselines inflate detectability, so scores are not comparable across very different ones' : ''}`}
             </span>
           </div>
         </div>
@@ -397,14 +399,16 @@ function Vetting(candidateId) {
       <div style="margin-bottom:1.25rem">
         <div class="stat-label" style="margin-bottom:0.25rem">Fold Agreement and Score Spread</div>
         <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8">
-          Five independently trained fold models · MC-dropout σ over 64 stochastic passes
+          ${agree.source === 'bulk'
+            ? 'Five fold models from the bulk scorer · uncalibrated ensemble means, a different measurement from the live score above'
+            : 'Five independently trained fold models, each scored live with MC-dropout'}
         </div>
       </div>
 
       <div class="panel" style="padding:1.75rem 1.75rem 1.25rem">
         <div class="fold-axis">
           <div class="fold-track"></div>
-          <div class="fold-band" style="left:${pct(c.prob - agree.probStd)}%;width:${pct(c.prob + agree.probStd) - pct(c.prob - agree.probStd)}%"></div>
+          ${has(agree.probStd) ? `<div class="fold-band" style="left:${pct(c.prob - agree.probStd)}%;width:${pct(c.prob + agree.probStd) - pct(c.prob - agree.probStd)}%"></div>` : ''}
           <div class="fold-mean" style="left:${pct(c.prob)}%"></div>
           ${agree.folds.map(f => `<div class="fold-dot" style="left:${pct(f.score)}%" title="fold ${f.fold} · ${f.score.toFixed(3)}"></div>`).join('')}
           <!-- The end ticks sit on the axis ends, and .fold-tick centres itself
@@ -418,18 +422,30 @@ function Vetting(candidateId) {
         <div style="display:flex;gap:1.75rem;flex-wrap:wrap;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.06)">
           <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:13px;height:13px;border-radius:50%;border:1px solid #4DFFD2;background:rgba(5,6,8,0.9)"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">per_fold score</span></div>
           <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:1px;height:14px;background:#4DFFD2;box-shadow:0 0 8px rgba(77,255,210,0.7);margin:0 6px"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">ensemble mean</span></div>
-          <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:14px;height:10px;background:rgba(77,255,210,0.12);border-left:1px solid rgba(77,255,210,0.3);border-right:1px solid rgba(77,255,210,0.3)"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">± prob_std</span></div>
+          <div style="display:flex;align-items:center;gap:0.45rem"><div style="width:14px;height:10px;background:rgba(77,255,210,0.12);border-left:1px solid rgba(77,255,210,0.3);border-right:1px solid rgba(77,255,210,0.3)"></div><span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">± σ</span></div>
         </div>
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:0;border:1px solid rgba(255,255,255,0.08);border-top:none">
-        ${[
-          { k:'Calibrated score', v:!has(c.prob) ? '—' : c.prob.toFixed(3), accent:true },
-          { k:'MC-dropout σ',     v:agree.probStd.toFixed(4) },
-          { k:'Fold σ',           v:agree.foldStd.toFixed(4) },
-          { k:'Fold range',       v:`${agree.range[0].toFixed(3)} – ${agree.range[1].toFixed(3)}` },
-        ].map((m, i) => `
-          <div style="padding:1.1rem 1.25rem;border-right:${i < 3 ? '1px solid rgba(255,255,255,0.08)' : 'none'};background:rgba(255,255,255,0.01)">
+        ${(() => {
+          /* Two spreads, named for what each is about rather than both called
+             sigma. Within-fold is the model's own uncertainty on this target;
+             across-fold is how much the answer depended on which split scored
+             it. The live score's prob_std is the TOTAL of the two, so it is
+             labelled differently from the bulk row's pure within-fold figure. */
+          const tiles = [
+            { k:'Calibrated score', v:!has(c.prob) ? '—' : c.prob.toFixed(3), accent:true },
+            { k: agree.source === 'bulk' ? 'Within-fold σ' : 'Total σ (MC + fold)',
+              v: has(agree.probStd) ? agree.probStd.toFixed(4) : 'not measured' },
+            { k:'Across-fold σ', v: has(agree.foldStd) ? agree.foldStd.toFixed(4) : 'not measured' },
+            { k:'Fold range', v:`${agree.range[0].toFixed(3)} – ${agree.range[1].toFixed(3)}` },
+          ];
+          if (has(agree.p10) && has(agree.p90)) {
+            tiles.push({ k:'MC 10th–90th pct', v:`${agree.p10.toFixed(3)} – ${agree.p90.toFixed(3)}` });
+          }
+          return tiles;
+        })().map((m, i, all) => `
+          <div style="padding:1.1rem 1.25rem;border-right:${i < all.length - 1 ? '1px solid rgba(255,255,255,0.08)' : 'none'};background:rgba(255,255,255,0.01)">
             <div class="stat-label" style="margin-bottom:0.35rem">${m.k}</div>
             <div class="stat-value" style="font-size:1.05rem;color:${m.accent ? '#4DFFD2' : '#F0EEE8'}">${m.v}</div>
           </div>`).join('')}
@@ -994,13 +1010,13 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
 }
 
 /* ── UPLOAD ──────────────────────────────────────────────── */
-const UPLOAD_MODES = [
-  { key:'tic',         label:'TIC / KIC ID',       live:true },
-  { key:'file',        label:'Upload Light Curve', live:false,
-    why:'The scoring API takes a target identifier, not a file. Accepting uploads means running detrending and phase-folding on user photometry, which the service does not do today.' },
-  { key:'coordinates', label:'Star Coordinates',   live:false,
-    why:'Resolving RA/Dec to a TIC needs a cone search against the target catalogue. Not wired up; name the target directly for now.' },
-];
+/* The page offered three ways in and two of them were labelled "coming": a
+   file upload the API cannot take, and a coordinate lookup nothing resolves.
+   Two thirds of a control that does nothing is not a roadmap, it is a page
+   pretending to be larger than it is. The one real path is now the page, and
+   what the service does not do is stated once in prose below rather than sold
+   as a tab. Discovery keeps its page because a whole deferred capability is
+   worth naming; a greyed-out button beside a working one is not.  */
 
 /* ── the scoring loader ───────────────────────────────────
    Six copies of the console's own motif — flat baseline, transit dip, flat
@@ -1052,7 +1068,7 @@ let lastScoreAt = 0;
    limited to one call a minute, so starting again cost another wait. State and
    timers live out here; the page registers a render hook while it is mounted
    and clears it when it is not, and the run carries on either way. */
-const UPLOAD = { mode:'tic', ticId:'', status:'idle', progress:0, stage:0, elapsed:0,
+const UPLOAD = { ticId:'', status:'idle', progress:0, stage:0, elapsed:0,
                  script:0, awaiting:false, waitedOn:0, result:null, error:null,
                  cooldown:0, controller:null, cancelled:false, vettingId:null,
                  answeredAt:0, ephemeris:{}, blsExpected:false };
@@ -1110,13 +1126,6 @@ function Upload() {
         </p>
       </div>
 
-      <div style="display:flex;gap:0;margin-bottom:2rem;border:1px solid rgba(255,255,255,0.1);flex-wrap:wrap" id="up-modes">
-        ${UPLOAD_MODES.map((m, i) => `
-          <button data-m="${m.key}" style="flex:1;min-width:11rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;font-family:'Ailerons';font-size:0.65rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;padding:0.875rem;border:none;border-right:${i < UPLOAD_MODES.length - 1 ? '1px solid rgba(255,255,255,0.1)' : 'none'};transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease">
-            ${m.label}${m.live ? '' : '<span class="tag-chip tag-soon">coming</span>'}
-          </button>`).join('')}
-      </div>
-
       <div id="up-input"></div>
       <div id="up-action"></div>
 
@@ -1143,25 +1152,7 @@ function Upload() {
   const inputEl = document.getElementById('up-input');
   const actionEl = document.getElementById('up-action');
 
-  const paintModes = () => {
-    document.querySelectorAll('#up-modes button').forEach(b => {
-      const m = UPLOAD_MODES.find(x => x.key === b.dataset.m);
-      const on = b.dataset.m === state.mode;
-      b.style.background = on ? (m.live ? 'rgba(77,255,210,0.08)' : 'rgba(255,255,255,0.03)') : 'transparent';
-      b.style.color = on ? (m.live ? '#4DFFD2' : 'rgba(240,238,232,0.7)') : '#8A8FA8';
-    });
-  };
-
   const paintInput = () => {
-    const m = UPLOAD_MODES.find(x => x.key === state.mode);
-    if (!m.live) {
-      inputEl.innerHTML = `
-        <div class="soon" style="margin-bottom:1.5rem">
-          <div class="h">${m.label} is not wired to the API <span class="tag-chip tag-soon" style="margin-left:0.4rem">coming</span></div>
-          <div class="d">${esc(m.why)}</div>
-        </div>`;
-      return;
-    }
     inputEl.innerHTML = `
       <div style="margin-bottom:1.5rem">
         <label for="up-tic" style="font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;display:block;margin-bottom:0.5rem">TIC ID or KIC ID</label>
@@ -1188,9 +1179,6 @@ function Upload() {
 
   const paintAction = () => {
     if (state.status !== 'running') stopScoreLoader();
-    const m = UPLOAD_MODES.find(x => x.key === state.mode);
-    if (!m.live) { actionEl.innerHTML = ''; return; }
-
     if (state.status === 'ratelimited') {
       actionEl.innerHTML = `
         <div class="note" style="border-color:rgba(245,166,35,0.35)">
@@ -1458,13 +1446,9 @@ function Upload() {
     }, 220);
   };
 
-  document.querySelectorAll('#up-modes button').forEach(b => b.addEventListener('click', () => {
-    state.mode = b.dataset.m; paintModes(); paintInput(); paintAction();
-  }));
-
   // Painting resumes from wherever the run got to while the page was away.
   uploadRender = paintAction;
-  paintModes(); paintInput(); paintAction();
+  paintInput(); paintAction();
 }
 
 /* The live equivalent of mockScore: the same shape, filled from /score.
