@@ -695,8 +695,16 @@ const normInv = p => {
   return (lo + hi) / 2;
 };
 
-/* binormal ROC with the mission's measured AUC */
-function rocFor(auc) {
+/* The measured curve where /model serves one, and only then the binormal
+   stand-in. A drawn curve reads as a measurement whatever the caption says, so
+   the two cases are kept apart and the chart says which it is showing. */
+function rocFor(m) {
+  return Array.isArray(m.roc) && m.roc.length ? m.roc : binormalRoc(m.auc);
+}
+
+/* Binormal ROC with the mission's measured AUC: the family of curves that AUC
+   implies, not this run's. Used only where no per-threshold points are served. */
+function binormalRoc(auc) {
   if (!has(auc) || !Number.isFinite(auc)) return [{ fpr: 0, tpr: 0 }, { fpr: 1, tpr: 1 }];
   const a = Math.SQRT2 * normInv(auc);
   const pts = [{ fpr: 0, tpr: 0 }];
@@ -733,20 +741,19 @@ function calibrationFor(m) {
   }));
 }
 
-/* Prototype-only. The matrix needs the number of positives in the slice and
-   no endpoint carries it — /model reports n and recall, never the label
-   balance behind them — so these three constants turned one assumption into
-   four measured-looking counts and three derived metrics. Live, the panel
-   reports the cells as not measured instead. */
-const POSITIVE_RATE = { TESS: 0.493, Kepler: 0.538, K2: 0.524 };
+/* The four cells as /model measured them, or nothing.
 
+   This used to assume a positive rate per mission and derive four
+   measured-looking counts from it, which is why it refused to run live at all.
+   /model now cuts the matrix at the same threshold it cuts the published
+   recall at, so the cells and the recall beside them are one measurement.
+
+   All four are required together: a matrix with a hole in it cannot be read,
+   and filling the hole is how the assumption got in the first time. */
 function confusionFor(m) {
-  if (API.mode === 'live') return null;
-  const P = Math.round(m.n * (POSITIVE_RATE[m.mission] ?? 0.5));
-  const N = m.n - P;
-  const fp = Math.round(N * 0.01);            // the 1% FPR operating point
-  const tp = Math.round(P * m.recall);
-  return { tp, fp, fn: P - tp, tn: N - fp };
+  const cells = [m.tp, m.fp, m.fn, m.tn];
+  if (!cells.every(v => has(v) && Number.isFinite(v))) return null;
+  return { tp: m.tp, fp: m.fp, fn: m.fn, tn: m.tn };
 }
 
 function metricBlock(label, value, err, accent) {
@@ -882,10 +889,12 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
     clearCharts();
     const m = SERVED.missions.find(x => x.mission === mission);
     const cm = confusionFor(m);
-    // Recall is served; precision and F1 need the cells, which are not.
-    const precision = cm ? cm.tp / (cm.tp + cm.fp) : null;
-    const recall = cm ? cm.tp / (cm.tp + cm.fn) : (has(m.recall) ? m.recall : null);
-    const f1 = cm ? 2 * precision * recall / (precision + recall) : null;
+    // All three are served, with their own fold spreads. They were derived
+    // here from assumed cells, and their error bars were the recall's scaled
+    // by 0.6 and 0.7 — two numbers on screen that nothing had measured.
+    const precision = has(m.precision) ? m.precision : null;
+    const recall = has(m.recall) ? m.recall : null;
+    const f1 = has(m.f1) ? m.f1 : null;
 
     detail.innerHTML = `
       ${m.evaluation === 'zero-shot' ? `
@@ -898,11 +907,9 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.5rem">${m.mission} ROC Curve</div>
           <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:0.35rem">AUC = ${has(m.auc) ? m.auc.toFixed(4) : '—'} ± ${has(m.aucErr) ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
-          <!-- The AUC is measured; the curve is not. No endpoint carries the
-               per-threshold points, so this is the binormal curve that the
-               measured AUC implies, and it says so rather than passing a model
-               off as a measurement. -->
-          <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:rgba(138,143,168,0.75);margin-bottom:1rem">binormal curve implied by the AUC · per-threshold points not measured</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:rgba(138,143,168,0.75);margin-bottom:1rem">${Array.isArray(m.roc) && m.roc.length
+            ? `${m.roc.length} measured thresholds${has(m.fprActual) ? ` · shortlist cut marked at ${(m.fprActual * 100).toFixed(2)}% FPR` : ''}`
+            : 'binormal curve implied by the AUC · per-threshold points not measured'}</div>
           <div class="chart-wrap" id="chart-roc"></div>
         </div>
         <div class="panel" style="padding:1.5rem">
@@ -915,7 +922,9 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
       <div class="cm-grid" style="display:grid;grid-template-columns:1fr 2fr;gap:2rem">
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.35rem">${m.mission} Confusion Matrix</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-bottom:1.25rem">at the 1% FPR operating point · ${m.evaluation}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-bottom:1.25rem">${cm && has(m.fprActual)
+            ? `at the shortlist cut, score &gt; ${m.threshold.toFixed(4)}, ${(m.fprActual * 100).toFixed(2)}% of ${(m.n - m.nPositive).toLocaleString()} false positives · ${m.evaluation}`
+            : `at the 1% FPR operating point · ${m.evaluation}`}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,0.08)">
             ${[
               { label:'True Positive',  value:cm && cm.tp, color:'#4DFFD2' },
@@ -931,15 +940,15 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
           ${cm ? '' : `
           <div class="note" style="margin-top:1.25rem">
             <span class="ico">▲</span>
-            <span class="txt">The cells need the number of real planets in the ${esc(m.mission)} slice, and no endpoint reports it: /model gives n and recall, not the label balance behind them.</span>
+            <span class="txt">This run reports no confusion matrix for the ${esc(m.mission)} slice. /model cuts one wherever the slice has both classes, so an absent matrix means the slice has only one.</span>
           </div>`}
         </div>
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:1.5rem">${m.mission} Derived Metrics</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:2rem">
-            ${metricBlock('Precision', precision, cm ? m.recallErr * 0.6 : null, false)}
+            ${metricBlock('Precision', precision, m.precisionErr, false)}
             ${metricBlock('Recall', recall, m.recallErr, false)}
-            ${metricBlock('F1', f1, cm ? m.recallErr * 0.7 : null, false)}
+            ${metricBlock('F1', f1, m.f1Err, false)}
           </div>
           <div style="font-family:'Inter';font-size:0.75rem;line-height:1.6;color:rgba(240,238,232,0.5);margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.06)">
             Intervals are the ±1σ spread over the five folds. Recall @ 1% FPR is the promotion criterion: it is what "would this candidate reach the shortlist" actually means, and it is the number that rejected all five architecture arms.
@@ -948,7 +957,7 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
       </div>`;
 
     renderChart(document.getElementById('chart-roc'), {
-      height: 260, data: rocFor(m.auc), xKey: 'fpr', fontSize: 9,
+      height: 260, data: rocFor(m), xKey: 'fpr', fontSize: 9,
       margin: { top: 5, right: 10, bottom: 40, left: 52 },
       xLabel: 'False Positive Rate', yLabel: 'True Positive Rate',
       xDomain: [0, 1], yDomain: () => [0, 1],
