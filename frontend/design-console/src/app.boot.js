@@ -17,6 +17,21 @@
 let resolveBoot;
 const bootReady = new Promise(r => { resolveBoot = r; });
 
+/* Resolved by app.boot's own hydrate() call at the bottom of this file. The
+   overlay waits on it, because the page underneath cannot render until the API
+   has answered — route() is called from that same .then().
+
+   Without this the two were independent: the animation handed over on a fixed
+   4 s timer while hydrate waited on four calls to a scale-to-zero Fly machine,
+   so a cold service left the console showing an empty starfield between the
+   overlay leaving and the content arriving. Measured on the live site
+   2026-09-05: dial complete at 2 s, blank page at 6 s, content at about 8 s.
+   That is the state a first-time visitor reads as broken, and it is the exact
+   thing this console's own README means by "never gated on a warm model" —
+   the overlay is what covers the wait, so it has to still be there. */
+let resolveHydrated;
+const hydrated = new Promise(r => { resolveHydrated = r; });
+
 (function boot() {
   const root = document.getElementById('boot');
   const statusEl = document.getElementById('boot-status');
@@ -35,6 +50,16 @@ const bootReady = new Promise(r => { resolveBoot = r; });
   const track = a => { running.push(a); return a; };
 
   let done = false;
+  /* Hand over once the animation has run AND the data is in. `capped` skips the
+     wait: the 9 s backstop must remove the overlay whatever hydrate is doing,
+     since an overlay that never lifts is worse than a page that arrives thin.
+     hydrate() never rejects — an unreachable service resolves to prototype
+     mode — so this cannot deadlock on an error path. */
+  const handOver = (capped = false) => {
+    if (capped) return finish();
+    return hydrated.then(finish);
+  };
+
   const finish = () => {
     if (done) return;
     done = true;
@@ -45,8 +70,8 @@ const bootReady = new Promise(r => { resolveBoot = r; });
     resolveBoot();
   };
 
-  if (!HOLD) setTimeout(finish, 9000);   // the console must never stay behind the overlay
-  if (REDUCED) { finish(); return; }
+  if (!HOLD) setTimeout(() => handOver(true), 9000);   // the console must never stay behind the overlay
+  if (REDUCED) { handOver(); return; }
 
   const C = 180;                          // centre of the 360×360 viewBox
 
@@ -126,7 +151,7 @@ const bootReady = new Promise(r => { resolveBoot = r; });
       fillEl.style.width = (p * 100).toFixed(2) + '%';
       setStage(Math.min(STAGES.length - 1, Math.floor(p * STAGES.length)));
     },
-    onComplete: finish,
+    onComplete: () => handOver(),
   })
     // chrome
     .add('.boot-corner', { opacity: [0, 1], duration: 500, delay: stagger(70) }, 0)
@@ -196,4 +221,6 @@ hydrate().then(({ mode, notes }) => {
   if (corner) corner.textContent = mode === 'live' ? SERVED.runId : 'prototype data';
   mountTicker();
   route();
+  // Only now is there a page to reveal, so the overlay may lift.
+  resolveHydrated();
 });
