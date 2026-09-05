@@ -21,6 +21,16 @@ is moved verbatim from `roadmap.md` §6 and frozen.
 | 2026-09-04 | The Phase 1 arms run once, from code pinned at `d93a1a0`, and their reading closes the branch line either way | `PLAN.md` step 4 |
 | 2026-09-04 | The React console (`frontend/src`) is deleted; `frontend/design-console` is the console | PR #2 |
 | 2026-09-05 | **The branch line is closed in writing.** Phase 1 falsified the last standing explanation for stage 9's null, so no third stamp variant is commissioned and no further branch architecture work is scheduled. `ca906040` stays served | [phase 1 result](experiments/phase-1-result.md) |
+| 2026-09-05 | The ai-slop-detector CI gate is removed: ruff already hard-fails on all three of its critical patterns (`B006`, `E722`, `SIM105`), so its one project-specific justification is redundant, and it has never fired | [#26](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/26) |
+| 2026-09-05 | `AGENTS.md` is renamed to `docs/web-interface-guidelines.md` and stays tracked: the console README's "nine gaps closed" claim is only checkable if the standard is in the repo, and the root filename otherwise misdirects tooling that reads `AGENTS.md` as project instructions | [#27](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/27) |
+| 2026-09-05 | The mypy pre-commit hook is kept. There is no 78-error baseline on the hook — it passes clean on 77 files; the 78 belong to `make type` under a different mypy version. Advisory-CI-only was rejected as strictly worse | [#28](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/28) |
+| 2026-09-05 | `mlflow.db` is kept and the 912 orphaned `mlruns/` directories are deleted: the database is the only record of the served model's git SHA and 114 hyperparameters, and the orphans are unreachable by any run record or code path | [#29](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/29) |
+| 2026-09-05 | The `models/cv/` run directories are kept, not archived: they are gitignored and invisible to a reviewer, only 201 MB is genuinely uncited, and moving bytes somewhere the repo does not describe would manufacture a second instance of the #31 problem | [#30](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/30) |
+| 2026-09-05 | **The on-disk view-set bytes are `dvc add`ed and pushed.** The pointers name a 5,423-row 301/31 set the record calls already dead; the on-disk bytes are the 5,426-row 2001/201 set stages 8 and 10.5 trained on, and they exist in no cache. `dvc checkout` would have destroyed them | [#31](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/31) |
+| 2026-09-05 | Stage 7i's limit 1 is stated as a limitation, not repaired. Changing a pre-registered instrument after it blocks a prediction is re-specification (rule 6), and the branch line is closed, so a measurable prediction 1 would answer a shelved question | [#32](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/32) |
+| 2026-09-05 | W7 is accepted as unexplained **and recorded as resolved by the branch closure**: the +0.1446 is a branch-model deficit, the champion scores 0.9852 on that cell, and Kepler is 0% of the served population. Readiness exception A closes | [#33](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/33) |
+| 2026-09-05 | Seed 45 is skipped and not revisited: no recorded conclusion depends on a fourth draw, and n=3 to n=4 does not retire the thin-floor limitation — roughly ten draws would, which is research, and the research is frozen | [#34](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/34) |
+| 2026-09-05 | Discovery is kept as a stated deferral; Upload's two non-live modes are removed with their `why` copy folded into the endpoint grid; the Branch Evidence tab stops claiming "in progress" | [#35](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/35) |
 
 ### The branch line, closed 2026-09-05
 
@@ -50,20 +60,46 @@ unrunnable by its own pre-registered limit (#32). Stage 7ii's attribution and
 stage 11's serving parity are deferred (#40, #41), and they only matter if the
 branch line is ever reopened.
 
+### The ten open decisions, closed 2026-09-05
+
+Taken in one session against a single test — does this help a reviewer, help the
+report, or reduce risk — on the ground that the science is frozen and steps 5 to
+8 are all that remain. Every claim resting on disk state, file sizes or a past
+measurement was re-checked rather than repeated, and **four issue bodies turned
+out to be wrong**:
+
+- **#30** stated 862 MB across 30 run directories with 8 cited. `models/cv` is
+  **699 MB** across **27** directories plus 3 `.dvc` files, **17 of 27** are
+  cited by name, and only **201 MB** has never been cited. It also placed the
+  stage 9 arms in `models/cv`; they are in `models/stage9/`, deliberately.
+- **#31** described the drift as costing stage 10.5's bytes. The pointers were
+  written on 2026-08-05 and never updated, and name a **5,423-row 301/31** view
+  set the record already calls superseded and dead. The on-disk bytes are
+  **5,426 rows at 2001/201**, matching the `view_shapes` that stages 8 and 10.5
+  recorded, and they exist in no cache. The options were never symmetric.
+- **#28** called 78 errors a baseline of the pre-commit hook. The hook passes
+  clean on 77 files. The 78 are `make type` in the conda env under mypy 2.2.0
+  against the hook's pinned 1.10.1, and 76 of them are `import-untyped` from
+  installed-but-unstubbed third-party packages.
+- **#35** scoped the question to Discovery and Upload. The console carries
+  **seven** unbuilt markers, and the one that matters most is neither: the
+  Branch Evidence tab is chipped "in progress" for a line closed on 2026-09-05.
+
+Two findings were out of scope for the decisions they surfaced in and are
+recorded as their own issues rather than folded in: the mypy version skew and
+the inert `disallow_untyped_defs` override (from #28), and roughly **3.0 GB of
+shard sets backing stage 9, Phase 1, Phase 1a and stage 8's synthetic-negative
+arm that are gitignored, carry no DVC pointer and exist on one disk** (from
+#30).
+
+The register in `known-limits.md` is unchanged by this session: these are
+decisions, not the work they authorise, and the DVC drift remains a real carried
+limit until the `dvc add` and `dvc push` land.
+
 ## Open
 
-| decision | issue | options | while untaken |
-|---|---|---|---|
-| The ai-slop-detector CI gate, a third-party scanner that scores code structure against a tuned threshold (`.slopconfig.yaml`, Makefile targets) | #26 | keep · remove | kept |
-| `AGENTS.md` at the repo root, a generic web-interface guideline sheet for assistants | #27 | move under the ignored `.agents/` · delete · keep | kept |
-| The mypy pre-commit hook with its 78-error baseline | #28 | keep · advisory CI job only | kept |
-| MLflow tracking (`mlruns/`, 1.7 GB, and `mlflow.db`) | #29 | keep · drop | kept |
-| 22 of 30 `models/cv/` run directories no result cites | #30 | archive to R2 or external disk · keep | kept |
-| The DVC drift on the three view-set artefacts | #31 | `dvc add` the on-disk bytes · `dvc checkout` the pointers and record that stage 10.5's bytes are gone | untouched, stated in `known-limits.md` |
-| Stage 7i's limit 1: the control-arm harness zeroes every DV input, which makes stage 9's primary test unrunnable; feeding real DV stamps would make it runnable at the cost of changing a pre-registered instrument | #32 | change the harness, which is re-specification · state as a limit | stated as a limit |
-| W7, the narrow-span high-count Kepler cell where three architectures lose +0.1446 to the champion | #33 | investigate · accept unexplained | accepted, stated |
-| Seed 45, a fourth Phase 1a draw (about 3 h) that would firm up the three-draw floors | #34 | run · skip | skipped |
-| The Discovery tab and Upload's unbuilt tiles on the console | #35 | keep as stated deferrals · hide | kept as deferrals |
+None. The ten decisions that stood here were taken on 2026-09-05 and are
+recorded above; issues [#26–#35](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues) are closed.
 
 ## Considered and deferred (frozen)
 
