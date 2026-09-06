@@ -113,8 +113,9 @@ serving.
 Labels are pulled from the NASA Exoplanet Archive over its TAP service:
 confirmed planets and false positives from TESS, Kepler and K2, plus the
 unvetted candidate list from ExoFOP. Kepler negatives are restricted to
-DR25-certified false positives, so the negative class is genuinely certain
-rather than merely unconfirmed.
+DR25 FALSE POSITIVE KOIs with a Robovetter disposition score below 0.5 — a
+reconstruction of the retired Certified False Positive criterion, not that table
+itself.
 
 Sources, tables and their exact roles are in
 [data_provenance.md](data_provenance.md).

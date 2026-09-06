@@ -71,3 +71,17 @@ frontend:       ## Build the console into frontend/design-console/dist, serve it
 
 up:             ## The API container via Docker (the console is a static build)
 	docker compose up --build
+
+figures:        ## Regenerate docs/figures/ from the promoted run
+	python pipeline/scripts/make_performance_figures.py
+
+report:         ## Render docs/report.md to docs/report.pdf (needs pandoc + xelatex)
+	pandoc docs/report.md -o docs/report.pdf \
+	  --resource-path=docs --pdf-engine=xelatex --number-sections
+	@echo "wrote docs/report.pdf"
+
+ready:          ## Is the project fit to show? Prints LOOKS GOOD or NOT YET
+	python pipeline/scripts/check_showcase_ready.py
+
+ready-live:     ## The same, plus the deployed API and console
+	python pipeline/scripts/check_showcase_ready.py --live
