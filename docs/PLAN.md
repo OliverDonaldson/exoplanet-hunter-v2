@@ -177,7 +177,50 @@ with the floors re-measured after any data change.
 The forward plan as it stood on 2026-08-16, with its costs, is kept verbatim in
 [forward-plan-2026-08-16](experiments/forward-plan-2026-08-16.md).
 
-## 5. Operations
+## 5. Phase 2 — the measurement foundation
+
+Opened 2026-09-07 by a bootstrap of the decision metric. It is the answer to why
+so much of the model-selection record reads "within floor", and it changes what
+the next experiment should be.
+
+**The finding.** TESS recall @1% FPR is cut at the 10th-highest negative score
+(the 8th on `dv_usable`). A paired bootstrap of the Phase 1 contrast gives the
+difference a sampling sd of **0.0437**; twice that is 0.087, the same order as
+the seed floors the record reads against. Three members of one arm, identical
+data and architecture, span 0.1418 to 0.2221. **Any architecture effect below
+about 0.09 on this metric is undetectable at this sample size, whatever is
+trained.** Stage 4's rejections are real at up to 4.8x their floor; most of what
+follows them is underpowered rather than negative, and the gate returning
+UNRESOLVED was the gate saying exactly that. Carried in
+[known-limits.md](known-limits.md); the reasoning is [report.md](report.md) §6.4.
+
+**What follows from it.** Build the instrument before running more models. The
+order below is deliberate: each item is a prerequisite for the one after, and
+nothing here trains a competitive model until item 6.
+
+| # | item | exit criterion | cost |
+|---|---|---|---:|
+| P2.1 | **Power analysis, written up as an experiment file.** What effect size is detectable at what n and member count, for each candidate metric. Decide the promotion metric. | An experiment file naming the metric the gate will use and the minimum detectable effect at the current n | ≈4 h |
+| P2.2 | **The gate reads a confidence interval.** Paired bootstrap on the contrast, not a seed floor alone. | `promotion_gate.py` emits a CI on the contrast; the three verdicts are decided against it; existing recorded verdicts re-checked and any that change are noted, not rewritten | ≈6 h |
+| P2.3 | **Score the random forest.** `handcrafted.py::extract_features`, 14 features, the same folds and the same protocol. | [report.md](report.md) §4 row 1 carries a number instead of a dash | ≈2 h |
+| P2.4 | **Scale injection-recovery.** 40 hosts to a few hundred, with the null-injection floor reported beside every completeness figure. | A completeness curve with se < 0.02 per S/N bin, and the S/N = 0 floor printed on the same axes | ≈3 h + compute |
+| P2.5 | **Preprocessing and leakage audit against the new instrument.** | Every preprocessing step verified on cases with a known answer; a leakage probe that would fail if host grouping broke | ≈6 h |
+| P2.6 | **One full clean run.** All 13 aux dims, the current shard set, at least 5 members per fold, both architectures, one protocol, one report. | Both architectures compared on P2.1's metric with a margin read against P2.2's interval; the answer means something either way | ≈2 h + 12–20 h compute |
+
+**The metric recommendation, for P2.1 to accept or reject.** Partial AUC over
+FPR in [0, 0.1] — every row in the follow-up-relevant region rather than one
+crossing point — plus injection completeness above the null floor. Recall @1%
+FPR stays reported, demoted from gating. ROC-AUC's bootstrap sd on the same rows
+is 0.0059, seven times more stable than recall @1% FPR's 0.0410; the point is not
+to gate on AUC but to stop gating on the least stable statistic available.
+
+**Two re-scopings that fall out of this.** The weekly refresh is drift detection
+and calibration monitoring, not a promotion path — it has never been able to
+promote and should say so. And the eventual discovery goal is served by the same
+work: injection-recovery is completeness as a function of depth and period, which
+is what a search has to report.
+
+## 6. Operations
 
 - The weekly refresh runs from this working tree every Saturday at 09:00
   (launchd). It runs whatever branch is checked out, so the tree stays on a

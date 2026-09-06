@@ -31,10 +31,14 @@
 
 @article{valizadegan2025,
   author  = {Valizadegan, Hamed and Martinho, Miguel J. S. and others},
-  title   = {{ExoMiner++}: Enhanced Transit Classification with Difference
-             Imaging and Unfolded Views},
+  title   = {{ExoMiner++}: Enhanced Transit Classification and a New Vetting
+             Catalog for 2-minute {TESS} Data},
   journal = {The Astronomical Journal},
+  volume  = {170},
+  number  = {5},
+  pages   = {287},
   year    = {2025},
+  doi     = {10.3847/1538-3881/ae03a4},
   note    = {Difference-image and unfolded-transit inputs; the source of the
              outstanding branch work in the roadmap.}
 }
@@ -53,7 +57,8 @@
 
 @article{giacalone2021,
   author  = {Giacalone, Steven and Dressing, Courtney D. and others},
-  title   = {Validation of 50 New Exoplanets from {K2} with {TRICERATOPS}},
+  title   = {Vetting of 384 {TESS} Objects of Interest with {TRICERATOPS} and
+             Statistical Validation of 12 Planet Candidates},
   journal = {The Astronomical Journal},
   volume  = {161},
   number  = {1},
@@ -135,4 +140,40 @@
   howpublished = {\url{https://exofop.ipac.caltech.edu/tess}},
   note         = {TOI and CTOI candidate tables; enrichment only, not the label
                   authority.}
+}
+
+@inproceedings{hu2018,
+  author    = {Hu, Jie and Shen, Li and Sun, Gang},
+  title     = {Squeeze-and-Excitation Networks},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and
+               Pattern Recognition (CVPR)},
+  pages     = {7132--7141},
+  year      = {2018},
+  doi       = {10.1109/CVPR.2018.00745},
+  note      = {The channel-attention block in the served dual-view model, placed
+               after each conv block and before pooling.}
+}
+
+@inproceedings{guo2017,
+  author    = {Guo, Chuan and Pleiss, Geoff and Sun, Yu and Weinberger, Kilian Q.},
+  title     = {On Calibration of Modern Neural Networks},
+  booktitle = {Proceedings of the 34th International Conference on Machine
+               Learning (ICML)},
+  pages     = {1321--1330},
+  year      = {2017},
+  note      = {Temperature scaling. Cited to say why this project does not use
+               it: one parameter on the logit, no bias term, so it cannot shift
+               the boundary under distribution shift.}
+}
+
+@techreport{bryson2015,
+  author      = {Bryson, Stephen T. and Abdul-Masih, Michael and Batalha, Natalie
+                 and others},
+  title       = {The {Kepler} Certified False Positive Table},
+  institution = {NASA Ames Research Center},
+  number      = {KSCI-19093-003},
+  year        = {2015},
+  note        = {The FPWG product this project's Kepler negative class is a
+                 reconstruction of, not an instance of. The table is no longer
+                 served by the archive.}
 }

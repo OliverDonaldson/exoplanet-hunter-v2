@@ -15,6 +15,8 @@ that measured it.
 | **A floor belongs to the architecture and run it was measured on** | Stage 6 and Phase 1a measured branch-model floors; 4.1a measured the dual-view floor (recall 0.0733). A branch floor read under dual-view numbers is a category error, and the two constants the API serves today are exactly that | [stage 6](experiments/stage-06-recall-floor.md), [4.1a](experiments/refresh-gate-calibration-4-1.md), `PLAN.md` step 4 |
 | **Stage 9's primary test is unrunnable on its own instrument** | The stage 7i harness zeroes every DV input by its pre-registered limit 1, so the difference branch contributes exactly 0.0 on control-arm hosts and host-AUC cannot measure it | [stage 9 result](experiments/stage-09-difference-image.md) |
 | **W7, the narrow-span high-count Kepler cell, is unexplained** | +0.1446, unmoved by two bin resolutions, four input fixes, tied odd/even weights and a shared tower. Carried as a stated limitation, not investigated; decision #33 | [stage 4, 3.2l](experiments/stage-04-branch-runs.md) |
+| **There is no classical baseline** | `models/baseline_rf.py` and `conf/model/random_forest.yaml` exist with a documented rationale, but no scored cross-validated result for them exists in this repository: `mlflow.db` holds 197 runs and every one that records a model name records `cnn_dualview`. The CNN's advantage over classical ML is assumed here, not measured | `mlflow.db`, 2026-09-07; [report §4 row 1](report.md) |
+| **The decision metric is an eight-to-ten row statistic** | TESS recall @1% FPR is cut at the 10th-highest negative score (8th on `dv_usable`), so its paired sampling sd is **0.0437** — 2·sd ≈ 0.087, the same order as the seed floors the record reads against. Three members of one arm span 0.1418–0.2221 on identical data. Any architecture effect below ~0.09 on this metric is undetectable at this sample size, however many models are trained | paired bootstrap on `models/phase1/arm-{c,d}-*/predictions.parquet`, 2026-09-07 |
 | **Three view-set artefacts drift from their DVC pointers** | `viewset.npz`, `viewset_tfrecords` and `viewset_scalars.parquet` on disk differ from what `dvc pull` returns; stage 10.5 trained on the on-disk bytes. Open decision #31 | `dvc status`, 2026-09-04; issue #31 |
 
 ## The weakness register (frozen)
@@ -65,7 +67,7 @@ under-observed ones that may deserve it. No architecture can reach it.
 |---|---|---|---|
 | **W4** | **A branch model cannot be scored from a light curve at all** | `TargetScorer` builds views with `preprocess.views`, not `preprocess.viewset`; `ScoringEnsemble.from_registry` loads `cnn_dualview.keras` | **stage 11** |
 | **W5** | **No score can be explained** | per-branch contributions do not exist; the UI has nothing to display | **stage 11** |
-| **W6** | **`score_std` is computed and thrown away** | not persisted, not in the catalogue, not surfaced per candidate — and it is a real differentiator (ExoMiner concedes theirs "is NOT a probability") | **finishing touches** |
+| **W6** | **`score_std` is computed and thrown away** | not persisted, not in the catalogue, not surfaced per candidate — and it is a real differentiator (ExoMiner concedes theirs "is NOT a probability" — their code, `vetting_tce_catalog_exominer_dash_app.py:81`, not the paper) | **finishing touches** |
 
 #### 1d.3 Tier 3 — unexplained, and currently unowned
 

@@ -139,11 +139,23 @@ Label rules:
 | FP, FA (TESS); FALSE POSITIVE, REFUTED (Kepler, K2) | 0 |
 | PC, APC, CANDIDATE | held out — never trained on, never evaluated on |
 
-Kepler negatives are restricted to DR25-certified false positives
-(`koi_score < 0.5`), so a negative means *demonstrated not to be a planet*
-rather than *not yet confirmed*. Without that restriction the negative class
-would be contaminated with undiscovered planets and every recall figure in this
-report would be optimistic by an unknown amount.
+Kepler negatives are restricted to DR25 FALSE POSITIVE KOIs with a Robovetter
+disposition score below 0.5 — a majority false-positive vote across the
+Robovetter's perturbed runs [@thompson2018]. **This is not the Kepler Certified
+False Positive table** [@bryson2015], which rested on Follow-up Observation
+Program working-group vetting against follow-up data; that table is no longer
+served by the archive over TAP or its retired legacy API, so
+`data/catalog.py::_query_certified_fp` reconstructs the criterion from the DR25
+KOI table instead. About 79% of the bare cumulative false positives pass it; the
+rest are dropped as disputed or unvetted.
+
+So a negative here means *the Robovetter rejected it consistently under
+perturbation* — stronger than "not yet confirmed", weaker than "certified by the
+FPWG against follow-up observations". That distinction matters because without
+any such restriction the negative class would be contaminated with undiscovered
+planets and every recall figure in this report would be optimistic by an unknown
+amount; with the reconstruction it is contaminated only to the extent the
+Robovetter is wrong. See [`data_provenance.md`](data_provenance.md).
 
 **The served model saw no K2 rows.** Of the 5,812 labelled rows, 4,818 carry an
 out-of-fold prediction from the served run; joining those predictions to the
@@ -259,13 +271,18 @@ classical ML is *assumed* in this project, not measured.
 
 ### Row 2 — the model that shipped
 
-A dual-view 1-D CNN: two convolutional towers, one per view, concatenated with
-the auxiliary vector and passed through a dense head, with Squeeze-and-Excitation
-channel attention and residual late fusion. Full evaluation in §6.
+A dual-view 1-D CNN after Shallue & Vanderburg [@shallue2018]: two convolutional
+towers, one per view, concatenated with the auxiliary vector and passed through a
+dense head, with Squeeze-and-Excitation channel attention [@hu2018] placed after
+each conv block and before pooling, multi-head attention pooling, and a residual
+late-fusion head. Full evaluation in §6.
 
-Platt scaling rather than temperature scaling, for a measured reason: temperature
-has no bias term and so cannot correct a distribution shift, which cost a 0.136
-ECE regression before it was diagnosed and fixed.
+Platt scaling [@platt1999] rather than temperature scaling [@guo2017], for a
+measured reason: temperature is a single parameter applied to the logit and has
+no bias term, so it cannot shift the decision boundary under a distribution
+shift. Platt's affine form can. Both are rank-preserving, so neither changes
+AUC — the difference is entirely in calibration, and using the wrong one cost a
+0.136 ECE regression before it was diagnosed.
 
 ### Rows 3–4 — the branch model, and why more capacity did not save it
 
@@ -492,6 +509,23 @@ cut the model makes 417 positive calls of which 406 are right — but there are
 they were equally valuable; under a fixed follow-up budget they are not. F1 is
 reported for completeness and is not a promotion criterion.
 
+**The decision metric is an eight-to-ten row statistic, and that governs how
+every margin in §4 should be read.** At a 1% false-positive rate on 1,067 TESS
+negatives the threshold is the 10th-highest negative score; on the Phase 1
+`dv_usable` population it is the 8th. A paired bootstrap of the Phase 1 contrast
+gives a sampling sd of **0.0437** for the difference, so twice that — 0.087 — is
+the same order as the seed floors the record reads margins against. Three
+members of a single arm, identical data and architecture, span 0.1418 to 0.2221.
+
+The consequence is stated plainly: **any architecture effect smaller than about
+0.09 in TESS recall @1% FPR is undetectable at this sample size, however many
+models are trained.** The rejections in §4 rows 3–4 are real, at up to 4.8x their
+floor. The nulls in rows 5–10 are mostly *underpowered*, not *negative*, and the
+promotion gate returning UNRESOLVED rather than REJECT is the gate correctly
+saying so. ROC-AUC, by contrast, has a bootstrap sd of 0.0059 on the same rows —
+seven times more stable — because it uses every row rather than one crossing
+point. Any future comparison on this project should be powered before it is run.
+
 **Calibration is good pooled and mediocre per mission.** Pooled ECE is 0.0121;
 per mission it is 0.0435 (TESS) and 0.0407 (Kepler). Pooling cancels errors of
 opposite sign — TESS is over-confident where Kepler is under-confident — so the
@@ -577,6 +611,9 @@ which makes compute budgeting unreliable for any future sweep.
 
 **Evaluation is out of fold, not on a fresh holdout.** §6.1.
 
+**The decision metric has too little power to settle architecture questions.**
+§6.4. This is the limitation that most shapes what §4 can and cannot claim.
+
 The full register, with each item's evidence and status, is
 [`known-limits.md`](known-limits.md).
 
@@ -638,7 +675,11 @@ Full bibliography in [`references.bib`](references.bib).
 |---|---|
 | `shallue2018` | the dual-view architecture the served model follows |
 | `valizadegan2022`, `valizadegan2025` | ExoMiner and ExoMiner++ — the per-diagnostic branch design §4 is *inspired by*, not a reimplementation of |
-| `twicken2018`, `thompson2018` | Kepler DR25: the certified false-positive population used for the negative class |
+| `thompson2018` | Kepler DR25 and the Robovetter disposition score that defines the negative class (§2.2) |
+| `bryson2015` | the Kepler Certified False Positive table — cited to say what this project's negative class is **not** |
+| `twicken2018` | the DR25 transiting-planet search that produced the KOI population |
+| `hu2018` | Squeeze-and-Excitation channel attention, in the served architecture |
+| `guo2017`, `platt1999` | temperature scaling and Platt scaling — why the calibrator is the affine one |
 | `jenkins2016` | the SPOC pipeline that produces the light curves |
 | `giacalone2021` | the vetting problem as the community frames it |
 | `lightkurve2018` | the library the ingest layer uses |

@@ -1,7 +1,7 @@
 # Roadmap — the ExoMiner-inspired rebuild
 
 Adopted 2026-07-26 after reviewing [NASA's ExoMiner](https://github.com/nasa/ExoMiner)
-(ExoMiner++, TESS paper: [AJ 170, 5](https://iopscience.iop.org/article/10.3847/1538-3881/ae03a4)).
+(ExoMiner++, TESS paper: [AJ 170, 287](https://iopscience.iop.org/article/10.3847/1538-3881/ae03a4)).
 
 We reimplement and credit; we do not vendor their code (NASA NOSA licence).
 

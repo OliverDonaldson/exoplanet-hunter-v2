@@ -83,12 +83,13 @@ for the branch-per-diagnostic restructure: the odd/even, secondary and centroid
 | Disposition | Label | Source |
 |---|---|---|
 | CP, KP (TESS) / CONFIRMED (Kepler, K2) | 1 | NASA Exoplanet Archive |
-| FP, FA (TESS) / FALSE POSITIVE, REFUTED | 0 | archive + DR25 certification |
+| FP, FA (TESS) / FALSE POSITIVE, REFUTED | 0 | archive + DR25 Robovetter score |
 | PC, CANDIDATE | −1, held out | not trained on |
 
-Kepler negatives are restricted to DR25-certified false positives
-(`koi_score < 0.5`), so the negative class is genuinely certain rather than
-merely unconfirmed. See [data_provenance.md](data_provenance.md).
+Kepler negatives are restricted to DR25 FALSE POSITIVE KOIs with a Robovetter
+disposition score below 0.5 — a majority false-positive vote under perturbation.
+That is a reconstruction of, not the same thing as, the Kepler Certified False
+Positive table, which is no longer served by the archive. See [data_provenance.md](data_provenance.md).
 
 ## 2. Architecture
 
