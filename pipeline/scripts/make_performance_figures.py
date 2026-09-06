@@ -46,6 +46,11 @@ def fig_training_curves(db_path: Path, run_id: str, out: Path) -> None:
             (run_id,),
         ).fetchall()
     )
+    # A fold with no epoch series gets no line and no legend entry. ca906040's
+    # fold 0 is exactly that case: it logged its 31 summary metrics and no
+    # per-epoch history, so plotting it unconditionally put a fifth label on a
+    # legend over four curves — a chart claiming a fold it does not show.
+    drawn: set[int] = set()
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
     for name, ax, ylabel in (
         (("loss", "val_loss"), axes[0], "loss"),
@@ -56,12 +61,19 @@ def fig_training_curves(db_path: Path, run_id: str, out: Path) -> None:
             if uuid is None:
                 continue
             train, val = _epoch_series(con, uuid, name[0]), _epoch_series(con, uuid, name[1])
+            if not len(val):
+                continue
+            drawn.add(i)
             ax.plot(train, color=FOLD_COLORS[i], alpha=0.25)
             ax.plot(val, color=FOLD_COLORS[i], label=f"fold {i}")
         ax.set_xlabel("epoch")
         ax.set_ylabel(ylabel)
-    axes[0].set_title("Loss by epoch (faint = train, solid = validation)")
-    axes[1].set_title("ROC-AUC by epoch")
+    missing = sorted(set(range(5)) - drawn)
+    note = f" · no epoch history logged for fold {', '.join(map(str, missing))}" if missing else ""
+    axes[0].set_title(f"Loss by epoch (faint = train, solid = validation){note}", fontsize=10)
+    axes[1].set_title("ROC-AUC by epoch", fontsize=10)
+    if missing:
+        log.warning("no epoch history for folds %s — drawn from %d of 5", missing, len(drawn))
     axes[1].legend(fontsize=8, loc="lower right")
     fig.tight_layout()
     fig.savefig(out, dpi=150)
