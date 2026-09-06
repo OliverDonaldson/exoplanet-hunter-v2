@@ -11,7 +11,9 @@ promotion gate → live FastAPI scoring → the vetting console.
 | [getting-started.md](getting-started.md) | environment, everyday commands, the refresh loop, scoring a target, deploying |
 | [model_specs.md](model_specs.md) | every model input, where it comes from, and the two architectures |
 | [model_pipeline.md](model_pipeline.md) | the end-to-end path, stage by stage |
+| [report.md](report.md) | the write-up: problem, data, preprocessing, model selection, training, evaluation, limitations, reproducibility — rendered to [report.pdf](report.pdf) |
 | [PLAN.md](PLAN.md) | where the project stands and the delivery steps left |
+| [showcase-readiness.md](showcase-readiness.md) | what `make ready` checks before the project is fit to show, and why |
 | [../CLAUDE.md](../CLAUDE.md) | the rules every session works under |
 | [experiments/](experiments/README.md) | the record of what was measured, one frozen file per stage |
 | [known-limits.md](known-limits.md) | the weakness register and the limits every result is read under |

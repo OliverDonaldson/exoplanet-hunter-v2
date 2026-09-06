@@ -39,14 +39,22 @@ and 11. This plan finishes Phase 1 and defers Phases 2 and 3.
 
 | # | step | issue | PR | state | updated |
 |---|---|---|---|---|---|
-| 1 | Land the Phase 1 build | #3 | [#1](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/1) | merged to main, CI green | 2026-09-05 |
-| 2 | Repo hygiene: React console removed, README, commit-msg hook | #4 | [#2](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/2) merged into the stack base by mistake; [#45](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/45) re-targets it to main | open | 2026-09-05 |
-| 3 | Docs restructure: this file, `experiments/`, `known-limits.md`, `decisions.md` | #5 | [#46](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/46), stacked on #45 | open | 2026-09-05 |
-| 4 | Close the science: Phase 1 arms read, branch line closed, API floor fixed | #6 | [#48](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/48) floor, #49 reading | both arms complete and gated UNRESOLVED; Phase 1 falsified and the branch line closed in writing; registry untouched | 2026-09-05 |
-| 5 | Console tells the truth: wrong before empty | #7 | — | not started |  |
-| 6 | Console: empty to filled | #8 | — | not started |  |
-| 7 | The report | #9 | — | not started |  |
+| 1 | Land the Phase 1 build | #3 | [#1](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/1) | merged | 2026-09-05 |
+| 2 | Repo hygiene: React console removed, README, commit-msg hook | #4 | [#2](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/2), re-targeted as [#45](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/45) | merged to main via [#51](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/51) | 2026-09-05 |
+| 3 | Docs restructure: this file, `experiments/`, `known-limits.md`, `decisions.md` | #5 | [#46](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/46) | merged to main via [#51](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/51) | 2026-09-05 |
+| 4 | Close the science: Phase 1 arms read, branch line closed, API floor fixed | #6 | [#48](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/48), [#49](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/49) | merged; both arms gated UNRESOLVED, Phase 1 falsified, branch line closed in writing, `registry.json` untouched | 2026-09-05 |
+| 5 | Console tells the truth: wrong before empty | #7 | [#47](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/47) | merged | 2026-09-05 |
+| 6 | Console: empty to filled | #8 | [#52](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/52), [#53](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/53), [#57](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/57), [#58](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/58), [#59](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/59), [#60](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/60) | merged; API redeployed | 2026-09-06 |
+| 7 | The report | #9 | this branch | in progress | 2026-09-07 |
 | 8 | Peer-review pass | #10 | — | not started |  |
+
+**Is it fit to show?** `make ready` answers that, and nothing else does. It
+checks the documents a reader is entitled to find, that the report PDF is
+current and its figures exist, that no doc link is dead, that the registry names
+a run whose artefacts are on disk, that every step above has landed, that the
+tree is clean, and that ruff, mypy and the fast suite are where they should be.
+It prints **LOOKS GOOD** or **NOT YET** with the failing checks named. Criteria
+and rationale: [showcase-readiness.md](showcase-readiness.md).
 
 Served: `ca906040`, unchanged since 2026-07-19. `models/registry.json` untouched.
 
