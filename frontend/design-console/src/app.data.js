@@ -63,6 +63,10 @@ const SERVED = {
   // prototype run measured these, and the panel that reads them renders
   // nothing rather than inventing three numbers.
   metrics: {},
+  // No prototype curve is measured, and the panel says "no API" rather than
+  // drawing an invented one. Live hydration replaces this with /model/training-history.
+  trainingHistory: null,
+  trainingHistoryError: null,
   missions: [
     { mission:'TESS',   role:'gating',     evaluation:'out-of-fold', n:5156,
       auc:0.9100, aucErr:0.0070, recall:0.6120, recallErr:0.0337, brier:0.0871, brierErr:0.0042, ece:0.0130, eceErr:0.0031,
@@ -714,13 +718,25 @@ function renderChart(container, cfg) {
     });
 
     cfg.series.forEach(sr => {
-      const pts = data.map(d => [X(d[cfg.xKey]), Y(d[sr.key])]);
-      const path = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(' ');
+      // A row without a finite value for this series breaks the line rather
+      // than being interpolated across. The training-history panel puts folds
+      // of 69 to 83 epochs on one axis, and joining epoch 68 to epoch 82 would
+      // draw a segment no fold ever ran.
+      const pts = data.map(d => (Number.isFinite(d[sr.key]) ? [X(d[cfg.xKey]), Y(d[sr.key])] : null));
+      const drawn = pts.filter(Boolean);
+      if (!drawn.length) return;
+      let pen = 'M';
+      const path = pts.map(p => {
+        if (!p) { pen = 'M'; return ''; }
+        const seg = `${pen}${p[0].toFixed(2)},${p[1].toFixed(2)}`;
+        pen = 'L';
+        return seg;
+      }).filter(Boolean).join(' ');
       if (sr.type === 'area') {
-        s += `<path d="${path} L${pts[pts.length - 1][0].toFixed(2)},${(m.top + ih).toFixed(2)} L${pts[0][0].toFixed(2)},${(m.top + ih).toFixed(2)} Z" fill="${sr.fill}" stroke="none"/>`;
+        s += `<path d="${path} L${drawn[drawn.length - 1][0].toFixed(2)},${(m.top + ih).toFixed(2)} L${drawn[0][0].toFixed(2)},${(m.top + ih).toFixed(2)} Z" fill="${sr.fill}" stroke="none"/>`;
       } else {
-        s += `<path d="${path}" fill="none" stroke="${sr.stroke}" stroke-width="${sr.width || 1}" ${sr.dash ? `stroke-dasharray="${sr.dash}"` : ''} stroke-linejoin="round" stroke-linecap="round"/>`;
-        if (sr.dots) pts.forEach(p => { s += `<circle cx="${p[0].toFixed(2)}" cy="${p[1].toFixed(2)}" r="3" fill="${sr.stroke}"/>`; });
+        s += `<path d="${path}" fill="none" stroke="${sr.stroke}" stroke-width="${sr.width || 1}" ${sr.dash ? `stroke-dasharray="${sr.dash}"` : ''} stroke-linejoin="round" stroke-linecap="round" ${sr.opacity ? `opacity="${sr.opacity}"` : ''}/>`;
+        if (sr.dots) drawn.forEach(p => { s += `<circle cx="${p[0].toFixed(2)}" cy="${p[1].toFixed(2)}" r="3" fill="${sr.stroke}"/>`; });
       }
     });
 
@@ -744,7 +760,10 @@ function renderChart(container, cfg) {
       data.forEach((d, i) => { const dd = Math.abs(d[cfg.xKey] - xv); if (dd < bd) { bd = dd; best = i; } });
       const d = data[best];
       tip.innerHTML = (cfg.tooltipLabel ? `<div style="color:${AXIS};margin-bottom:0.25rem;font-size:0.6rem">${cfg.tooltipLabel(d[cfg.xKey])}</div>` : '')
-        + cfg.series.filter(sr => !sr.hideTooltip).map(sr =>
+        // A series with no value at the hovered epoch is left out of the
+        // tooltip rather than formatted: the default formatter is `toFixed`,
+        // which throws on undefined and would take the whole handler with it.
+        + cfg.series.filter(sr => !sr.hideTooltip && Number.isFinite(d[sr.key])).map(sr =>
           `<div style="display:flex;gap:0.5rem;justify-content:space-between"><span style="color:${AXIS}">${sr.name}:</span><span style="color:${cfg.tooltipValueColor || '#4DFFD2'}">${(cfg.tooltipFormat || (v => v.toFixed(5)))(d[sr.key])}</span></div>`
         ).join('');
       tip.style.opacity = '1';
