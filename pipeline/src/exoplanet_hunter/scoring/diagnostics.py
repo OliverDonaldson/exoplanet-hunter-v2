@@ -132,21 +132,17 @@ def false_alarm_checks(
     *,
     min_points: int = 5,
 ) -> FalseAlarmResult | None:
-    """Noise/systematic false-alarm bundle for BLS-found ephemerides
-    (Kunimoto 2025, AJ 170:280) — the model never trained on junk
-    detections, so a search-sourced ephemeris gets extra scrutiny.
+    """Noise and systematic false-alarm bundle for BLS-found ephemerides.
 
-    - SWEET (§3.3): sine fits at 0.5/1/2× the period with data within one
-      duration of midtransit masked; caution when the best fit's
-      amplitude/uncertainty > 15 and P < 10 d (stellar variability).
-    - Asymmetry (§3.5): left- vs right-half in-transit depths compared in
-      sigma (the paper compares trapezoid-fit durations; we fit no models
-      in serving), caution > 10 (ramps/scattered light).
-    - Depth mean/median (§3.6): per-transit depths, caution when
-      mean/median > 1.5 (a few outlier events dominate).
-    - Data gaps (§3.12): caution when ≥50% of observed transits have a
-      midtime within 2 durations of a ≥0.3 d gap (edge-of-gap systematics).
-    Individual checks are None when there is too little data to say.
+    Kunimoto 2025, AJ 170:280. The model never trained on junk detections, so a
+    search-sourced ephemeris gets extra scrutiny: SWEET (§3.3) sine fits at 0.5, 1
+    and 2x the period flag stellar variability; asymmetry (§3.5) compares left- and
+    right-half in-transit depths in sigma, catching ramps and scattered light; the
+    depth mean-over-median (§3.6) catches a few outlier events dominating; and the
+    data-gap check (§3.12) flags edge-of-gap systematics.
+
+    Where the paper fits trapezoids we compare depths directly, because serving fits
+    no models. Individual checks are None when there is too little data to say.
     """
     ok = np.isfinite(time) & np.isfinite(flux)
     t, f = np.sort(time[ok]), flux[ok][np.argsort(time[ok])]
@@ -257,36 +253,18 @@ def significant_secondary(
 ) -> SecondaryResult | None:
     """Significant-secondary test (Kunimoto 2025, AJ 170:280, §3.9 + §4.3).
 
-    Simplified Model-Shift: the folded light curve is scanned with a
-    duration-wide box outside ±2 durations of the primary; each box's depth
-    significance is depth / (sigma_w / sqrt(n)). The strongest dip is the
-    secondary; following §4.3 (Eq 9) it is significant when MS4 > 0,
-    MS5 > -1, MS6 > -1 with FA1 = FA2 = sqrt(2)·erfcinv(Tdur/P)
-    (Thompson 2018, Eq 13-14, N_TCEs = 1 for single-target vetting).
+    The folded curve is scanned with a duration-wide box outside ±2 durations of
+    the primary; the strongest dip is the secondary, significant under the paper's
+    MS4/MS5/MS6 conditions. Box depths stand in for a transit-model MES series, and
+    the MS4 condition is ignored above F_red 1.8, where a deep secondary inflates
+    it.
 
-    Simplifications vs the paper, by design: box depths on the folded curve
-    instead of a transit-model MES series; tertiary/positive comparisons are
-    skipped when no valid box exists. F_red — the red/white noise ratio at
-    the transit duration (§3.9) — is the standard deviation of the box
-    significance series outside the primary and secondary (≈1 for white
-    noise); MS4 uses sig/F_red, and per §4.3 the MS4 condition is ignored
-    when F_red > 1.8 (deep secondaries inflate F_red). Broad secondaries may
-    also be partially attenuated by the transit-masked detrend upstream.
-
-    Occultation escape hatch: a shallow significant secondary (< 10% of the
-    primary) is not flagged when a planet's own occultation could produce it —
-    by EITHER reflected light OR thermal emission:
-      * reflected (Kunimoto 2025, §4.3, Eq 10): the implied geometric albedo
-        A = delta_sec·(a/Rp)² (a/Rp from stellar density, Rp/R* = sqrt(delta_pri))
-        is < 1;
-      * thermal (Kepler DV, Twicken 2018, Eq 3): the implied brightness
-        temperature T_p = T_*·(delta_sec/delta_pri)^(1/4) is within
-        SECONDARY_TEMP_MAX_FACTOR of the equilibrium temperature Teq =
-        T_*/sqrt(2·a/R*). This rescues hot Jupiters whose real thermal
-        secondaries push the reflected-only albedo above 1.
-    The paper's impact-parameter < 0.95 and Rp < 22 R_Earth conditions are
-    skipped — we fit neither. Without stellar params neither arm can fire and
-    the caution stands.
+    A shallow secondary (< 10% of the primary) is not flagged when a planet's own
+    occultation could produce it, by reflected light (implied albedo < 1) or
+    thermal emission (implied brightness temperature near equilibrium) — the second
+    arm is what rescues hot Jupiters whose real secondaries push the reflected-only
+    albedo above 1. Without stellar parameters neither arm can fire and the caution
+    stands.
     """
     from scipy.special import erfcinv
 
@@ -404,14 +382,13 @@ def unphysical_duration(
 ) -> DurationResult | None:
     """Unphysical transit duration test (Kunimoto 2025, AJ 170:280, §3.4).
 
-    q = duration/period is checked against q_circ, the duration ratio of a
-    central transit on a circular orbit. Caution when q > 0.5, q/q_circ < 0.6,
-    or a/R* < 1.5 — the paper's single most effective false-alarm test.
+    q = duration/period is checked against q_circ, the duration ratio of a central
+    transit on a circular orbit. Caution when q > 0.5, q/q_circ < 0.6, or a/R* < 1.5
+    — the paper's single most effective false-alarm test.
 
-    Deviation from the paper: a/R* comes from Kepler's third law with the
-    stellar density (rho* = 3g / 4piGR* from the TIC logg + radius), not from
-    a transit-model fit — the serving path fits no transit model. Without
-    stellar params only the q > 0.5 condition can fire.
+    a/R* comes from Kepler's third law with the stellar density rather than from a
+    transit-model fit, because the serving path fits no transit model. Without
+    stellar parameters only the q > 0.5 condition can fire.
     """
     if period <= 0 or duration <= 0:
         return None
@@ -446,23 +423,17 @@ def odd_even_depths(
     *,
     min_points: int = 5,
 ) -> OddEvenResult | None:
-    """Depths and timings of odd- vs even-numbered transits; a big difference
-    means the "period" is really twice an eclipsing binary's true period.
+    """Depths and timings of odd- vs even-numbered transits.
 
-    Depth = median(out-of-transit) - median(in-transit), in ppm of the
-    normalised flux. The difference is expressed in sigma via the standard
-    errors of the two in-transit medians. Returns None when either parity
-    has too few in-transit points to say anything.
+    A large difference means the "period" is really twice an eclipsing binary's.
+    Depth is median(out-of-transit) - median(in-transit) in ppm of normalised flux,
+    and the difference is expressed in sigma via the two in-transit medians'
+    standard errors. Returns None when either parity has too few in-transit points.
 
-    Timing (Kunimoto 2025, AJ 170:280, §4.4, Eq 13 — OE_trap,T analogue):
-    catches eccentric EBs detected at half period whose primary and secondary
-    depths match but whose eclipses are not separated by exactly half an
-    orbit. Per-transit midtimes are flux-weighted centroids of the in-transit
-    points (the paper fits trapezoids; we don't fit models in serving), so an
-    offset larger than ~half a duration saturates at the window edge. Parity
-    mean offsets from the linear ephemeris are compared in sigma via their
-    standard errors; timing fields are None with fewer than two usable
-    transits per parity.
+    Timing (Kunimoto 2025, §4.4, Eq 13) catches eccentric EBs at half period whose
+    depths match but whose eclipses are not half an orbit apart. Per-transit midtimes
+    are flux-weighted centroids rather than fitted trapezoids — serving fits no
+    models — so an offset beyond about half a duration saturates at the window edge.
     """
     ok = np.isfinite(time) & np.isfinite(flux)
     t, f = time[ok], flux[ok]

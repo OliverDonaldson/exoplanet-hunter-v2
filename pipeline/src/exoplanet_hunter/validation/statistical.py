@@ -2,28 +2,15 @@
 
 Our CNN ranks candidates by a calibrated probability but never reads the pixels,
 so it cannot separate a transit on the target from an eclipse on a nearby star
-bleeding into the aperture. TRICERATOPS (Giacalone et al. 2021, AJ 161:24)
-closes that gap with a Bayesian model over 15 target-star scenarios (planet / EB
-/ period-doubled EB on the target, on an unresolved bound companion, or on an
-unresolved background star) plus nearby-star scenarios (NTP/NEB/NEBx2P for each
-resolved neighbour), scored against the phase-folded light curve and the TESS
-pixel data. It yields two numbers:
+bleeding into the aperture. TRICERATOPS (Giacalone et al. 2021, AJ 161:24) closes
+that gap with a Bayesian model over target- and nearby-star scenarios, yielding
+``FPP`` (not a planet on the target, Eq 4) and ``NFPP`` (a neighbour, Eq 5).
 
-  * ``FPP``  = 1 - (P_TP + P_PTP + P_DTP): probability the signal is NOT a planet
-    transiting the target star (Eq 4);
-  * ``NFPP`` = sum of the nearby-star scenario probabilities: probability the
-    signal originates from a resolved neighbour (Eq 5) — the piece a
-    light-curve-only vetter (ours included) is blind to.
-
-This is a slow, network-bound, OFFLINE step (TIC cone search, pixel cutout,
-TRILEGAL galactic model, ~1e6 Monte-Carlo draws): a validation pass over a
-ranked shortlist, never part of live ``/score``. ``triceratops`` is an optional
-dependency — ``pip install -e 'pipeline[validation]'``.
-
-Caveats carried straight from the paper:
-  * feed SIMPLE-APERTURE (SAP) flux, not PDCSAP — PDC removes the very
-    nearby-star contamination NFPP exists to catch;
-  * FPP is unreliable below S/N ~15 (Eq 17); :func:`estimate_snr` flags it.
+A slow, network-bound, OFFLINE pass, never part of live ``/score``;
+``triceratops`` is optional (``pip install -e 'pipeline[validation]'``). Two
+caveats from the paper: feed SAP flux, never PDCSAP, which removes the very
+contamination NFPP exists to catch; and FPP is unreliable below S/N ~15
+(Eq 17), which :func:`estimate_snr` flags.
 """
 
 from __future__ import annotations
@@ -66,15 +53,13 @@ _UNIFORM_POSTERIOR_RTOL = 1e-9
 def is_degenerate_posterior(scenario_probs: Mapping[str, float]) -> bool:
     """True when every scenario got the same probability.
 
-    TRICERATOPS initialises ``lnZ = np.zeros(N_scenarios)`` and fills it per
-    scenario. If nothing fills it — no star survives the depth cut, say — the
-    evidences stay equal and normalise to a uniform posterior, which then
-    yields a *constant* FPP of ``1 - 3/N`` and NFPP of ``(N-15)/N``. Those are
+    TRICERATOPS initialises ``lnZ`` to zeros and fills it per scenario. If nothing
+    fills it — no star survives the depth cut, say — the evidences stay equal and
+    normalise to a uniform posterior, yielding a *constant* FPP and NFPP. Those are
     arithmetic, not measurements.
 
-    The vendored fork's ``FPP_degenerate`` does not cover this: it flags
-    all-``-inf`` and NaN/+inf evidences, but uniform *finite* evidences
-    normalise cleanly and report status "ok".
+    The vendored fork's ``FPP_degenerate`` does not cover this: it flags all-``-inf``
+    and NaN evidences, but uniform *finite* ones normalise cleanly and report "ok".
     """
     values = list(scenario_probs.values())
     if len(values) < 2:
@@ -86,12 +71,10 @@ def classify(fpp: float, nfpp: float, *, degenerate: bool = False) -> str:
     """Map an (FPP, NFPP) pair to a disposition (Giacalone 2021, §4).
 
     A high NFPP means a resolved neighbour is the likely source, so it takes
-    precedence; otherwise a high FPP means a target-side false positive (e.g. an
-    EB on the target). Only a low NFPP *and* low FPP validates a planet.
-
-    ``degenerate`` short-circuits everything: a failed computation must not be
-    dressed up as a verdict. TIC 441804533 returned FPP 6/7 and NFPP 2/7 from a
-    uniform posterior and was reported as ``likely_nearby_fp``.
+    precedence; only a low NFPP *and* low FPP validates a planet. `degenerate`
+    short-circuits everything: a failed computation must not be dressed up as a
+    verdict, and one uniform posterior was reported as `likely_nearby_fp` before
+    this existed.
     """
     if degenerate or not (np.isfinite(fpp) and np.isfinite(nfpp)):
         return DEGENERATE
@@ -126,14 +109,13 @@ def prepare_lightcurve(
     *,
     window_durations: float = 5.0,
 ) -> tuple[np.ndarray, np.ndarray, float]:
-    """Fold a light curve into the (time-from-midpoint, normalised flux, sigma)
-    triple TRICERATOPS' ``calc_probs`` expects.
+    """Fold a curve into the (time-from-midpoint, normalised flux, sigma) triple
+    TRICERATOPS' ``calc_probs`` expects.
 
-    Folds to time from the nearest transit midpoint (days), keeps points within
-    ``window_durations`` transit durations of it, normalises flux by the
-    out-of-transit median (baseline 1.0), and returns a scalar flux uncertainty
-    from the robust out-of-transit scatter (1.4826·MAD). Points are sorted by
-    phase. Feed SAP flux, not PDCSAP (see the module docstring).
+    Keeps points within ``window_durations`` of the nearest midpoint, normalises by
+    the out-of-transit median to a baseline of 1.0, and returns a scalar uncertainty
+    from the robust out-of-transit scatter. Feed SAP flux, not PDCSAP — see the
+    module docstring.
     """
     ok = np.isfinite(time) & np.isfinite(flux)
     t, f = np.asarray(time, float)[ok], np.asarray(flux, float)[ok]
@@ -180,17 +162,16 @@ class StatisticalValidation:
 
 
 def _install_triceratops_compat_shims() -> None:
-    """Make pytransit (a TRICERATOPS dependency) importable under this env's
-    modern numpy / scipy / setuptools. pytransit 2.2.0 predates three removals:
+    """Make pytransit importable under this env's modern numpy, scipy and setuptools.
 
-      * ``numpy.int`` — dropped in NumPy 1.24 (restore the alias to the builtin);
-      * ``scipy.integrate.trapz`` — renamed ``trapezoid``, dropped in SciPy 1.14;
-      * ``pkg_resources`` — dropped in setuptools 81; pytransit's contamination
-        module imports only ``resource_filename`` from it, so stub that.
+    pytransit 2.2.0 predates three removals: ``numpy.int`` (dropped in NumPy 1.24),
+    ``scipy.integrate.trapz`` (renamed ``trapezoid``, dropped in SciPy 1.14), and
+    ``pkg_resources`` (dropped in setuptools 81, and pytransit imports only
+    ``resource_filename`` from it).
 
-    Each shim is a no-op when the real name is present, so a compatible env is
-    left untouched. Without these, ``import triceratops`` dies deep in pytransit
-    with an unhelpful ImportError.
+    Each shim is a no-op when the real name is present, so a compatible env is left
+    untouched. Without them ``import triceratops`` dies deep in pytransit with an
+    unhelpful ImportError.
     """
     import numpy as _np
 
@@ -243,13 +224,11 @@ def _load_target_cls() -> type:
 def _trilegal_ssl_disabled() -> Iterator[None]:
     """Scope an SSL-verification bypass to TRICERATOPS' TRILEGAL query only.
 
-    The TRILEGAL server (stev.oapd.inaf.it) ships an incomplete certificate
-    chain that even an up-to-date CA bundle cannot verify — a known issue, which
-    is why TRICERATOPS gave ``query_TRILEGAL`` a ``verify_ssl`` flag. But
-    ``target()`` hardcodes ``verify_ssl=True`` and never exposes it, so we patch
-    the reference it calls to force verification off, then restore it. The query
-    is a public, unauthenticated star-count lookup (only RA/Dec is sent), so
-    skipping verification here carries no data-exposure risk.
+    The TRILEGAL server ships an incomplete certificate chain no CA bundle can
+    verify, which is why TRICERATOPS gave `query_TRILEGAL` a `verify_ssl` flag — but
+    `target()` hardcodes it True and never exposes it, so the reference it calls is
+    patched and restored. The query is a public, unauthenticated star count with
+    only RA/Dec sent, so this carries no data-exposure risk.
     """
     import triceratops.triceratops as _tt
 
@@ -273,12 +252,10 @@ def _aperture_to_cutout_pixels(
 ) -> np.ndarray:
     """Map a SPOC pipeline aperture into TRICERATOPS' TessCut cutout frame.
 
-    ``pipeline_mask`` is the boolean [row, col] SPOC aperture on the TPF grid;
-    ``target_xy_tpf`` the target's [col, row] position on that grid;
-    ``target_xy_cutout`` its [col, row] position in TRICERATOPS' cutout. Both
-    products sample the same native CCD pixels, so each aperture pixel's offset
+    Both products sample the same native CCD pixels, so each aperture pixel's offset
     from the target is frame-invariant — shift those offsets onto the target's
-    cutout position. Returns the (N, 2) [col, row] array ``calc_depths`` expects.
+    position in the cutout. Returns the (N, 2) [col, row] array ``calc_depths``
+    expects.
     """
     rows, cols = np.nonzero(pipeline_mask)
     dcol = cols - target_xy_tpf[0]
@@ -340,18 +317,16 @@ def validate_target(
 ) -> StatisticalValidation:
     """Run TRICERATOPS for one target and return its FPP/NFPP disposition.
 
-    ``phase_time`` is days from the transit midpoint, ``flux`` normalised to a
-    baseline of 1, ``flux_err`` a scalar (all as produced by
-    :func:`prepare_lightcurve`); ``depth_ppm`` seeds the per-star required-depth
-    calculation. Constructing the target hits the network (TIC + pixel cutout +
-    a TRILEGAL galactic-model query), so this is never called on live serving.
+    `phase_time` is days from midtransit, `flux` normalised to a baseline of 1 and
+    `flux_err` a scalar, all as :func:`prepare_lightcurve` produces them.
+    Constructing the target hits the network (TIC, pixel cutout, TRILEGAL), so this
+    is never called on live serving.
 
-    ``use_pipeline_aperture`` (TESS) fetches the real SPOC aperture instead of
-    TRICERATOPS' 5x5 default, which otherwise inflates FPP; it falls back to the
-    default (with a warning) if the aperture can't be built. ``apertures``
-    overrides it. Two escapes for TRILEGAL's broken TLS cert: pass
-    ``trilegal_fname`` (pre-downloaded table, fully secure) or opt into
-    ``verify_ssl=False`` to bypass verification for that one public query.
+    `use_pipeline_aperture` (TESS) fetches the real SPOC aperture instead of
+    TRICERATOPS' 5x5 default, which otherwise inflates FPP, falling back with a
+    warning if it cannot be built. Two escapes for TRILEGAL's broken TLS cert:
+    `trilegal_fname` for a pre-downloaded table, or `verify_ssl=False` to bypass
+    verification for that one public query.
     """
     target_cls = _load_target_cls()
     ssl_ctx = (

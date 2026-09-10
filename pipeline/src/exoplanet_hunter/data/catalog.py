@@ -165,15 +165,10 @@ def _tap_query(adql: str, fmt: str = "csv", max_retries: int = 3) -> pd.DataFram
 def _query_confirmed_planets() -> pd.DataFrame:
     """Confirmed planets observed by TESS, with transit parameters.
 
-    Unit normalisation applied at query time (matches the rest of the
-    pipeline, where every catalogue uses fraction for depth and days for
-    duration):
-
-      * ``pl_tranmid`` is full BJD (~2,458,000+); TESS light curves use
-        BTJD = BJD − 2457000, so we subtract the offset. Phase-folding accumulates
-        many days of error across ~10^5 orbital cycles otherwise.
-      * ``pl_trandep`` is **percent** in the archive; divide by 100 to get fraction.
-      * ``pl_trandur`` is **hours** in the archive; divide by 24 to get days.
+    Units are normalised at query time, so every catalogue in this pipeline uses
+    fraction for depth and days for duration: ``pl_tranmid`` full BJD to BTJD
+    (phase-folding accumulates days of error over ~10^5 cycles otherwise),
+    ``pl_trandep`` percent to fraction, ``pl_trandur`` hours to days.
     """
     adql = (
         "select pl_name, tic_id, hostname, "
@@ -215,18 +210,13 @@ def _query_confirmed_planets() -> pd.DataFrame:
 def _query_toi() -> pd.DataFrame:
     """All TOIs with their disposition — includes both candidates and false positives.
 
-    Unit normalisation applied at query time. Note: the TOI and PS tables in
-    the NASA Exoplanet Archive use *different* units for `pl_trandep` (the TOI
-    table is ppm; the PS table is percent). Both are correctly documented at
-    https://exoplanetarchive.ipac.caltech.edu/docs/API_toi_columns.html and
-    https://exoplanetarchive.ipac.caltech.edu/docs/API_PS_columns.html . An
-    earlier version of this code applied `/100.0` to both, which was correct
-    for PS but produced 10,000× too-large values for TOI rows. Fixed in commit
-    on branch fix/data-units.
+    Units are normalised at query time: ``pl_tranmid`` full BJD to BTJD (subtract
+    2,457,000), ``pl_trandep`` ppm to fraction, ``pl_trandurh`` hours to days.
 
-      * ``pl_tranmid`` full BJD → BTJD (subtract 2,457,000) for TESS-cadence folding.
-      * ``pl_trandep`` is **ppm** → divide by 1.0e6 for fraction.
-      * ``pl_trandurh`` is **hours** → divide by 24 for days.
+    The TOI and PS tables use *different* units for ``pl_trandep`` — TOI is ppm, PS
+    is percent — and both are correctly documented at the archive. An earlier version
+    applied ``/100.0`` to both, which was right for PS and produced 10,000x too-large
+    values for TOI rows.
     """
     adql = (
         "select toi, tid as tic_id, "
@@ -286,17 +276,15 @@ def _query_koi() -> pd.DataFrame:
 def _query_certified_fp() -> set[str]:
     """kepoi_names the DR25 catalogue certifies as false positives.
 
-    The Q1-Q17 DR25 Robovetter is the definitive uniform Kepler vetting run; a
-    KOI it dispositions FALSE POSITIVE with ``koi_score < CERTIFIED_FP_MAX_SCORE``
-    is a high-confidence negative — cleaner than the bare ``cumulative``
-    ``koi_disposition``, which also carries later, less-uniform dispositions
-    (and, for ~1 in 5 of its FPs, ones DR25 either disputes or never vetted).
+    The Q1-Q17 DR25 Robovetter is the definitive uniform Kepler vetting run; a KOI
+    it dispositions FALSE POSITIVE with ``koi_score < CERTIFIED_FP_MAX_SCORE`` is a
+    high-confidence negative — cleaner than the bare ``cumulative``
+    ``koi_disposition``, which also carries later, less uniform dispositions.
 
     This is the modern stand-in for the retired ``fpwg`` Certified-False-Positive
-    table: the archive no longer serves ``fpwg``/``koifpp`` through TAP or the
-    legacy API, and DR25's ``koi_score`` + FP flags are the very evidence that
-    certification rested on. Keyed on ``kepoi_name`` so it certifies the exact
-    signal, not merely the host star.
+    table, which the archive no longer serves over TAP or the legacy API; DR25's
+    ``koi_score`` and FP flags are the evidence certification rested on. Keyed on
+    ``kepoi_name``, so it certifies the exact signal rather than the host star.
     """
     adql = (
         "select kepoi_name from q1_q17_dr25_koi "
@@ -311,16 +299,15 @@ def _query_certified_fp() -> set[str]:
 def _query_k2() -> pd.DataFrame:
     """K2 planets and candidates from the ``k2pandc`` archive table.
 
-    Keyed on the EPIC id, stored in ``tic_id`` exactly as the KIC id is for
-    Kepler; the ``mission`` column ("K2") disambiguates for the EPIC-indexed MAST
-    download path. k2pandc carries several rows per candidate (one per reference)
-    and the archive's ``default_flag=1`` set often omits the transit ephemeris
-    (confirmation came from RV), so rather than that flag we require a usable
-    ephemeris (period + epoch + duration) and *prefer* the default row when it
-    has one. Units match the other sources: ``pl_trandep`` is percent (÷100 →
-    fraction, verified against (Rp/R*)²), ``pl_trandur`` hours (÷24 → days).
-    ``pl_tranmid`` is full BJD → BKJD (−2454833), the K2 light-curve time system.
-    Stellar parameters come inline — no separate lookup at build time.
+    Keyed on the EPIC id, stored in ``tic_id`` exactly as the KIC id is for Kepler;
+    ``mission`` disambiguates for the EPIC-indexed MAST download path.
+
+    k2pandc carries several rows per candidate, one per reference, and the archive's
+    ``default_flag=1`` set often omits the transit ephemeris because confirmation
+    came from RV — so a usable ephemeris is required and the default row merely
+    *preferred* when it has one. Units match the other sources: ``pl_trandep``
+    percent to fraction, ``pl_trandur`` hours to days, ``pl_tranmid`` full BJD to
+    BKJD.
     """
     adql = (
         "select epic_hostname, epic_candname as name, disposition, default_flag, "
@@ -363,15 +350,9 @@ def _query_k2() -> pd.DataFrame:
 def build_label_catalog(req: CatalogRequest, out_dir: Path) -> pd.DataFrame:
     """Build the combined labelled catalogue and persist to parquet.
 
-    Parameters
-    ----------
-    req     : sampling request — how many of each class to pull.
-    out_dir : directory where `labels.parquet` will be written.
-
-    Returns
-    -------
-    The combined dataframe with one row per TIC and columns
-    `tic_id, period, t0, depth, duration, snr, disposition, label, teff, radius, logg, tmag`.
+    `req` says how many of each class to pull and `out_dir` is where
+    `labels.parquet` lands. Returns one row per TIC, carrying the ephemeris, depth,
+    duration, SNR, disposition, label and stellar parameters.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 

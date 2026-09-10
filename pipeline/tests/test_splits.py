@@ -93,7 +93,7 @@ def test_val_frac_sets_the_held_out_share():
         assert len(val_idx) / len(positions) == pytest.approx(expected, abs=0.06)
 
 
-def test_a_single_class_side_raises_rather_than_calibrating_on_it():
+def test_single_class_side_raises_not_calibrating_on_it():
     """Stratification cannot rescue a population that has one class, and a
     plausible-looking calibrator fitted on it is the artefact that ships."""
     groups = np.arange(20)
@@ -176,7 +176,7 @@ def test_two_populations_sharing_a_subset_partition_identically():
     assert partitions[0] == partitions[1]
 
 
-def test_an_uncovered_group_raises_rather_than_being_placed_somewhere():
+def test_uncovered_group_raises_not_being_placed_somewhere():
     """Silently folding an unknown host in would train on a population the
     summary does not describe — a plausible number over the wrong rows."""
     _, y, groups = population(n_hosts=60)

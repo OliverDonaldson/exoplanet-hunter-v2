@@ -1,28 +1,16 @@
 """Centroid-shift features for false-positive vetting.
 
-A genuine transit is a small dip with no measurable shift in the photo-centre
-of the target pixel. A *background eclipsing binary* (BEB) — a deep dip on a
-faint star inside the photometric aperture — produces a clear centroid
-shift during the dip. This module measures that shift after detrending the
-raw `MOM_CENTR1/2` columns for the systematics that swamp the signal in raw
-data: Kepler's quarterly 90° spacecraft rolls (tens-of-pixels jumps every
-~93 days) and the per-quarter thermal/pointing drift.
+A genuine transit shifts the photo-centre of the target pixel immeasurably; a
+background eclipsing binary — a deep dip on a faint star inside the aperture —
+shifts it clearly. This module measures that shift after detrending the raw
+`MOM_CENTR1/2` columns for the systematics that swamp it: Kepler's quarterly
+90-degree rolls and the per-quarter thermal drift.
 
-Pipeline (per Ansdell 2018; Kepler-centroid detrending notes):
-
-  1. Outlier rejection at 5σ MAD (cosmic rays, argabrightening events).
-  2. Per-segment median subtraction (Kepler quarters / TESS sectors).
-     Segment boundaries are detected from time gaps > 0.5 d, which works
-     for both missions and survives `LightCurveCollection.stitch()`.
-  3. Rolling-median detrend with a 1-day time-based window (per segment).
-  4. Phase-fold the detrended series, mask in/out of transit windows.
-  5. SNR per axis = S / (σ_oot_robust / √N_itr); 2D SNR = √(SNR_x² + SNR_y²).
-     σ_oot_robust = 1.4826 · MAD of out-of-transit cadences.
-
-Without these corrections, raw MOM_CENTR phase-folds capture the
-inter-quarter pixel jumps rather than the intra-transit shift, producing
-SNRs of the wrong order of magnitude (~19 arcsec on Kepler instead of the
-expected 0.1–1 arcsec).
+Per Ansdell 2018: 5-sigma MAD outlier rejection, per-segment median subtraction
+(segments from time gaps > 0.5 d, which works for both missions and survives
+`stitch()`), a 1-day rolling-median detrend, then phase-fold and SNR per axis
+against the robust out-of-transit scatter. Without the corrections a raw fold
+captures the inter-quarter pixel jumps and returns SNRs orders too large.
 """
 
 from __future__ import annotations
@@ -100,14 +88,12 @@ def _detrend_axis(
         # 2. per-segment median subtraction
         seg_c -= float(np.median(seg_c[finite]))
 
-        # 3. rolling-median detrend via scipy.ndimage.median_filter (C-impl).
-        # Window size derived from the segment's median cadence — Kepler
-        # 30-min cadence with 1-day window → ~49 samples; TESS 2-min cadence
-        # → ~721 samples. Both ~50× faster than pandas time-based rolling
-        # for the segment lengths we see in practice (60–90k cadences).
-        # NaN-safe: fill with segment median before filter, restore mask after.
-        # Sort first — stitched multi-quarter LCs may have minor non-monotonic
-        # cadences that would skew the median window.
+        # 3. rolling-median detrend via scipy.ndimage.median_filter, window sized
+        # from the segment's own median cadence — far faster than pandas
+        # time-based rolling at these segment lengths. NaN-safe: fill with the
+        # segment median before filtering, restore the mask after. Sort first,
+        # because stitched multi-quarter curves carry non-monotonic cadences that
+        # would skew the window.
         order = np.argsort(seg_t, kind="stable")
         inv_order = np.argsort(order)
         seg_t_sorted = seg_t[order]
@@ -144,18 +130,13 @@ def extract_centroid_features(
 ) -> dict[str, float]:
     """Compute centroid-shift statistics during transit vs out-of-transit.
 
-    Returns a dict with three keys:
-      - centroid_shift_x : column shift, pixels (after detrend)
-      - centroid_shift_y : row shift, pixels (after detrend)
-      - centroid_snr     : √(SNR_x² + SNR_y²), dimensionless. Each axis's
-                           SNR is `S_axis / (σ_oot / √N_itr)`. Genuine
-                           on-target transits give values < ~3; BEBs give
-                           values ≳ 3.
+    Returns `centroid_shift_x` and `centroid_shift_y` in pixels after detrending,
+    and `centroid_snr`, the quadrature sum of the per-axis SNRs. Genuine on-target
+    transits give values below about 3; background eclipsing binaries give more.
 
-    Returns NaN for all three when MOM_CENTR1/2 are absent, or when the
-    detrended in/out-of-transit masks are too small (< 3 / < 10 cadences)
-    or σ_oot collapses to zero. NaNs flow to the build pipeline's median
-    imputer downstream.
+    All three are NaN when MOM_CENTR1/2 are absent, when the detrended in- or
+    out-of-transit masks are too small, or when the out-of-transit scatter collapses
+    to zero. Those NaNs flow to the build pipeline's median imputer downstream.
     """
     cx_col = next((c for c in ("mom_centr1", "centroid_col") if c in lc.columns), None)
     cy_col = next((c for c in ("mom_centr2", "centroid_row") if c in lc.columns), None)
@@ -219,14 +200,13 @@ def extract_centroid_offset(
 ) -> float:
     """Single-scalar wrapper of `extract_centroid_features` for the aux vector.
 
-    Returns `centroid_snr` — the magnitude of the in-transit centroid shift
-    in units of σ, from the Ansdell-style normalisation in
-    `extract_centroid_features`. Genuine on-target transits produce values
-    near zero (< ~3); background eclipsing binaries produce values ≳ 3.
+    Returns `centroid_snr`, the magnitude of the in-transit centroid shift in sigma.
+    Genuine on-target transits sit below about 3; background eclipsing binaries
+    above it.
 
-    Returns NaN when `MOM_CENTR1/2` are missing from the FITS, the in-/out-
-    of-transit masks are too small, or σ_oot collapses to zero. The build
-    pipeline's median imputer fills NaNs at training time.
+    NaN when `MOM_CENTR1/2` are missing, the masks are too small, or the
+    out-of-transit scatter collapses to zero; the build pipeline's median imputer
+    fills those at training time.
     """
     return float(extract_centroid_features(lc, period, t0, duration)["centroid_snr"])
 

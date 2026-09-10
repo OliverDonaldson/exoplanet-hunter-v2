@@ -122,7 +122,7 @@ def test_a_weight_table_puts_a_sample_weight_in_the_third_slot(shards):
     assert np.allclose(batch[2].numpy(), 2.5)
 
 
-def test_a_tic_the_caller_forgot_to_weight_trains_at_one_not_zero():
+def test_tic_the_caller_forgot_to_weight_trains_at_one_not_zero():
     """A default of 0.0 removes the example from the loss while every batch
     still looks the right size — invisible, and the population is no longer the
     one the arm describes."""

@@ -1,19 +1,16 @@
 """Parse a SPOC DV report XML into difference images and DV scalars.
 
-Reader half of `data/dv.py`. Three traps, each yielding a plausible wrong
-number rather than an error:
+Reader half of `data/dv.py`. Three traps, each yielding a plausible wrong number:
 
 - one `planetResults` per TCE, not per target — the catalogue period picks the
   nearest `@orbitalPeriodInDays` and the mismatch is returned;
 - difference images are a CCD-pixel list sized to the target's aperture, not
-  Kepler's fixed 33x33 — re-gridding is the consumer's job. Measured 2026-08-17
-  over the whole archive, the list is *dense*: it fills its bounding box
-  exactly, with no gaps and no repeated coordinates, so reconstructing the
-  rectangle is exact rather than an interpolation. 95.8% are 11x11 and the full
-  range is 11-25 px;
+  Kepler's fixed 33x33 — re-gridding is the consumer's job, and it is exact
+  rather than an interpolation because the list fills its bounding box with no
+  gaps and no repeats (measured over the whole archive);
 - `-1.0` is DV's "attempted, undefined" sentinel, not a measurement — including
-  per pixel, where it marks a whole sector DV declined to measure while writing
-  its flux as a plausible 0.0. See `DVDifferenceImage.declined`.
+  per pixel, where it marks a sector DV declined to measure while writing a
+  plausible 0.0. See `DVDifferenceImage.declined`.
 """
 
 from __future__ import annotations
@@ -90,17 +87,11 @@ class DVDifferenceImage:
         default_factory=lambda: np.zeros(0, dtype=np.float32)
     )
     #: The target star's catalogue position on the CCD for this sector, from
-    #: `ticReferenceCentroid`, in the same row/column frame as `ccd_rows` and
-    #: `ccd_cols` and with sub-pixel precision. None when DV did not define it.
-    #:
-    #: This is the **origin** the difference image is read against. Without it a
-    #: stamp says only that flux moved, not whether it moved away from the star,
-    #: and roadmap 4.2b finding 2 records its absence as the mechanism behind
-    #: stage 9's null. Measured 2026-08-27 over all 38,964 non-declined images in
-    #: the archive: the target sits a median 0.84 px from the bounding box's
-    #: centre, sd 0.61 px in row and 0.64 in column, and lands in a **different
-    #: pixel** than that centre on 77.8% of stamps — so the centred placement
-    #: `preprocess/diffimage.py` performs is not a stand-in for it.
+    #: `ticReferenceCentroid`, sub-pixel, in the `ccd_rows`/`ccd_cols` frame. None
+    #: when DV did not define it. This is the **origin** the difference image is
+    #: read against: without it a stamp says only that flux moved, not whether it
+    #: moved away from the star. Measurements, and why the centred placement is
+    #: not a stand-in: `docs/experiments/phase-1-build-4-2d.md`.
     target_row: float | None = None
     target_col: float | None = None
 
@@ -112,17 +103,14 @@ class DVDifferenceImage:
     def declined(self) -> bool:
         """True when DV produced no difference image for this sector at all.
 
-        Measured 2026-08-17 over the 53,118 difference images in the archive:
-        **26.6% are declined**, and the state is all-or-nothing — every pixel of
-        an image carries the sentinel or none of them does, with nothing in
-        between. Every declined image also reports `quality_metric` exactly 0.0
-        and `quality_valid` false, so DV is consistent about it in two places.
+        The state is all-or-nothing — every pixel of an image carries the sentinel or
+        none does — and a declined image also reports `quality_metric` 0.0 with
+        `quality_valid` false, so DV is consistent about it in two places.
 
-        This is a third state, and the reason it is named here rather than
-        inferred downstream: a declined sector is *not* a measurement of no
-        centroid shift. Fed to a model as zeros it would be indistinguishable
-        from a star that genuinely did not move, which is the strongest evidence
-        this diagnostic can give.
+        It is named here rather than inferred downstream because a declined sector is
+        *not* a measurement of no centroid shift. Fed to a model as zeros it would be
+        indistinguishable from a star that genuinely did not move, which is the
+        strongest evidence this diagnostic can give.
         """
         if not self.n_pixels or not self.flux_difference_uncertainty.size:
             return True
@@ -238,13 +226,10 @@ def _sectors_from_bitmask(bitmask: str | None) -> list[int]:
 def _centroid_coordinate(block: ET.Element | None, tag: str) -> float | None:
     """One axis of a DV centroid, or None where DV attempted it and failed.
 
-    **The sentinel here is on the uncertainty, not the value.** On a sector DV
-    declined to measure it writes `ticReferenceCentroid` as row 0.0, column 0.0,
-    uncertainty -1.0 — verified on every one of the 14,154 declined images in
-    the archive, where the row value is *exactly* 0.0 and never anything else.
-    Reading the value alone would put the target at CCD row 0 of a stamp whose
-    pixels start near row 2000, which is a confident placement 2,000 px away
-    rather than a missing one. The same trap `_nan` exists for, one level up.
+    The sentinel is on the *uncertainty*, not the value: a declined sector is written
+    as row 0.0, column 0.0, uncertainty -1.0. Reading the value alone would put the
+    target at CCD row 0 of a stamp whose pixels start near row 2000 — a confident
+    placement thousands of pixels away rather than a missing one.
     """
     if block is None:
         return None

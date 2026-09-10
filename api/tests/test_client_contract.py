@@ -39,7 +39,7 @@ def _accessed(prefix: str) -> set[str]:
 
 
 @pytest.mark.skipif(not _CLIENT.exists(), reason="console source not in this checkout")
-def test_the_client_only_reads_catalogue_fields_the_contract_declares():
+def test_client_reads_only_declared_catalogue_fields():
     """`mapCandidate` maps /candidates rows field by field."""
     accessed = _accessed("row")
     assert len(accessed) >= _MIN_ROW_FIELDS, (
@@ -70,7 +70,7 @@ def test_the_contract_test_would_notice_a_removed_field():
     assert "baseline_days" in CandidateRow.model_fields
 
 
-def test_the_score_response_still_carries_what_the_vetting_page_needs():
+def test_score_response_carries_what_the_vetting_page_needs():
     """The Vetting page's panels each rest on one of these. They are named here
     rather than extracted because the client reaches them through `mapScore`'s
     nested shapes, which a flat regex cannot follow honestly."""

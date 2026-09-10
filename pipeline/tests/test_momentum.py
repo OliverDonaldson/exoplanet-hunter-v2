@@ -86,7 +86,7 @@ class TestBuildMomentumDumpView:
         assert view[centre, 0] == 0.0
         assert view[:, 0].max() > 0.0
 
-    def test_the_lost_cadences_are_restored_or_the_branch_is_all_zero(self):
+    def test_lost_cadences_are_restored_or_the_branch_is_all_zero(self):
         # The defect this module exists for: our cached curves have the dump
         # cadences removed, so a fold over the surviving times alone finds
         # nothing at any phase.
@@ -102,7 +102,7 @@ class TestBuildMomentumDumpView:
         assert without_any[:, 0].max() == 0.0
         assert without_any[:, 1].max() == 1.0  # measured, and clean
 
-    def test_restored_cadences_use_the_target_cadence_not_the_reference_one(self):
+    def test_restored_cadences_use_the_target_cadence(self):
         # A 200-s FFI target lost fewer cadences to the same dump than a 120-s
         # target did. Counting the reference curve's cadences would overstate it.
         dumps = dumps_every(2.5, 1327.8, 1352.0)
@@ -127,7 +127,7 @@ class TestBuildMomentumDumpView:
         assert coarse[:, 0].max() > 0.0
         assert fine[:, 0].sum() != pytest.approx(coarse[:, 0].sum())
 
-    def test_dumps_from_a_sector_the_target_was_not_on_are_not_its_dumps(self):
+    def test_dumps_from_another_sector_are_not_its_dumps(self):
         # A dump 300 days after the target's last cadence is not a cadence it
         # lost, and folding it in would put a systematic at a phase where nobody
         # was watching this star.
@@ -165,7 +165,7 @@ class TestBuildMomentumDumpView:
     @pytest.mark.parametrize(
         "period,t0", [(float("nan"), 1325.0), (0.0, 1325.0), (2.5, float("nan"))]
     )
-    def test_an_unusable_ephemeris_is_absent_rather_than_folded_on_a_guess(self, period, t0):
+    def test_unusable_ephemeris_is_absent_not_folded_on_a_guess(self, period, t0):
         view = build_momentum_dump_view(
             sector_times(),
             dumps_every(2.5, 1327.8, 1352.0),

@@ -1,25 +1,16 @@
 """Scoring a promoted run against a shard set, under a stated protocol.
 
-The champion's own training inputs no longer exist. The legacy shards were
-rebuilt on 2026-07-25, six days after run `ca906040` trained on 2026-07-19, and
-its 9-dim aux is not a slice of the 13-dim shard aux: index 7 is `pink_snr`
-there and the catalogue transit SNR in the model. Taking 13 -> 9 by slicing
-would feed one into the lane the model learned as the other and return a
-confident wrong number, so index 7 is rebuilt from the catalogue and the rest
-taken directly.
+The champion's own training inputs no longer exist: the legacy shards were
+rebuilt days after it trained, and its 9-dim aux is not a slice of the 13-dim
+shard aux — index 7 is `pink_snr` there and the catalogue transit SNR in the
+model. Slicing 13 to 9 would feed one into the lane the model learned as the
+other and return a confident wrong number, so index 7 is rebuilt explicitly.
 
-**The two protocols are not interchangeable, and the difference is the whole
-reason this module states it in the return value.**
-
-- `OUT_OF_FOLD` scores each row with the single fold that held it out. It is the
-  only honest protocol for rows the run trained on, and it reproduces the run's
-  own `predictions.parquet`.
-- `ZERO_SHOT` has every fold score every row and takes the mean. Valid only
-  where no fold trained on the row. Ranking stays comparable; calibration does
-  not, because the Platt scalers were fitted on other missions' validation rows.
-
-Silently mixing them across one population is itself a comparability defect, so
-`score_run` refuses to guess and `Scored.protocol` travels with the numbers.
+The two protocols are not interchangeable, which is why `Scored.protocol`
+travels with the numbers. `OUT_OF_FOLD` scores each row with the fold that held
+it out — the only honest protocol for rows the run trained on. `ZERO_SHOT`
+averages every fold over rows no fold trained on; ranking stays comparable,
+calibration does not. `score_run` refuses to guess between them.
 """
 
 from __future__ import annotations
@@ -240,22 +231,17 @@ def summarise_scored(
 ) -> dict[str, Any]:
     """A gate-readable summary from a scored frame, one protocol per slice.
 
-    `evaluate_promotion` gates on `per_mission[GATE_MISSION]`. A summary without
-    that block makes it fall through to comparing pooled means over populations
-    that may differ, which is how every stage 4 decision before 2026-08-07 was
-    silently taken. The live champion `ca906040` has no such block, and the
-    re-baseline exists only as predictions — so this is what lets the gate
-    engage at all.
+    `evaluate_promotion` gates on `per_mission[GATE_MISSION]`. A summary without that
+    block makes it fall through to comparing pooled means over populations that may
+    differ, which is how every stage 4 decision before 2026-08-07 was silently taken.
+    The live champion has no such block, so this is what lets the gate engage at all.
 
-    **Slices are out-of-fold only, and that is the point.** A re-baselined
-    champion carries both protocols in one frame: measured 2026-08-08, the live
-    set holds 2,238 out-of-fold Kepler rows plus 243 zero-shot ones that are
-    **all negatives**. Pooling them moves the Kepler figure for reasons that have
-    nothing to do with the model. It happens to be worth only +0.0001 there
-    (0.9915 pooled against 0.9914 out-of-fold, because the champion already
-    ranks those negatives low) — which makes it more dangerous rather than less,
-    since a plausible right answer is one nobody re-checks. Zero-shot rows are
-    kept, labelled, under `zero_shot`, and never reach the gate.
+    Slices are out-of-fold only, and that is the point. A re-baselined champion
+    carries both protocols in one frame, and its zero-shot rows are all negatives, so
+    pooling moves the Kepler figure for reasons that have nothing to do with the
+    model. It happens to be worth almost nothing there, which makes it more dangerous
+    rather than less: a plausible right answer is one nobody re-checks. Zero-shot
+    rows are kept, labelled, and never reach the gate.
     """
     required = {"tic_id", "label", "score", "mission", "protocol"}
     if missing := sorted(required - set(scored.columns)):
@@ -263,15 +249,9 @@ def summarise_scored(
 
     # `groupby` drops null keys by default, so an unresolved mission would leave
     # the per-mission slices summing to less than the aggregate with nothing
-    # saying so. Refuse the frame instead of measuring part of it.
-    #
-    # A row reaches here when it was scored against a shard set the mission
-    # source does not cover. On 2026-08-08 that was five rows: the champion was
-    # re-scored on the legacy 9-dim shards (5,380 rows, no mission column) while
-    # missions resolve from the current view set (5,426), and five confirmed
-    # planets present in the former dropped out of the stage 2 rebuild. They are
-    # outside the comparison population — no candidate can score them — so
-    # excluding them is right, but it is a decision the caller makes explicitly.
+    # saying so. A row reaches here when it was scored against a shard set the
+    # mission source does not cover; excluding those is right, but it is a
+    # decision the caller makes explicitly rather than one taken silently.
     unresolved = scored[scored["mission"].isna()]
     if len(unresolved):
         if not exclude_unresolved:
@@ -321,19 +301,11 @@ def summarise_scored(
         for mission, group in scored[scored["protocol"] != GATE_PROTOCOL].groupby("mission")
     }
 
-    # The gate sizes its recall tolerance from the run's own reseeding spread,
-    # and the per-member scores that measure it are already in the prediction
-    # set — so a summary built here can carry the floor instead of leaving the
-    # gate to fall back to a constant that was never measured against this run.
-    #
-    # Emitted whether or not there are draws to measure. A block that appears
-    # only when the measurement succeeded makes a missing key and a null read the
-    # same to a person and differently to a program. With no member columns the
-    # draw count is zero, which `decision_floor` reads as no variance block at
-    # all — the same answer it gave before this existed.
-    #
-    # One draw per member, each formed over every fold, so the draw count IS the
-    # member count and the gate divides by the same `n` either trainer would.
+    # The per-member scores that size the gate's recall tolerance are already in
+    # the prediction set, so the summary can carry the floor instead of leaving
+    # the gate on a constant never measured against this run. Emitted whether or
+    # not there are draws: a block that appears only on success makes a missing
+    # key and a null the same to a person and different to a program.
     draws = pooled_member_draws(held_out)
     variance = {"n_models_per_fold": draws["pooled_gate_recall_n_draws"], **draws}
 

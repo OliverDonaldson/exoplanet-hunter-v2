@@ -74,9 +74,11 @@ the problem, the data, preprocessing, model selection, training, evaluation,
 limitations and reproducibility. Every number in it traces to a file in
 `models/` or `docs/experiments/`.
 
-[docs/index.md](docs/index.md) maps every document. `docs/PLAN.md` is where the
-project stands; `docs/experiments/` is the record of what was measured;
-`docs/known-limits.md` is what this model cannot do.
+[docs/index.md](docs/index.md) maps every document and labels every library
+module serving or experimental. `docs/PLAN.md` is where the project stands;
+`docs/experiments/` is the record of what was measured; `docs/known-limits.md`
+is what this model cannot do; [CONTRIBUTING.md](CONTRIBUTING.md) is how to run
+the environment, the tests and the promotion gate.
 
 ```bash
 make ready        # is the repository fit to show? prints LOOKS GOOD or NOT YET

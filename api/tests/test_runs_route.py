@@ -92,7 +92,7 @@ def test_an_unreadable_log_loses_the_verdict_and_not_the_run(tmp_path, monkeypat
     assert row["reason"] is None
 
 
-def test_a_log_with_no_reasons_reports_no_reason_rather_than_an_empty_string(tmp_path, monkeypatch):
+def test_log_with_no_reasons_reports_none_not_empty(tmp_path, monkeypatch):
     """The console renders a fallback sentence on a null and the literal cell on
     a string, so an empty string would print an empty Reason beside a verdict."""
     _registry(tmp_path, "served")

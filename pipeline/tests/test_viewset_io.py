@@ -121,9 +121,7 @@ def test_nan_scalars_are_written_through_rather_than_filled(make_view_set, tmp_p
     assert float(features["masks"][mask_idx]) == pytest.approx(0.0)
 
 
-def test_absent_declared_scalars_raise_rather_than_writing_a_shorter_vector(
-    tmp_path, make_view_set
-):
+def test_absent_declared_scalars_raise_not_short_vector(tmp_path, make_view_set):
     # A merge that suffixes a column to _x/_y leaves the declared name absent.
     # Writing a shorter scalar vector and passing every gate is how the transit
     # counts — the whole point of the unfolded branch — went missing. This

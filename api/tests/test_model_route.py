@@ -47,7 +47,7 @@ def _floor(models_dir: Path, monkeypatch) -> dict:
     return response.json()["noise_floor"]
 
 
-def test_a_single_member_run_reports_no_floor_rather_than_a_number(tmp_path, monkeypatch):
+def test_single_member_run_reports_no_floor_not_a_number(tmp_path, monkeypatch):
     """The served champion's case. One model per fold has no seed spread, so
     `2 * sd / sqrt(n)` has nothing to average over. Nulls plus a reason, never a
     figure borrowed from a run that did measure one."""
@@ -60,7 +60,7 @@ def test_a_single_member_run_reports_no_floor_rather_than_a_number(tmp_path, mon
     assert floor["source"]
 
 
-def test_a_multi_member_run_reports_the_floor_its_own_members_measured(tmp_path, monkeypatch):
+def test_multi_member_run_reports_its_members_floor(tmp_path, monkeypatch):
     """`2 * sd / sqrt(n_models_per_fold)`, over the spread the trainer wrote.
     The figures below are Phase 1a seed 44's, whose own log reports
     `auc_floor seed_sd 0.0143` and `pooled gate floor seed_sd 0.0625` at n=3."""
@@ -108,9 +108,7 @@ def test_the_pooled_gate_draw_is_preferred_over_the_per_fold_one(tmp_path, monke
     assert floor["recall"] == 0.05  # 2 * 0.05 / sqrt(4), not 2 * 0.02 / sqrt(4)
 
 
-def test_a_variance_block_missing_a_statistic_nulls_that_one_and_keeps_the_other(
-    tmp_path, monkeypatch
-):
+def test_missing_statistic_nulls_one_and_keeps_the_other(tmp_path, monkeypatch):
     """Partial is not absent. A run that recorded an AUC spread and no recall
     spread has a measured AUC floor, and saying otherwise would discard a real
     measurement to keep the pair tidy."""

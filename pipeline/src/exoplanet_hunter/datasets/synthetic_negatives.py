@@ -1,44 +1,16 @@
 """Synthetic negatives: light curves that cannot contain a transit, by construction.
 
-**What this is for.** Observation baseline correlates +0.3874 with the label on
-TESS and the branch model reads it at +0.5155 — *above* the labels it learned
-from. The mechanism is confirmation bias in the catalogue: a target observed
-across many sectors accumulates the follow-up that promotes it to confirmed,
-while a briefly-observed one stays a candidate or is retired. No architecture
-reaches that, because in the training labels it is true.
+Observation baseline correlates with the label in the catalogue, and no
+architecture reaches that, because in the training labels it is true. Destroying
+the transit in a real curve makes the negative label correct however long the
+star was observed, diluting the association without touching a real label.
 
-A synthetic negative breaks it at the source. Take a real light curve, destroy
-any coherent transit in it, and label the result negative. The label is now
-correct **regardless of how long the star was observed**, so a negative drawn
-from a long-baseline host carries the opposite of the catalogue's association.
-Drawn to match the positives' baseline distribution, they dilute the correlation
-without touching a single real label — which is the only one of stage 8's three
-interventions with no external dependency and the cleanest causal story.
-
-**Two constructions, both standard.** Kepler's Robovetter was characterised
-against exactly these (Coughlin 2016, KSCI-19114):
-
-- **inversion** — reflect the flux about its median, so transits become
-  brightenings. An astrophysical transit cannot go up, so anything recovered
-  from an inverted curve is a false alarm by definition.
-- **scrambling** — cut the curve into segments and permute them in time while
-  leaving the timestamps in place. A periodic transit folded at its original
-  ephemeris now mixes phases and smears out.
-
-Both preserve the star's own noise, cadence gaps and systematics, which a
-generated curve would not. That is the whole point: the negative has to be hard
-in the same way real negatives are hard, or the model learns to spot the
-synthesis instead of the absence of a transit.
-
-**The failure mode this module is built around.** A "synthetic negative" that
-still contains its transit is a *mislabelled positive*, and it is invisible —
-training accepts it, the loss barely moves, and the intervention appears to have
-been tried. So the constructions do not trust their own mechanism: they ask
-whether a transit is still **detectable** at the original ephemeris and raise
-when one is. See `assert_transit_destroyed`, and note that it tests a detection
-significance rather than a fraction of the original depth — the fraction is two
-noisy small numbers divided by each other on a real light curve, and it
-mis-rejected three of the first four real scrambles.
+Two constructions from Kepler's Robovetter work (Coughlin 2016): **inversion**,
+reflecting flux about its median so a transit becomes an impossible brightening,
+and **scrambling**, permuting segments so a periodic transit smears across
+phase. One still holding its transit is a mislabelled positive, invisible in
+training, so neither trusts its own mechanism — see `assert_transit_destroyed`.
+Numbers: `docs/experiments/stage-08-labels-and-negatives.md`.
 """
 
 from __future__ import annotations
@@ -93,16 +65,14 @@ def scramble_flux(
 ) -> np.ndarray:
     """Permute contiguous segments of flux in time, leaving timestamps in place.
 
-    Segment boundaries are drawn at random interior positions rather than at
-    even spacing. Even spacing makes every segment the same length, and a
-    segment length that happens to be an integer multiple of the transit period
-    **preserves phase** — the fold at the original ephemeris comes back
-    unchanged and the "negative" still contains its transit. Random boundaries
-    make that coincidence measure-zero instead of a property of the grid.
+    Segment boundaries are drawn at random interior positions rather than evenly.
+    Even spacing makes every segment the same length, and a length that happens to
+    be an integer multiple of the transit period *preserves phase* — the fold at the
+    original ephemeris comes back unchanged and the "negative" still holds its
+    transit. Random boundaries make that coincidence measure-zero.
 
-    The permutation is also checked to be a derangement of at least one segment;
-    the identity is a legal draw from `permutation` and returns the curve
-    untouched.
+    The permutation is also checked to derange at least one segment: the identity is
+    a legal draw from `permutation` and returns the curve untouched.
     """
     t = np.asarray(time, dtype=float)
     values = np.asarray(flux, dtype=float)
@@ -208,23 +178,15 @@ def assert_transit_destroyed(
     The mechanisms are sound in the abstract and this does not trust them. A
     scramble whose segments align with the period, an inversion of a curve whose
     median sits inside the transit, a curve short enough that one segment holds
-    every transit — each returns something that looks like a synthetic negative
-    and still carries its dip. Training would accept it silently as a
-    mislabelled positive, the loss would barely move, and the intervention would
-    be recorded as tried.
+    every transit — each looks like a synthetic negative and still carries its dip,
+    which training accepts silently as a mislabelled positive.
 
-    **Significance, not a fraction of the original depth.** This checked
-    `after / before < 5%` until 2026-08-12, which is the wrong statistic on real
-    light curves: a catalogue transit is often only a few sigma to begin with, so
-    the ratio is two noisy small numbers divided by each other. On the first real
-    run three of four scrambles "failed", one reporting **620% of the original
-    depth** — the scramble had merely moved a low-flux chunk into the transit
-    window, which is noise, not a surviving transit. The question that matters is
-    not *how much of the dip is left* but *is there a transit here at all*, and
-    that is a detection threshold.
-
-    A curve whose original transit is itself undetectable is rejected: there is
-    nothing to destroy, so the check could neither pass nor fail honestly.
+    It tests a detection significance, not a fraction of the original depth. The
+    fraction is the wrong statistic on a real curve: a catalogue transit is often
+    only a few sigma to begin with, so it divides two noisy small numbers, and on
+    the first real run it mis-rejected three of four scrambles. A curve whose
+    original transit is itself undetectable is rejected — there is nothing to
+    destroy, so the check could neither pass nor fail honestly.
     """
     before = transit_significance(time, original, period, t0, duration)
     if abs(before) <= max_sigma:
@@ -282,16 +244,13 @@ def draw_negative_hosts(
     """Draw hosts whose baseline distribution matches the **positives'**.
 
     This is the part that breaks the correlation rather than merely diluting it.
-    Synthetic negatives drawn uniformly would inherit the pool's own baseline
-    distribution, which is dominated by short-baseline targets — adding them
-    makes "short baseline" an even stronger negative cue and moves the
-    correlation the wrong way. Matching the positives instead puts negatives at
-    exactly the baselines where the catalogue currently has almost none, which is
-    where the confound lives.
+    Drawn uniformly, synthetic negatives would inherit the pool's own short-baseline
+    bulk, making "short baseline" an even stronger negative cue and moving the
+    correlation the wrong way. Matching the positives puts negatives exactly where
+    the catalogue currently has almost none, which is where the confound lives.
 
-    Raises when the pool cannot supply a stratum, rather than backfilling from
-    the short-baseline bulk: a quietly backfilled draw returns a clean number
-    about a distribution that was never built.
+    Raises when the pool cannot supply a stratum rather than backfilling: a quietly
+    backfilled draw returns a clean number about a distribution never built.
     """
     required = {"tic_id", "label"}
     missing = required - set(candidates.columns)

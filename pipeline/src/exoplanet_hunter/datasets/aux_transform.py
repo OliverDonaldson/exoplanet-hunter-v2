@@ -38,15 +38,13 @@ VETTING_AUX_DIM = 13
 
 
 def _log1p_centroid(X: np.ndarray) -> np.ndarray:
-    """log1p the centroid_snr column only. LEGACY, retained UNCHANGED: persisted
-    8/9-dim pipelines (e5388ed9, cebb0fe6, the live ca906040) pickle this
-    function *by reference*, so renaming or altering it breaks their unpickle at
-    serve time. New fits use `_log_heavy_tail_aux`; see it for the rationale.
+    """log1p the centroid_snr column only.
 
-    Centroid_snr is heavy-tailed on the FP cohort (q90=423, max=10436) while
-    the planet body sits around ~1.1; without compression StandardScaler fits
-    the tail and squashes the bulk. Module-level (not a lambda) so persisted
-    pipelines unpickle anywhere.
+    LEGACY, retained UNCHANGED: persisted 8/9-dim pipelines — including the live
+    `ca906040` — pickle this function *by reference*, so renaming or altering it
+    breaks their unpickle at serve time. New fits use `_log_heavy_tail_aux`; see it
+    for the rationale. Module-level, not a lambda, so persisted pipelines unpickle
+    anywhere.
     """
     if X.shape[1] <= CENTROID_COL:
         return X
@@ -65,14 +63,12 @@ def _signed_log1p(v: np.ndarray) -> np.ndarray:
 def _log_heavy_tail_aux(X: np.ndarray) -> np.ndarray:
     """Compress the heavy-tailed aux columns before standardising.
 
-    centroid_snr (idx 8) is log1p'd exactly as the legacy path did. In the
-    13-dim vetting layout, pink_snr (idx 7) and secondary_sig (idx 11) are also
-    heavy-tailed — fed raw, StandardScaler fits their tail and squashes the bulk
-    into a near-constant lane the aux branch can barely read (a linear probe
-    gains +0.036 AUC on pink_snr once signed-logged). They get a *signed* log so
-    the negative tail survives; gated on the full 13-dim layout so legacy 8/9-dim
-    builds (where idx 7 is the catalogue snr) are untouched. Module-level so
-    persisted pipelines unpickle anywhere.
+    `centroid_snr` is log1p'd exactly as the legacy path did. In the 13-dim layout
+    `pink_snr` and `secondary_sig` are heavy-tailed too — fed raw, StandardScaler
+    fits their tail and squashes the bulk into a near-constant lane the aux branch
+    can barely read. They get a *signed* log so the negative tail survives, gated on
+    the full 13-dim layout so legacy builds are untouched. Module-level so persisted
+    pipelines unpickle anywhere.
     """
     if X.shape[1] <= CENTROID_COL:
         return X
@@ -85,14 +81,12 @@ def _log_heavy_tail_aux(X: np.ndarray) -> np.ndarray:
 
 
 def fit_aux_pipeline(train_aux: np.ndarray) -> Pipeline:
-    """Fit impute → log(heavy-tail cols) → standardise on training-fold aux rows.
+    """Fit impute -> log(heavy-tail cols) -> standardise on training-fold aux rows.
 
-    `keep_empty_features=True` is load-bearing: without it, a column that is
-    all-NaN in some refresh (e.g. snr on a small fresh build) gets silently
-    *dropped* by the imputer, the scaler fits one dimension short, and both
-    the tf replay and the model input shape break. With it, dead columns
-    impute to 0, standardise to 0 (unit scale on zero variance), and the aux
-    dimension is stable across catalogue refreshes.
+    `keep_empty_features=True` is load-bearing: without it a column that is all-NaN
+    in some refresh is silently *dropped* by the imputer, the scaler fits one
+    dimension short, and both the tf replay and the model input shape break. With it,
+    dead columns impute to 0 and the aux dimension is stable across refreshes.
     """
     dead = np.isnan(train_aux).all(axis=0)
     if dead.any():

@@ -64,12 +64,11 @@ class ScalarConstants:
 def fit_scalar_constants(index: pd.DataFrame, columns: list[str]) -> ScalarConstants:
     """Fit robust centre and scale from the training rows given.
 
-    Median and MAD rather than mean and standard deviation: the DV scalars have
-    heavy tails and one outlier would otherwise set the scale for the whole
-    column. Columns needing a log scale are already stored that way — the shard
-    writer applies it, because a float32 record cannot hold the raw values (see
-    `LOG_SCALED_COLUMNS`), so the index this reads and the shards the model
-    reads carry the same numbers.
+    Median and MAD rather than mean and standard deviation: the DV scalars have heavy
+    tails and one outlier would set the scale for a whole column. Columns needing a
+    log scale are already stored that way by the shard writer, because a float32
+    record cannot hold the raw values, so the index this reads and the shards the
+    model reads carry the same numbers.
     """
     if not columns:
         return ScalarConstants.from_arrays(np.zeros(0), np.ones(0))
@@ -82,15 +81,14 @@ def fit_scalar_constants(index: pd.DataFrame, columns: list[str]) -> ScalarConst
 def parse_viewset_shards(shard_files: list[str], metadata: dict) -> tf.data.Dataset:
     """Decode every shard once, cached, for reuse across folds and splits.
 
-    Only normalisation is per-fold, and that happens downstream — so the parsed
-    stream is shareable. It was being rebuilt per call instead: `run_fold` opens
-    four streams (train, the validation stream inside `fit`, validation again to
-    calibrate, then test) and five folds made 20 full decodes of all 11 shards,
-    ~13 GB of redundant parse work, plus one live cache per stream.
+    Only normalisation is per-fold and that happens downstream, so the parsed stream
+    is shareable. It was being rebuilt per call instead: `run_fold` opens four
+    streams, and five folds made twenty full decodes of every shard — gigabytes of
+    redundant parse work, plus one live cache per stream.
 
-    Reads are deterministic, not AUTOTUNE-parallel: the cache fixes whatever
-    order it first materialises, and unshuffled order matching the index is what
-    prediction alignment rests on.
+    Reads are deterministic, not AUTOTUNE-parallel: the cache fixes whatever order it
+    first materialises, and unshuffled order matching the index is what prediction
+    alignment rests on.
     """
     return (
         tf.data.TFRecordDataset(shard_files)
@@ -117,21 +115,16 @@ def make_viewset_dataset(
 ) -> tf.data.Dataset:
     """Build one split's (inputs_dict, label) stream from a view-set shard set.
 
-    Pass `base` — a `parse_viewset_shards` result — to share one decode across
-    every fold and split; without it each call decodes the shard set itself.
+    Pass `base`, a `parse_viewset_shards` result, to share one decode across every
+    fold and split. `augment` applies only to the training split and runs after the
+    cache, so every epoch draws fresh.
 
-    `augment` applies only to the training split and runs after the cache, so
-    every epoch draws fresh.
-
-    `with_tic_id` yields a third element for prediction streams, so alignment
-    can be asserted against the identity of the row rather than its label. It
-    is not for `fit`, which takes the two-tuple.
-
-    `weight_table` yields a third element too — a per-example sample weight,
-    which is what `fit` does with a three-tuple. Stage 8's propensity arm. It is
-    mutually exclusive with `with_tic_id` **because they occupy the same slot**:
-    a prediction stream built with both would hand `fit` a tensor of TIC IDs as
-    its sample weights, which trains perfectly happily and is nonsense.
+    `with_tic_id` yields a third element for prediction streams, so alignment can be
+    asserted against the row's identity rather than its label. `weight_table` yields
+    a third element too — the per-example sample weight `fit` expects. They are
+    mutually exclusive because they occupy the same slot: a stream built with both
+    would hand `fit` a tensor of TIC IDs as sample weights, which trains perfectly
+    happily and is nonsense.
     """
     if with_tic_id and augment is not None:
         raise ValueError("with_tic_id is for prediction streams; augmentation is training-only")

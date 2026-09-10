@@ -320,7 +320,7 @@ def test_secondary_thermal_escape_hatch_rescues_hot_jupiter():
     assert not with_teff.suspicious  # thermal arm rescues the hot Jupiter
 
 
-def test_secondary_thermal_hatch_still_flags_deep_eclipsing_binary():
+def test_thermal_hatch_still_flags_deep_eclipsing_binary():
     # A 30%-of-primary secondary blows past the 10% depth gate, so neither arm
     # rescues it even with a temperature: a genuine EB stays flagged.
     time, flux = synthetic_with_secondary(0.01, 0.003, period=2.0)
@@ -485,7 +485,7 @@ def test_catalogue_ephemeris_rejects_dirty_and_missing(tmp_path):
     assert scorer._catalogue_ephemeris(999) is None  # absent
 
 
-def test_apply_injection_dims_only_in_transit_and_preserves_metadata():
+def test_injection_dims_in_transit_and_keeps_metadata():
     """The injection hook must edit flux in place in the served path's own units."""
     import astropy.units as u
     import lightkurve as lk

@@ -1,18 +1,15 @@
 """Follow-up prioritisation metrics: TSM, ESM, predicted mass, predicted K.
 
-Implements the NExScI "Supplementary ExoFOP Calculations" recipes (Kempton
-et al. 2018 metrics; Chen & Kipping 2017 mass-radius relation as applied by
-Louie et al. 2018) so we can compute these numbers for candidates that
-ExoFOP doesn't cover: CTOIs, and our own model's discoveries scored ad hoc.
-For TOIs the NExScI-published values are used as-is (they draw on TFOP
-working-group spreadsheets we can't see); this module exists for everything
-else, and its outputs are pinned against the document's TOI-664.01 worked
-example in tests.
+Implements the NExScI "Supplementary ExoFOP Calculations" recipes (Kempton 2018
+metrics; Chen & Kipping 2017 mass-radius as applied by Louie 2018) so we can
+compute these for candidates ExoFOP does not cover: CTOIs, and our own model's
+discoveries scored ad hoc. For TOIs the NExScI-published values are used as-is,
+since they draw on TFOP spreadsheets we cannot see.
 
-All functions are float/ndarray-vectorised. Units are handled by astropy
-(`units`, `constants`, `modeling.BlackBody`) exactly as in the reference
-implementation; NaN inputs propagate to NaN outputs so callers can compute
-column-wise over incomplete catalogues.
+Outputs are pinned against the document's TOI-664.01 worked example in tests.
+All functions are float/ndarray-vectorised, units handled by astropy exactly as
+in the reference implementation, and NaN inputs propagate to NaN outputs so
+callers can compute column-wise over incomplete catalogues.
 """
 
 from __future__ import annotations

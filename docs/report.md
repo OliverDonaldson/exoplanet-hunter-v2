@@ -645,13 +645,33 @@ which makes compute budgeting unreliable for any future sweep.
 dedup that makes the split leak-free also discards every multi-planet system's
 additional rows. §2.2 and §5.1. Both cost power.
 
-**Only one of this project's headline numbers is comparable to a published one.**
-A benchmark-comparability audit on 2026-09-10 found that of six candidate
-comparisons, five fail on population, protocol or metric definition, and the
-survivor — TESS ROC-AUC against ExoMiner++ — is one this project loses. The
-decision metric it promotes on, recall @1% FPR, has no published counterpart in
-any of the five studies examined. See
-[`experiments/benchmark-comparability-2026-09-10.md`](experiments/benchmark-comparability-2026-09-10.md).
+**This project is behind the published state of the art on the metric it
+promotes on, and the size of the gap is now bounded.** A benchmark-comparability
+audit on 2026-09-10, whose six verdicts were then put through a three-refuter
+adversarial panel, found that of six candidate comparisons to published work,
+five fail on population, protocol or metric definition and cannot be stated in
+either direction.
+
+The sixth can. An earlier draft of this section claimed that recall @1% FPR —
+the metric promotion is decided on — has no published counterpart. **That was
+wrong, and the correction is unfavourable.** ROC curves are non-decreasing, so
+any published operating point at an FPR below 1% is a valid lower bound on
+recall @1% FPR, and two of the five sources publish one:
+
+| source | published point | implied FPR | ⇒ bound | ours |
+|---|---|---:|---:|---:|
+| ExoMiner 2022 (Kepler) | recall 0.936 at 99% precision | 0.077% | ≥ 0.936 | 0.8129 |
+| ExoMiner++ (TESS) | recall 0.951 | 0.47% | **≥ 0.951** | **0.3113** |
+
+This project's own realised cuts are stricter still — 0.94% FPR on TESS, 0.70%
+on Kepler — so the inequality runs the right way and the comparison is valid
+one-sided: roughly **12 points behind on Kepler and 64 points behind on TESS**.
+Negative-class composition affects the magnitude, not the sign.
+
+It is stated here because the alternative is not rigour. The audit's original
+refusal to compare read as methodological care; on the one metric that governs
+promotion it was suppressing a 64-point deficit, and the refuting agent said so.
+See [`experiments/benchmark-comparability-2026-09-10.md`](experiments/benchmark-comparability-2026-09-10.md) §8.
 
 **The decision metric has too little power to settle architecture questions.**
 §6.4. This is the limitation that most shapes what §4 can and cannot claim.

@@ -71,7 +71,7 @@ def make_image(
 
 
 class TestRegridStamp:
-    def test_an_11px_stamp_lands_centred_and_the_rest_is_marked_absent(self):
+    def test_11px_stamp_lands_centred_and_rest_is_marked_absent(self):
         stamp = regrid_stamp(make_image(height=11, width=11))
         assert stamp.shape == (DIFF_GRID, DIFF_GRID, DIFF_CHANNELS)
         present = stamp[..., -1]
@@ -231,7 +231,7 @@ class TestTargetChannel:
     *measurement* rather than that placement restated.
     """
 
-    def test_the_marker_carries_the_subpixel_position_not_the_rounded_one(self):
+    def test_marker_carries_subpixel_not_rounded_position(self):
         # 0.3 px below and 0.25 px right of the box centre. A hard one-hot at the
         # rounded pixel would put all the mass in one cell and lose both.
         stamp = regrid_stamp(make_image(target_row=400 + 5 + 0.3, target_col=700 + 5 + 0.25))
@@ -287,7 +287,7 @@ class TestTargetChannel:
         assert blind.target_position is None
         assert regrid_stamp(blind) is None
 
-    def test_a_star_outside_the_frame_is_absent_rather_than_clipped_to_an_edge(self):
+    def test_star_outside_the_frame_is_absent_not_clipped_to_an_edge(self):
         # Clipping would place the star on the border and let the branch read a
         # centroid offset against a position the data does not support.
         assert regrid_stamp(make_image(target_row=400 - 40.0)) is None

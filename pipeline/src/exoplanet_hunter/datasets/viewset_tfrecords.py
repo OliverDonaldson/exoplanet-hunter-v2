@@ -1,20 +1,16 @@
 """TFRecord shards for the branch-model view set.
 
 Parallel to `tfrecords.py`, the legacy 9-dim two-view schema that feeds the live
-model. This one is generic over `VIEW_SHAPES`, so adding a branch means adding
-it there and nowhere else. The bin counts are deliberately not restated here: a
+model. This one is generic over `VIEW_SHAPES`, so adding a branch means adding it
+there and nowhere else. The bin counts are deliberately not restated here: a
 docstring naming a resolution is a second declaration of it, and this file
-carried "301/31" for two days after the set became 2001/201.
+carried a stale one for two days after the set changed.
 
     viewset-00000-of-00011.tfrecord
     metadata.json   view shapes, scalar columns, n_examples, n_shards
     index.parquet   the scalars table, in shard order
 
-**Sizing, re-measured 2026-08-08: 699 MB over 5,426 examples, ~129 kB each**,
-against the legacy set's 47 MB. This supersedes the 2026-08-01 figure of ~26 kB
-per example (~150 MB total), which was measured before the 2001/201 restore and
-was the basis for calling `tf.data.cache()` affordable. That decision still
-holds on a 24 GB machine, but it rests on 699 MB rather than 150.
+Sizing, and the caching decision: `docs/experiments/stage-05-viewset.md`.
 """
 
 from __future__ import annotations
@@ -87,13 +83,12 @@ def write_viewset_shards(
 ) -> dict:
     """Serialise a `ViewSetArrays` into shards + metadata + index.
 
-    Rows are permuted once, deterministically, before sharding. The catalogue
-    arrives mission-blocked — TESS, then Kepler, then K2 — and a `tf.data`
-    shuffle buffer of 1,024 over a ~3,470-row split never spans that, so every
-    batch held one mission. With a `BatchNormalization` in all 11 conv towers
-    that means batch statistics computed on a single mission, and an epoch that
-    walks the missions in order as an unintended curriculum. The index is
-    permuted with the views, so shard order still matches it row for row.
+    Rows are permuted once, deterministically, before sharding. The catalogue arrives
+    mission-blocked and a `tf.data` shuffle buffer never spans that, so every batch
+    held one mission — meaning `BatchNormalization` statistics computed on a single
+    mission in all eleven towers, and an epoch that walks the missions in order as an
+    unintended curriculum. The index is permuted with the views, so shard order still
+    matches it row for row.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     # A rebuild with a different example count names its shards differently, so

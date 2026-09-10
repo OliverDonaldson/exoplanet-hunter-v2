@@ -14,6 +14,7 @@ promotion gate → live FastAPI scoring → the vetting console.
 | [report.md](report.md) | the write-up: problem, data, preprocessing, model selection, training, evaluation, limitations, reproducibility — rendered to [report.pdf](report.pdf) |
 | [PLAN.md](PLAN.md) | where the project stands and the delivery steps left |
 | [showcase-readiness.md](showcase-readiness.md) | what `make ready` checks before the project is fit to show, and why |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | environment, how the tests are run, the promotion rule, the PR rule |
 | [../CLAUDE.md](../CLAUDE.md) | the rules every session works under |
 | [experiments/](experiments/README.md) | the record of what was measured, one frozen file per stage |
 | [known-limits.md](known-limits.md) | the weakness register and the limits every result is read under |
@@ -43,6 +44,107 @@ carry theirs in the files themselves.
 | `api/` | FastAPI serving |
 | `frontend/` | the vetting console: `design-console/`, built by `build.py` into one static file |
 | `docker/`, `infra/` | images and deployment config |
+
+### Every library module, serving or experimental
+
+**Serving** means the module is imported into the deployed API process — it is
+reachable from `api/app/` in the import graph, or it is named inside a serving
+artefact. **Experimental** means it builds data, trains, evaluates, or produced
+an entry in [`experiments/`](experiments/README.md), and no `/score` request
+touches it. The split is mechanical and can be recomputed from the import graph;
+`__init__.py` re-export shims are omitted.
+
+Three things about the labels are worth stating, because a reader would
+reasonably assume otherwise:
+
+- **`models/cnn_dualview.py` is experimental.** Serving loads
+  `cnn_dualview.keras` and never rebuilds the architecture, so the module that
+  *defines* the champion is not on the serving path. It is the reference for
+  what was trained, not what runs.
+- **`datasets/aux_transform.py` and `training/calibration.py` are serving, and
+  no import statement says so.** The served calibration bundle is a joblib
+  pickle that names both modules by path — verified against
+  `models/cv/ca906040.../fold_0/cnn_calibrator.joblib` — so renaming either
+  breaks scoring at load time with no compile-time warning. This is what
+  `_log1p_centroid`'s docstring means by "pickled by reference".
+- **`preprocess/viewset.py`, `diffimage.py` and `momentum.py` are imported but
+  not called** on the dual-view path. They arrive through `preprocess/__init__`
+  and build the branch model's views; W4 in
+  [`known-limits.md`](known-limits.md) is the fact that no branch model can be
+  scored from a light curve at all.
+
+| Module | Role |
+|---|---|
+| `data/catalog.py` | experimental |
+| `data/download.py` | **serving** |
+| `data/dv.py` | experimental |
+| `data/dv_xml.py` | **serving** |
+| `data/exofop.py` | **serving** |
+| `data/ffi.py` | experimental |
+| `data/gaia.py` | experimental |
+| `data/stellar.py` | **serving** |
+| `datasets/augment.py` | experimental |
+| `datasets/aux_transform.py` | **serving** (via the pickled bundle) |
+| `datasets/baseline_bias.py` | experimental |
+| `datasets/pipeline.py` | experimental |
+| `datasets/synthetic_negatives.py` | experimental |
+| `datasets/tfrecords.py` | experimental |
+| `datasets/views_io.py` | experimental |
+| `datasets/viewset_augment.py` | experimental |
+| `datasets/viewset_io.py` | experimental |
+| `datasets/viewset_pipeline.py` | experimental |
+| `datasets/viewset_tfrecords.py` | experimental |
+| `eval/comparison.py` | experimental |
+| `eval/control_arm.py` | experimental |
+| `eval/control_lane.py` | experimental |
+| `eval/injection_recovery.py` | **serving** |
+| `eval/metrics.py` | experimental |
+| `eval/observation_bias.py` | **serving** |
+| `eval/scoring.py` | experimental |
+| `eval/vetting.py` | experimental |
+| `features/aux.py` | **serving** |
+| `features/centroid.py` | **serving** |
+| `features/followup.py` | **serving** |
+| `features/handcrafted.py` | **serving** |
+| `features/noise.py` | **serving** |
+| `models/baseline_rf.py` | experimental |
+| `models/cnn_branches.py` | experimental |
+| `models/cnn_dualview.py` | experimental (the served weights, not the served code) |
+| `models/losses.py` | experimental |
+| `models/uncertainty.py` | **serving** |
+| `preprocess/clean.py` | **serving** |
+| `preprocess/diffimage.py` | **serving** (imported, branch-only) |
+| `preprocess/fold.py` | **serving** |
+| `preprocess/momentum.py` | **serving** (imported, branch-only) |
+| `preprocess/views.py` | **serving** |
+| `preprocess/viewset.py` | **serving** (imported, branch-only) |
+| `scoring/diagnostics.py` | **serving** |
+| `scoring/ensemble.py` | **serving** |
+| `scoring/service.py` | **serving** |
+| `search/bls.py` | **serving** |
+| `search/tls.py` | **serving** |
+| `training/calibration.py` | **serving** (via the pickled bundle) |
+| `training/mlflow_utils.py` | experimental |
+| `training/precision.py` | experimental |
+| `training/splits.py` | experimental |
+| `training/train.py` | experimental |
+| `training/train_branches.py` | experimental |
+| `training/tune.py` | experimental |
+| `utils/logging.py` | **serving** |
+| `utils/paths.py` | experimental |
+| `utils/provenance.py` | experimental |
+| `utils/seeds.py` | experimental |
+| `validation/leakage.py` | experimental |
+| `validation/promotion.py` | experimental |
+| `validation/schemas.py` | experimental |
+| `validation/shrink.py` | experimental |
+| `validation/statistical.py` | experimental |
+| `validation/trigger.py` | experimental |
+
+26 serving, 39 experimental, 65 modules.
+
+The API's own modules — `api/app/main.py`, `ratelimit.py`, `schemas.py` and the
+five route modules — are all serving by construction.
 
 ## The rules that do not bend
 

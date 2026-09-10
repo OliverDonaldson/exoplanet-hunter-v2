@@ -1,24 +1,16 @@
 """Does the model score the transit, or the observation?
 
-The original finding, over 3,919 scored candidates: probability correlated
-**+0.211** with observation baseline and **-0.003** with transit count.
+Probability correlates positively with observation baseline and near zero with
+transit count, and this module measures both against columns that are named
+rather than assumed — because the original reading used the wrong one twice.
+`expected_transit_count` is baseline / period: neither a baseline nor a count of
+anything caught.
 
-`candidate_bias.py` reproduced both on 3,908 of those rows and established which
-column each was measured against:
-
-- **+0.211 was right.** Baseline in days recomputes to **+0.208**.
-- **-0.003 was the wrong column.** It is the correlation with
-  `expected_transit_count` — the transits the ephemeris *predicts*. Against the
-  transits actually *captured* it is **-0.048**.
-
-`expected_transit_count` is baseline / period, so it is neither a baseline nor a
-count of anything caught. An earlier version of this module then compounded the
-confusion by using it as the *baseline* proxy, where it reported -0.068 against
-the +0.239 that days reports on the same predictions. The two errors ran in
-opposite directions on the same column, which is why each looked plausible.
-
-`baseline_days` is the default and is derived explicitly. Passing the count is
-still possible, but only by naming it.
+Read as the transit count it reports about -0.003; against transits actually
+captured it is -0.048. An earlier version then used the same column as the
+*baseline* proxy and reported the opposite sign to what days give on the same
+predictions, which is why each error looked plausible. `baseline_days` is the
+default and derived explicitly. Numbers: `docs/experiments/observation-baseline.md`.
 """
 
 from __future__ import annotations
@@ -85,14 +77,12 @@ def measure_observation_bias(
 ) -> ObservationBias:
     """Rank correlations of score against transit count, baseline, completeness.
 
-    Spearman rather than Pearson: transit counts are heavily skewed (median 3,
-    max 881 over the FFI targets), and a Pearson coefficient there mostly
-    reports the tail.
+    Spearman rather than Pearson: transit counts are heavily skewed, and a Pearson
+    coefficient there mostly reports the tail.
 
-    `baseline_column` defaults to `baseline_days` and is derived by
-    `baseline_days()` when the frame does not already carry it. Passing
-    `expected_transit_count` here measures a different thing — see the module
-    docstring — and is left available only so that the old number can be
+    `baseline_column` defaults to `baseline_days` and is derived when the frame does
+    not carry it. Passing `expected_transit_count` measures a different thing — see
+    the module docstring — and is left available only so the old number can be
     reproduced deliberately.
     """
     scores = np.asarray(scores, dtype=float).ravel()

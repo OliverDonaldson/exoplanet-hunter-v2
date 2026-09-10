@@ -1,25 +1,16 @@
-"""Per-diagnostic branch CNN — stage 4 (old 2(a)) of the ExoMiner rebuild.
+"""Per-diagnostic branch CNN — stage 4 of the ExoMiner rebuild.
 
 One conv tower per view, each with its own scoped scalars, then a late-fusion
 head. Reimplemented from the ExoMiner/ExoMiner++ papers; their branch structure
 is credited, their code is not vendored (NASA NOSA licence).
 
-Three things are structural rather than stylistic:
-
-**Presence masks gate their branch.** Every view carries a `present` channel
-and the DV/RUWE scalars carry a mask. A branch with no data contributes zero to
-the fusion rather than a learned bias on zeros, which is what stops a missing
-branch poisoning every row of a mission.
-
-**Scoped scalars join after their own tower.** A scalar concatenated into a
-global feature vector is the 13-dim aux null again; attached to the branch it
-qualifies, it can modulate that branch's evidence.
-
-**Pooling across transits is masked.** The unfolded stack is zero-padded to
-`MAX_TRANSITS` and 30.4% of the training set carries at least one padded slot,
-so an unmasked pool would make the branch's output scale with how many transits
-a target happened to catch — which correlates with the label. See
-`_unfolded_branch` and `MaskedTransitPool`.
+Three things are structural. Presence masks gate their branch, so a branch with
+no data contributes zero rather than a learned bias on zeros — which is what
+stops a missing branch poisoning every row of a mission. Scoped scalars join
+after their own tower, because a scalar concatenated into a global vector is the
+13-dim aux null again. And pooling across transits is masked: the unfolded stack
+is zero-padded, so an unmasked pool would scale the branch's output with how
+many transits a target caught, which correlates with the label.
 """
 
 from __future__ import annotations
@@ -124,17 +115,11 @@ BRANCH_NAMES: frozenset[str] = frozenset(
 )
 
 #: How stage 7's leave-one-out attribution groups those branches. A family is
-#: dropped as a unit where its members are the same measurement and a partial
-#: drop would answer no clean question: the periodogram pair is one diagnostic
-#: masked two ways, and the flux family shares a conv tower, so removing
-#: `local_view` alone would also change what `odd - even` is measured against.
-#:
-#: `global_view` is kept apart from the flux family despite being folded flux —
-#: it is 2001 bins through its own tower, so it is separately attributable and
-#: separating it costs one run.
-#:
-#: These partition `BRANCH_NAMES` exactly; `test_the_families_partition_every_
-#: branch` is what keeps that true as branches are added.
+#: dropped as a unit where a partial drop would answer no clean question — the
+#: flux family shares a conv tower, so removing `local_view` alone changes what
+#: `odd - even` is measured against. `global_view` stays apart because its own
+#: tower makes it separately attributable. These partition `BRANCH_NAMES`
+#: exactly, and a test keeps that true as branches are added.
 BRANCH_FAMILIES: dict[str, tuple[str, ...]] = {
     "flux": ("local_view", CONTRAST_BRANCH, "secondary_view"),
     "global": ("global_view",),
@@ -156,17 +141,15 @@ BRANCH_FAMILIES: dict[str, tuple[str, ...]] = {
 def resolve_dropped_branches(spec: object) -> frozenset[str]:
     """Branch names to leave out of fusion, from a family or branch spec.
 
-    Leaving a branch out has to be a *declared experiment* rather than a code
-    edit: `run_config.model_config` records whatever `model_cfg` carries, so a
-    run's own summary states which branches it was missing. Editing
-    `build_cnn_branches` to comment one out records nothing, and stage 4 already
-    produced four runs whose architecture was not recoverable from the artefact.
+    Leaving a branch out has to be a *declared experiment* rather than a code edit:
+    `run_config.model_config` records whatever `model_cfg` carries, so a run's own
+    summary states which branches it was missing. Editing `build_cnn_branches` to
+    comment one out records nothing, and stage 4 produced four runs whose
+    architecture was not recoverable from the artefact.
 
-    Accepts family names (`"periodogram"`) and individual branch names
-    (`"gap_view"`). Both raise on anything unrecognised rather than silently
-    dropping nothing — an ablation that quietly ablated nothing would report a
-    delta of zero and read as "this branch does not matter", which is the
-    opposite of what happened.
+    Accepts family names and individual branch names, and raises on anything
+    unrecognised rather than silently dropping nothing — an ablation that ablated
+    nothing would report a delta of zero and read as "this branch does not matter".
     """
     if spec is None or isinstance(spec, bool):
         return frozenset()
@@ -357,29 +340,19 @@ def _unfolded_branch(
 ) -> tf.Tensor:
     """Per-transit tower under `TimeDistributed`, then a masked pool across transits.
 
-    What the branch was always documented to do, and did not. Until 2026-08-08
-    it reshaped `(transits, bins, channels)` to `(transits, bins * channels)`
-    and convolved along the **transit** axis, so the 201 phase bins became 603
-    unordered channels, the transit shape was destroyed before the first
-    convolution, and no weights were shared across phase. The branch could not
-    see what a single transit looks like — only how flattened transit vectors
-    varied down the sequence. It also spent **48,256 of the model's 215,281
-    parameters** on that one 603-channel convolution.
+    Until 2026-08-08 this reshaped `(transits, bins, channels)` to
+    `(transits, bins * channels)` and convolved along the *transit* axis, so the
+    phase bins became unordered channels and the transit shape was destroyed before
+    the first convolution. The branch could not see what a single transit looks
+    like, and it spent a fifth of the model's parameters on that one convolution.
 
-    **Its own tower, not the shared flux one.** ExoMiner stacks the unfolded
-    transits into the same `TimeDistributed` call as the folded local family,
-    and the shapes here would allow it. `BatchNormalization` under
-    `TimeDistributed` computes its statistics over batch × stack entries, so
-    twenty low-SNR single transits would set the normalisation for the four
-    high-SNR folded views as well — moving `local_view`, the odd/even contrast
-    and `secondary_view` in the same change that fixes this branch, and
-    confounding the attribution stage 7 (old D) exists to do.
-
-    **Three statistics, not an average.** A mean across transits is the folded
-    view again, which is the thing this branch exists to avoid. `mean` is the
-    reference, `max` catches a single anomalous transit, and the spread is the
-    transit-to-transit variation an eclipsing binary or a background blend
-    shows and a planet does not.
+    It gets its own tower rather than joining the shared flux one, because
+    `BatchNormalization` under `TimeDistributed` computes statistics over batch by
+    stack entries — twenty low-SNR single transits would set the normalisation for
+    the folded views too, moving three other branches in the change that fixes this
+    one. Three statistics rather than an average: `mean` as reference, `max` for a
+    single anomalous transit, and the spread an eclipsing binary shows and a planet
+    does not.
     """
     _, bins, channels = view.shape[1:]
     tower = _conv_tower_model(
@@ -414,23 +387,18 @@ def _difference_branch(
 ) -> tf.Tensor:
     """Per-sector 2-D tower, pooled across sectors by attention over DV's quality.
 
-    A star's difference image is measured once per sector, and the sectors are
-    not equally worth reading: DV publishes a quality metric per image, and
-    17.5% of them are flagged invalid. A plain mean over sectors would let one
-    bad image drag a good one, and there is no fixed number of them to average —
-    the count runs from 1 to 43, with a median of 3.
+    A star's difference image is measured once per sector and the sectors are not
+    equally worth reading — DV publishes a quality metric per image and flags a
+    sixth of them invalid, the count per target runs from 1 to 43, and a plain mean
+    would let one bad image drag a good one. So the pool is an attention whose
+    logits see both the encoded stamp and DV's quality for it: quality alone would
+    ignore what the image shows, the embedding alone that DV already said which to
+    distrust.
 
-    So the pool is an attention over sectors whose logits see both the encoded
-    stamp and DV's own quality for it. Weighting on quality *alone* would ignore
-    what the image shows; on the embedding alone it would ignore that DV already
-    said which images to distrust.
-
-    **The mask, not a mean.** 58.9% of the set has no difference image at all,
-    and unmeasured sectors are zero-padded slots. Attention over them would put
-    the padding's learned embedding into the pool, and — because the number of
-    measured sectors is how many times TESS looked at the star — make this
-    branch's output scale with observation baseline, which is the confound the
-    whole project has been pulling out of its metrics.
+    Padded slots are masked rather than averaged. Attention over them would pool the
+    padding's learned embedding and, because the number of measured sectors is how
+    many times TESS looked at the star, make this branch's output scale with
+    observation baseline — the confound the project has spent stages removing.
     """
     tower = _conv_tower_2d(
         tuple(view.shape[2:]),
@@ -471,16 +439,14 @@ class SectorPresence(layers.Layer):
 class MaskedAttentionPool(layers.Layer):
     """Softmax over measured slots only, then the weighted sum of their embeddings.
 
-    Takes `[encoded, logits, measured]` — `(batch, slots, width)` embeddings,
-    `(batch, slots, 1)` attention logits and the `(batch, slots)` flags — and
-    returns `(batch, width)`.
+    Takes `[encoded, logits, measured]` and returns `(batch, width)`.
 
-    **Finite when nothing is measured, which is the common case here.** Masking
-    by adding `-inf` to absent slots is the textbook form and returns NaN when
-    every slot is absent — true for 58.9% of this set. The branch is gated on
-    presence downstream and a gate multiplies, so `NaN * 0` would poison the
-    whole model rather than contribute nothing. A large finite offset plus an
-    explicit zeroing keeps every row finite.
+    Finite when nothing is measured, which is the common case here. Masking by
+    adding `-inf` to absent slots is the textbook form and returns NaN when every
+    slot is absent — true for most of this set. The branch is gated on presence
+    downstream and a gate multiplies, so `NaN * 0` would poison the whole model
+    rather than contribute nothing. A large finite offset plus an explicit zeroing
+    keeps every row finite.
     """
 
     def __init__(self, offset: float = 1.0e9, **kwargs: Any) -> None:
@@ -580,19 +546,17 @@ class PickColumns(layers.Layer):
 class TransitPresence(layers.Layer):
     """Which transit slots hold at least one measured bin.
 
-    `preprocess.viewset._unfolded` allocates `zeros((MAX_TRANSITS, bins, 3))`
-    and fills only the epochs that caught a cadence, so an unused slot is all
-    zeros — presence channel included. Nothing downstream can tell a padded
-    slot from a measured one unless it reads that channel, and padding is
-    neither rare nor label-neutral: **30.4% of the training set carries at
-    least one padded slot**, 16% have fewer than ten of twenty filled, and on
-    TESS the 25th percentile of occupancy is 0.50. On K2 planet hosts average
-    12.4 filled slots against 17.2 for false positives.
+    `preprocess.viewset._unfolded` allocates a zero-filled `(MAX_TRANSITS, bins, 3)`
+    and fills only the epochs that caught a cadence, so an unused slot is all zeros,
+    presence channel included, and nothing downstream can tell it from a measured one
+    without reading that channel.
 
-    So an unmasked pool would divide by twenty regardless and make the branch's
-    output scale with occupancy — reintroducing the observation-baseline
-    confound (roadmap, stage 8) through the one branch built to measure
-    transits rather than hosts.
+    Padding is neither rare nor label-neutral — a third of the training set carries
+    at least one padded slot, and occupancy differs by label. An unmasked pool would
+    divide by `MAX_TRANSITS` regardless and make the branch's output scale with
+    occupancy, reintroducing the observation-baseline confound through the one branch
+    built to measure transits rather than hosts. Numbers:
+    `docs/experiments/stage-08-labels-and-negatives.md`.
     """
 
     def call(self, view: tf.Tensor) -> tf.Tensor:
@@ -606,15 +570,11 @@ class TransitPresence(layers.Layer):
 class MaskedTransitPool(layers.Layer):
     """Mean, max and spread of the per-transit embeddings, over measured slots only.
 
-    Takes `[encoded, measured]` — `(batch, transits, width)` embeddings and the
-    `(batch, transits)` flags from `TransitPresence` — and returns
-    `(batch, 3 * width)`.
+    Takes `[encoded, measured]` and returns `(batch, 3 * width)`.
 
-    Every statistic stays finite when nothing is measured. The branch is gated
-    on the view's presence channel downstream, and a gate multiplies: `NaN * 0`
-    is `NaN`, so a pool that returned NaN on an empty stack would poison the
-    whole model rather than contributing nothing. Five training rows have zero
-    filled slots.
+    Every statistic stays finite when nothing is measured. The branch is gated on the
+    view's presence channel downstream and a gate multiplies, so a pool returning NaN
+    on an empty stack would poison the whole model rather than contribute nothing.
     """
 
     def __init__(self, epsilon: float = SPREAD_EPSILON, **kwargs: Any) -> None:
@@ -636,15 +596,12 @@ class MaskedTransitPool(layers.Layer):
         variance = tf.reduce_sum(tf.square(deviation), axis=1) / divisor
         spread = tf.sqrt(variance + self.epsilon)
 
-        # Lowest representable rather than zero: `max` over `encoded * mask`
-        # would be correct only while the tower ends in a ReLU, and would go
-        # silently wrong the day it does not.
-        #
-        # A *scalar* `lowest`, broadcast by `tf.where`, rather than a
-        # `tf.fill(tf.shape(encoded), ...)`: filling from a dynamic shape leaves
-        # the result with no static shape, the concat below inherits that, and
-        # `_ConcatGradV2` then aborts the process — not an exception — when the
-        # gradient runs.
+        # Lowest representable rather than zero: `max` over `encoded * mask` is
+        # correct only while the tower ends in a ReLU. A *scalar* `lowest`
+        # broadcast by `tf.where`, not `tf.fill(tf.shape(...))`: a dynamic shape
+        # leaves the result with no static shape, the concat inherits that, and
+        # `_ConcatGradV2` aborts the process — not an exception — on the backward
+        # pass.
         lowest = tf.constant(encoded.dtype.min, dtype=encoded.dtype)
         largest = tf.reduce_max(tf.where(mask > 0.0, encoded, lowest), axis=1)
         largest = tf.where(count > 0.0, largest, tf.zeros_like(largest))
@@ -663,13 +620,11 @@ class MaskedTransitPool(layers.Layer):
 class SpreadMeasurable(layers.Layer):
     """1.0 when enough transit slots were measured for a spread to mean anything.
 
-    A spread of zero from one transit and a spread of zero from twenty
-    identical transits are the same float with opposite meanings — the first is
-    *unmeasured*, the second is the strongest evidence the branch can offer. On
-    its own that is this project's recurring defect: a plausible number where
-    the honest answer is "no measurement". The head cannot recover the
-    distinction from the scoped scalars either, because `observed_transit_count`
-    is the true count and the stack is capped at `MAX_TRANSITS`.
+    A spread of zero from one transit and from twenty identical transits are the same
+    float with opposite meanings — the first unmeasured, the second the strongest
+    evidence the branch can offer. The head cannot recover the distinction from the
+    scoped scalars either, because `observed_transit_count` is the true count while
+    the stack is capped at `MAX_TRANSITS`.
     """
 
     def __init__(self, minimum: int = MIN_TRANSITS_FOR_SPREAD, **kwargs: Any) -> None:

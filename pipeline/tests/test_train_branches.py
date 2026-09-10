@@ -130,7 +130,7 @@ def test_every_fold_leaves_a_servable_artefact(single_run):
         assert {"calibrator", "platt_a", "platt_b", "scalar_constants"} <= set(bundle)
 
 
-def test_the_checkpoint_reloads_without_disabling_keras_safe_mode(single_run):
+def test_checkpoint_reloads_without_disabling_keras_safe_mode(single_run):
     """A `Lambda` over a Python lambda needs `safe_mode=False` to deserialise,
     which would make every promoted checkpoint unloadable without waiving a
     safety check. The gating and column-picking layers are registered instead."""
@@ -150,7 +150,7 @@ def test_an_ensemble_fold_writes_every_member_and_averages_them(ensemble_run):
     assert all(len(row["model_roc_auc"]) == 2 for row in payload["folds"])
 
 
-def test_the_summary_separates_seed_variance_from_fold_difficulty(ensemble_run):
+def test_summary_separates_seed_variance_from_fold_difficulty(ensemble_run):
     """The reported ± has always been the spread of fold means within one run,
     read as the run's repeatability. They are different quantities."""
     payload, _ = ensemble_run
@@ -160,7 +160,7 @@ def test_the_summary_separates_seed_variance_from_fold_difficulty(ensemble_run):
     assert variance["fold_sd"] is not None
 
 
-def test_seed_variance_is_unmeasurable_from_a_single_draw_per_fold(single_run):
+def test_seed_variance_unmeasurable_from_one_draw(single_run):
     payload, _ = single_run
     variance = payload["summary"]["variance"]
     assert variance["seed_sd"] is None
@@ -196,7 +196,7 @@ def test_recall_at_1pct_fpr_is_not_recall_at_threshold_half():
     assert recall_at_fpr(labels, scores, GATE_FPR) == 1.0
 
 
-def test_the_recorded_recall_is_recomputable_from_the_scores_on_disk(single_run):
+def test_recorded_recall_is_recomputable_from_scores_on_disk(single_run):
     """Each member's own score column is what the summary's number was measured
     from, so recomputing it there is exact — no assumption about the sign of the
     Platt fit, which on a 40-row fixture is not guaranteed to be positive."""
@@ -221,7 +221,7 @@ def test_the_gate_slice_is_measured_apart_from_the_whole_fold(single_run):
         assert "model_recall_at_1pct_fpr" in row and "model_gate_recall_at_1pct_fpr" in row
 
 
-def test_a_non_finite_member_statistic_raises_instead_of_becoming_a_nan_sd():
+def test_non_finite_member_statistic_raises_not_nan_sd():
     """NaN loses every inequality, so a NaN `recall_seed_sd` reads as "this
     margin is not inside the noise" — the same shape as the NaN that once
     promoted a degenerate run. Made to fire, because a guard that cannot be
@@ -238,7 +238,7 @@ def test_a_non_finite_member_statistic_raises_instead_of_becoming_a_nan_sd():
         _variance_decomposition(degenerate)
 
 
-def test_a_population_with_no_rows_is_unmeasured_rather_than_degenerate():
+def test_population_with_no_rows_is_unmeasured_not_degenerate():
     """An empty list is "this fold held none of that population" and a NaN is
     "the population was there and came out single-class". Collapsing the two
     would either raise on a legitimate run or return a number for one that
@@ -252,7 +252,7 @@ def test_a_population_with_no_rows_is_unmeasured_rather_than_degenerate():
     assert variance["fold_sd"] is not None
 
 
-def test_the_recall_variance_keys_are_additive_and_leave_the_gate_untouched(ensemble_run):
+def test_recall_variance_keys_leave_the_gate_untouched(ensemble_run):
     """The promotion gate reads named keys. The AUC pair keeps its unprefixed
     names so nothing downstream has to know this change happened."""
     payload, _ = ensemble_run
@@ -313,7 +313,7 @@ def test_a_member_column_with_a_hole_in_it_raises(ensemble_run):
         train_branches.pooled_member_draws(predictions)
 
 
-def test_a_single_class_gate_slice_raises_rather_than_returning_a_nan_sd(ensemble_run):
+def test_single_class_gate_slice_raises_not_returning_a_nan_sd(ensemble_run):
     """`recall_at_fpr` returns NaN on a single-class slice rather than raising —
     correct for a metric, wrong for a noise floor, because an sd over NaN loses
     every later inequality. Empty and single-class are different failures and
@@ -331,7 +331,7 @@ def test_a_single_class_gate_slice_raises_rather_than_returning_a_nan_sd(ensembl
     assert drawn["pooled_gate_recall_n_draws"] == 0
 
 
-def test_the_summary_carries_the_per_mission_block_the_gate_reads(single_run):
+def test_summary_carries_the_per_mission_block_the_gate_reads(single_run):
     payload, _ = single_run
     assert "all" in payload["per_mission"]
     assert {"roc_auc", "brier", "ece", "recall_at_1pct_fpr", "n"} <= set(
@@ -409,7 +409,7 @@ def test_the_propensity_arm_returns_weights_and_keeps_every_row():
     assert abs(report["correlation_after"]) < abs(report["correlation_before"])
 
 
-def test_the_stratified_arm_shrinks_the_index_and_says_by_how_much():
+def test_stratified_arm_shrinks_the_index_and_says_by_how_much():
     index = _biased_index()
     kept, weights, report = train_branches._apply_baseline_intervention(
         index, CVConfig(baseline_intervention="stratified", baseline_strata=4)
@@ -440,7 +440,7 @@ def test_an_unknown_arm_raises_rather_than_running_the_control():
         )
 
 
-def test_a_duplicated_tic_id_refuses_because_the_tables_key_on_it():
+def test_duplicated_tic_id_refuses_because_the_tables_key_on_it():
     """The weight and split tables look up by tic_id, so a multi-planet host
     would silently share one weight across all of its planets."""
     index = pd.concat([_biased_index(n=200), _biased_index(n=200)], ignore_index=True)

@@ -2,19 +2,15 @@
 
 Two models are compared on the rows they share, and an inner join is a lossy
 operation that reports nothing about what it dropped. Comparing the champion
-`ca906040` against the stage 4 (old 2(a)) branch model matched 4,605 rows and looked
-complete; it had silently discarded **all 527 K2 examples**, 9.7% of training,
-because the champion's run predates K2 entirely. The surviving weights were
-Kepler 48.6% / TESS 51.4% / K2 0%, in a decision whose consequences are 100%
-TESS.
+against the stage 4 branch model matched thousands of rows and looked complete;
+it had silently discarded every K2 example, because the champion's run predates
+K2 entirely, leaving a decision whose consequences are 100% TESS weighted half
+Kepler.
 
 So coverage is computed first and returned alongside the metrics, and
 `MissionCoverage.dropped` names any mission the join lost outright.
-
 `recall_at_fpr` lives here because it is the other half of the same lesson: AUC
-scores ranking at every threshold, and a follow-up shortlist lives at exactly
-one. The two models' TESS AUCs differ by 0.002 while their recall at 1% FPR
-differs by 0.069.
+scores ranking at every threshold, a follow-up shortlist lives at exactly one.
 """
 
 from __future__ import annotations
@@ -322,33 +318,24 @@ def gap_table(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Summary pieces shared by BOTH trainers.
-#
-# These lived in train_branches.py, which meant the dual-view trainer wrote no
-# per-mission block and no recall floor — so the promotion gate could not slice
-# a dual-view candidate's population and refused to compare it at all, and
-# `decision_floor` fell back to a constant already measured as too tight. One
-# definition, both trainers delegating, for the same reason
-# `member_checkpoint_name` was centralised: two that drifted would change what a
-# bar was computed from.
-# ---------------------------------------------------------------------------
+# Summary pieces shared by BOTH trainers. These lived in train_branches.py, so
+# the dual-view trainer wrote no per-mission block and no recall floor — and the
+# gate then refused to compare a dual-view candidate at all. Two definitions that
+# drifted would change what a bar was computed from.
 
 
 def pooled_member_draws(predictions: pd.DataFrame) -> dict[str, Any]:
     """Independent draws of the *pooled* gate statistic, one per ensemble member.
 
-    `gate_recall_seed_sd` is measured on a fold's TESS slice — ~215 negatives, so
-    a 1% FPR cut of two rows, and a statistic set by where the third-highest
-    negative lands. The gate reads the pooled out-of-fold set instead: ~1,074
-    negatives, a cut of ten rows, and a materially better-conditioned number.
-    Bounding the second with the first only ever overstates the noise.
+    `gate_recall_seed_sd` is measured on a fold's TESS slice, where a 1% FPR cut is
+    two rows. The gate reads the pooled out-of-fold set instead — five times the
+    negatives and a materially better-conditioned cut — so bounding the second with
+    the first only ever overstates the noise.
 
-    Member `i`'s score column is filled by whichever fold held each row, so
-    stacking them re-forms a complete out-of-fold prediction set for member `i`
-    alone — the same protocol as the ensemble, one seed instead of three. Their
-    spread is the run-level reseeding sd directly, with no `sqrt(n)` argument in
-    the way. Three draws is a thin sd and it is reported with its `n`.
+    Member `i`'s score column is filled by whichever fold held each row, so stacking
+    them re-forms a complete out-of-fold set for that member alone: the same
+    protocol as the ensemble, one seed instead of three. Their spread is the
+    run-level reseeding sd directly. Three draws is a thin sd, reported with its `n`.
     """
     # Sorted on the integer, not the string: `member_score_10` sorts before
     # `member_score_2` lexicographically, which would reorder the draws. The

@@ -6,12 +6,11 @@ A shard set is a directory of
     metadata.json          n_examples, view lengths, aux_dim, n_shards
     index.parquet          per-example (row, tic_id, label [, aux_0..aux_k])
 
-The parquet index is the small, random-access companion to the sequential
-shards: CV splits are computed from it (StratifiedGroupKFold needs labels and
-groups in memory — a few KB), aux normalisation is fitted from its aux
-columns, and evaluation reads y_true from it in shard order. Examples are
-written in index-row order and `make_dataset` preserves that order for
-unshuffled reads, so predictions line up with index rows by position.
+The parquet index is the small random-access companion to the sequential
+shards: CV splits are computed from it, aux normalisation is fitted from its
+aux columns, and evaluation reads y_true from it in shard order. Examples are
+written in index-row order and `make_dataset` preserves that for unshuffled
+reads, so predictions line up with index rows by position.
 """
 
 from __future__ import annotations

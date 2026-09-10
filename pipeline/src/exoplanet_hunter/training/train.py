@@ -1,26 +1,16 @@
 """Hydra-driven training entry point — V2, streaming from TFRecord shards.
 
-Usage (from the repository root):
+Runs 5-fold CV for the dual-view CNN, or `model=random_forest` for the baseline.
+Input is a TFRecord shard set streamed via `datasets.make_dataset` — parse,
+filter and normalise cached, augmentation fresh each epoch — rather than NumPy
+arrays held in RAM.
 
-    python -m exoplanet_hunter.training.train                      # 5-fold CV CNN
-    python -m exoplanet_hunter.training.train model=random_forest  # RF baseline
-    python -m exoplanet_hunter.training.train train.mixed_precision=true  # GPU burst
-
-Differences from the V1 trainer this replaces:
-
-  * Input is a TFRecord shard set (`scripts/shard_views.py`) streamed via
-    `datasets.make_dataset` — parse/filter/normalise cached, augmentation
-    fresh each epoch — instead of NumPy arrays held in RAM.
-  * Fold membership is routed by TIC ID through a StaticHashTable filter,
-    so the StratifiedGroupKFold leakage guarantee survives streaming.
-  * Aux normalisation is still a fitted sklearn pipeline persisted in the
-    calibration bundle (the serving contract); training replays its fitted
-    constants as tensor ops (`datasets.aux_transform`, parity-tested).
-  * Optional mixed_float16 policy for the GPU burst.
-
-Split semantics and callbacks are unchanged from V1. Calibration is Platt
-scaling, and the F1 threshold is swept on *calibrated* validation scores —
-the space serving compares it against.
+Fold membership is routed by TIC ID through a StaticHashTable filter, so the
+`StratifiedGroupKFold` guarantee survives streaming. Aux normalisation stays a
+fitted sklearn pipeline persisted in the calibration bundle (the serving
+contract); training replays its fitted constants as tensor ops
+(`datasets.aux_transform`, parity-tested). Calibration is Platt scaling and the
+F1 threshold is swept on *calibrated* scores — the space serving compares in.
 """
 
 from __future__ import annotations
@@ -579,12 +569,10 @@ LABELS_RELATIVE = Path("data") / "tables" / "labels" / "labels.parquet"
 def _labels_path(cv_root: Path) -> Path:
     """Resolve the label catalogue from a run directory, positionally.
 
-    `_aggregate_cv` is called without a cfg, so the path is derived from
-    `models/cv/<run>` rather than configured. That derivation is an assumption
-    about layout, and layout has already moved once — the caches were
-    reorganised by mission on 2026-08-15 — so it is asserted rather than
-    trusted. A silently wrong root here writes a summary with no mission block,
-    and the gate's resulting REJECT is indistinguishable from a quality one.
+    `_aggregate_cv` is called without a cfg, so the path is derived from layout
+    rather than configured — and layout has moved once already, so it is asserted
+    rather than trusted. A silently wrong root writes a summary with no mission
+    block, and the gate's resulting REJECT is indistinguishable from a quality one.
     """
     root = cv_root.parents[2]
     if cv_root.parent.name != "cv" or cv_root.parents[1].name != "models":
@@ -599,15 +587,15 @@ def _labels_path(cv_root: Path) -> Path:
 def _labelled_predictions(cv_root: Path) -> pd.DataFrame:
     """The pooled out-of-fold set, with the columns the summary pieces expect.
 
-    The trainer writes `y_true`/`prob_calibrated` and no mission, because it
-    never needed them. Both shared summary functions read `label`, `score` and
-    `mission`, so the join happens here rather than in either of them.
+    The trainer writes `y_true`/`prob_calibrated` and no mission, because it never
+    needed them; both shared summary functions read `label`, `score` and `mission`,
+    so the join happens here rather than in either of them.
 
-    Every absence here raises. A summary written without these rows carries no
-    mission block and no recall floor, and the gate then REJECTs it on
-    "populations differ" — a message indistinguishable from a real quality
-    rejection, which is the defect class this project keeps rediscovering: *a
-    check that returns a plausible answer instead of failing*.
+    Every absence raises. A summary written without these rows carries no mission
+    block and no recall floor, and the gate then REJECTs it on "populations differ" —
+    indistinguishable from a real quality rejection, which is the defect class this
+    project keeps rediscovering: a check that returns a plausible answer instead of
+    failing.
     """
     import pandas as pd
 

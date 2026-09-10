@@ -1,37 +1,16 @@
 """The momentum-dump view — TESS reaction-wheel desaturation, folded on the transit.
 
-TESS spins its reaction wheels down on a schedule (every 2.5 days in the first
-sectors, later every 5.5 and eventually rarer). The spacecraft's pointing moves
-while it happens, and the flux of every target on the focal plane moves with it.
-If those cadences land at the candidate's transit phase, the "transit" is partly
-the spacecraft. ExoMiner++ is the only model of the eleven in their Table 1 that
-carries this input, and it is TESS-specific: there is no Kepler or K2 analogue,
-so the view is absent by construction on 55.8% of our rows exactly as
-`difference_view` is.
+TESS spins its reaction wheels down on a schedule; pointing moves while it does,
+and every target's flux moves with it. If those cadences land at the candidate's
+transit phase, the "transit" is partly the spacecraft. The view is TESS-specific
+and absent by construction on Kepler and K2 rows, as `difference_view` is.
 
-**Where the flag comes from, and why not from our own light curves.** The DQ bit
-is 32, and it is zero on every cadence of all 6,192 cached TESS curves: they were
-downloaded through lightkurve's default quality bitmask, which *removes* those
-cadences before the file is written. `viewset.py::_gap_view` already recorded
-that finding — "reading `QUALITY` bit 5 directly gives zero for every target in
-the cache". `scripts/fetch_momentum_dumps.py` fetches the flag from unmasked
-copies instead, one representative target per sector, which is sound because the
-flag is a property of the spacecraft: measured 2026-08-27, four independent
-sector-1 targets carry the identical 70 flagged timestamps.
-
-**The cadences the dump removed are put back, at the target's own cadence.** The
-dump cadences are missing from the target's own time array — that is the same
-masking — so a fold over the surviving times would find no dumps anywhere and
-the branch would be an all-zero input that looked like a feature. Each dump is
-re-expanded over its own measured interval at the target's median cadence, so a
-120-s target and a 200-s FFI target get the number of cadences each would
-actually have lost, rather than the number the representative curve lost.
-
-**Why not carry a variance channel beside the mean, as ExoMiner does.** Their
-`local_momentum_dump_view_var` is the spread of a 0/1 flag within a bin, which
-for a Bernoulli mean `p` is `p(1-p)` — a deterministic function of the channel
-already there. It would be a second copy of the first channel, and this project
-has spent two stages removing inputs that looked like measurements and were not.
+The DQ bit is zero on every cached curve — lightkurve's default bitmask removes
+those cadences before the file is written — so the flag comes from unmasked
+copies, one target per sector, the flag being a property of the spacecraft. The
+removed cadences are put back at the target's own median cadence, or a fold
+would find no dumps and leave an all-zero input that looked like a feature.
+Measurements: `docs/experiments/phase-1-build-4-2d.md`.
 """
 
 from __future__ import annotations
@@ -125,21 +104,15 @@ def build_momentum_dump_view(
 ) -> np.ndarray:
     """`(n_bins, 2)` = `[dump fraction, present]` over the local transit window.
 
-    Parameters
-    ----------
-    time        : the target's own cadence times [BTJD], dumps already removed.
-    dump_times  : flagged cadence times from `momentum_dumps.parquet`.
-    period, t0  : the ephemeris the *other* views were folded on. It must be that
-                  one: a momentum view folded on a different epoch would put the
-                  dumps at a phase the flux views disagree with, and the branch's
-                  whole question is whether the dumps sit under the transit.
-    half_window : half-width of the local window in phase units — `viewset.
-                  _local_window(duration, period, LOCAL_DURATIONS)`.
+    `time` is the target's own cadence times with dumps already removed, and
+    `period`/`t0` must be the ephemeris the *other* views were folded on: folded on a
+    different epoch the dumps would sit at a phase the flux views disagree with, and
+    the branch's whole question is whether they fall under the transit.
 
-    Channel 0 is the fraction of the cadences known at that phase that were
-    dump-flagged; channel 1 marks bins that held any cadence at all. A bin with
-    no cadence reads 0 with presence 0, never 0 with presence 1 — the
-    distinction every view in this package exists to keep.
+    Channel 0 is the fraction of cadences known at that phase that were dump-flagged;
+    channel 1 marks bins that held any cadence at all. A bin with no cadence reads 0
+    with presence 0, never 0 with presence 1 — the distinction every view in this
+    package exists to keep.
     """
     time = np.asarray(time, dtype=float)
     time = np.sort(time[np.isfinite(time)])

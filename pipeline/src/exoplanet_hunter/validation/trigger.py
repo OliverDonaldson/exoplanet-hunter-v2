@@ -1,20 +1,16 @@
 """The GPU-burst trigger: a precise definition of "dataset changed materially".
 
-Training costs real money on a rented GPU, so the orchestrator only fires it
-when a catalogue refresh actually moves the needle. The definition, per the
-V2 architecture doc's "verify before committing" note:
+Training costs real money on a rented GPU, so the orchestrator fires it only
+when a catalogue refresh actually moves the needle. New confirmed labels —
+targets that are label=1 now and were absent or unconfirmed before — are new
+ground truth, and `min_new_confirmed` or more justify a retrain. New false
+positives count the same way, pooled by `min_new_labelled`, because hard
+negatives teach as much as confirmations. An explicit expansion run
+(`force=True`) always trains: the deliberate data-scaling path.
 
-  * **new confirmed labels** — targets that are label=1 in the new catalogue
-    and were absent (or not yet confirmed) in the old one. These are new
-    ground truth: `min_new_confirmed` or more of them justify a retrain.
-  * **new false positives** count the same way (`min_new_labelled` pools
-    both classes) — hard negatives teach as much as confirmations.
-  * **an explicit expansion run** (`force=True`) always trains — that's the
-    deliberate data-scaling path, not a routine refresh.
-
-Label *flips* on existing targets never count toward the trigger: they are
-quarantined by the leakage guard (see `leakage.py`) and join the
-since-confirmed holdout instead of the training set.
+Label *flips* on existing targets never count toward the trigger. They are
+quarantined by the leakage guard (`leakage.py`) and join the since-confirmed
+holdout instead of the training set.
 """
 
 from __future__ import annotations

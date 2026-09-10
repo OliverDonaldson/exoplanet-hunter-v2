@@ -119,7 +119,7 @@ def _saturating_split() -> tuple[np.ndarray, np.ndarray]:
     return scores, labels
 
 
-def test_the_objective_and_its_analytic_gradient_agree_under_saturation():
+def test_objective_and_gradient_agree_under_saturation():
     """The stage 6 re-baseline died on fold 0 because they did not.
 
     The old objective clipped p to `[_EPS, 1 - _EPS]` while the analytic
@@ -152,7 +152,7 @@ def test_the_objective_and_its_analytic_gradient_agree_under_saturation():
     assert finite_difference == pytest.approx(analytic(params), abs=1e-6)
 
 
-def test_platt_still_fits_when_scores_saturate_past_the_logit_clip():
+def test_platt_fits_when_scores_saturate_past_clip():
     """The end-to-end consequence of the invariant above: a stationary point
     rather than the last iterate before a failed line search."""
     scores, labels = _saturating_split()
@@ -165,7 +165,7 @@ def test_platt_still_fits_when_scores_saturate_past_the_logit_clip():
     assert np.linalg.norm(grad) < 1e-4, f"not a stationary point: ||grad||={grad}"
 
 
-def test_the_objective_matches_the_textbook_cross_entropy_where_both_are_finite():
+def test_objective_matches_textbook_cross_entropy():
     """`softplus(z) - y*z` is only worth using if it is the same function. Away
     from the saturation that breaks the naive form, the two must agree."""
     rng = np.random.default_rng(3)
