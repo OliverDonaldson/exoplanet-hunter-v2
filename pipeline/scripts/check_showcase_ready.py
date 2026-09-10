@@ -14,11 +14,14 @@ skips the test suite, which is the slow one.
 from __future__ import annotations
 
 import argparse
+import ast
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tokenize
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -135,11 +138,10 @@ def check_registry_matches_served() -> Result:
     cv = ROOT / "models/cv" / run_id
     have = [f for f in ("cv_summary.json", "predictions.parquet") if (cv / f).exists()]
     ok = len(have) == 2
-    return Result(
-        "registry points at a real run",
-        ok,
-        f"{run_id[:8]}: " + (", ".join(have) if have else "no artefacts on disk"),
-    )
+    # A fresh clone or worktree carries the DVC pointers but not the bytes —
+    # the same thing a stranger sees. Name the fix, not just the symptom.
+    detail = ", ".join(have) if have else "no artefacts on disk — run `make data-pull`"
+    return Result("registry points at a real run", ok, f"{run_id[:8]}: {detail}")
 
 
 def check_plan_complete() -> Result:
@@ -164,6 +166,102 @@ def check_plan_complete() -> Result:
         if unfinished
         else f"{len(rows)} steps, all landed",
     )
+
+
+#: PLAN.md section 2 step 8's exit criteria. Measured here rather than recorded
+#: once, because the pass landed a handful of lines under the bar and one
+#: enthusiastic docstring erases that.
+_COMMENT_SHARE_MAX = 25.0
+_MODULE_DOCSTRING_MAX = 15
+_TEST_NAME_MAX = 60
+
+
+def _prose_census(root: Path) -> tuple[int, int, list[tuple[str, int]]]:
+    """Physical lines, docstring-plus-comment lines, and over-long module docstrings."""
+    total = prose = 0
+    over: list[tuple[str, int]] = []
+    for path in sorted(root.rglob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        total += len(src.splitlines())
+        marked: set[int] = set()
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(
+                node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+            ):
+                continue
+            if ast.get_docstring(node, clean=False) is None:
+                continue
+            span = range(node.body[0].lineno, node.body[0].end_lineno + 1)
+            marked.update(span)
+            if isinstance(node, ast.Module) and len(span) > _MODULE_DOCSTRING_MAX:
+                over.append((str(path.relative_to(ROOT)), len(span)))
+        prose += len(marked)
+        prose += sum(
+            1
+            for t in tokenize.generate_tokens(io.StringIO(src).readline)
+            if t.type == tokenize.COMMENT
+        )
+    return total, prose, over
+
+
+def check_comment_share() -> Result:
+    total, prose, _ = _prose_census(ROOT / "pipeline" / "src")
+    share = prose / total * 100
+    ok = share < _COMMENT_SHARE_MAX
+    headroom = int(total * _COMMENT_SHARE_MAX / 100) - prose
+    return Result(
+        "comment share under 25%",
+        ok,
+        f"{share:.2f}% of {total:,} lines — {headroom} lines of headroom"
+        if ok
+        else f"{share:.2f}%, over by {-headroom} lines",
+    )
+
+
+def check_module_docstrings() -> Result:
+    _, _, over = _prose_census(ROOT / "pipeline" / "src")
+    worst = ", ".join(f"{p} ({n})" for p, n in sorted(over, key=lambda x: -x[1])[:3])
+    return Result(
+        "no module docstring over 15 lines",
+        not over,
+        f"{len(over)} over: {worst}" if over else "all 15 lines or fewer",
+    )
+
+
+def check_test_names() -> Result:
+    long: list[str] = []
+    for root in (ROOT / "pipeline" / "tests", ROOT / "api" / "tests"):
+        for path in sorted(root.rglob("test_*.py")):
+            for name in re.findall(
+                r"^\s*(?:async )?def (test_\w+)", path.read_text(encoding="utf-8"), re.M
+            ):
+                if len(name) > _TEST_NAME_MAX:
+                    long.append(name)
+    return Result(
+        "test names under 60 characters",
+        not long,
+        f"{len(long)} over, longest {max((len(n) for n in long), default=0)}"
+        if long
+        else "all under 60",
+    )
+
+
+#: The console is the project's primary artefact — the thing a visitor actually
+#: opens. A gate that passes while it cannot be built is checking the wrong
+#: deliverable, which this one did until 2026-09-10.
+def check_console_builds() -> Result:
+    """The static console builds into the single file Render serves."""
+    frontend = ROOT / "frontend"
+    if not (frontend / "node_modules").exists():
+        return Result("console builds", False, "no node_modules — run `npm install` in frontend/")
+    code, out = run(["python3", "design-console/build.py"], cwd=frontend, timeout=300)
+    built = frontend / "design-console" / "dist" / "index.html"
+    size = built.stat().st_size if built.exists() else 0
+    ok = code == 0 and size > 0
+    if ok:
+        return Result("console builds", True, f"dist/index.html, {size / 1024:.0f} kB")
+    tail = next((ln for ln in reversed(out.strip().splitlines()) if ln.strip()), "no output")
+    return Result("console builds", False, tail[:90])
 
 
 def check_git_clean() -> Result:
@@ -250,6 +348,10 @@ def main() -> int:
         check_doc_links,
         check_registry_matches_served,
         check_plan_complete,
+        check_console_builds,
+        check_comment_share,
+        check_module_docstrings,
+        check_test_names,
         check_git_clean,
         check_lint,
         check_types,
