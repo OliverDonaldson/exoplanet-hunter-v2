@@ -31,8 +31,9 @@ champion re-scored on the current labelled set on 2026-08-17. The pooled figure
 averages two missions with different label provenance and class balance, and
 TESS is the mission the service scores. K2 (530 labelled rows) is in the
 catalogue, but the served run predates it and has no K2 slice; the promotion
-gate flags that permanently. The deployed Model page still prints a noise floor
-measured on a different architecture; that is issue #11.
+gate flags that permanently. The Model page serves the run's own noise floor,
+or says it was not measured; the branch-model constants it used to print are
+gone (#11).
 
 Live: the console at https://exoplanet-hunter-console.onrender.com and the API
 at https://exoplanet-hunter-api.fly.dev. Maintained by Oliver Donaldson.

@@ -33,6 +33,21 @@ ROOT = Path(__file__).resolve().parents[2]
 API_URL = os.environ.get("EH_API_URL", "https://exoplanet-hunter-api.fly.dev")
 CONSOLE_URL = os.environ.get("EH_CONSOLE_URL", "https://exoplanet-hunter-console.onrender.com")
 
+#: What the console fetches on every load, so a deployment missing any one of
+#: them puts an error string in a panel in front of a visitor. Checked rather
+#: than assumed because this list drifted once: the probe asked for /health,
+#: which no version of the API has ever served, so --live failed identically
+#: whether the deployment was current or five commits behind. /score is left
+#: out: it is on demand and can take minutes.
+CONSOLE_ENDPOINTS = (
+    "/healthz",
+    "/model",
+    "/model/training-history",
+    "/reliability",
+    "/runs?limit=8",
+    "/candidates?limit=1&sort_by=prob_mean&order=desc",
+)
+
 #: Documents a reader is entitled to find. Absence is a real gap, not a nit.
 REQUIRED_DOCS = (
     "README.md",
@@ -321,8 +336,13 @@ def _get(url: str, timeout: int = 25) -> tuple[int, str]:
 
 
 def check_api_live() -> Result:
-    status, body = _get(f"{API_URL}/health")
-    return Result("deployed API answers", status == 200, f"{API_URL} -> {status or body[:50]}")
+    missing = []
+    for path in CONSOLE_ENDPOINTS:
+        status, body = _get(f"{API_URL}{path}")
+        if status != 200:
+            missing.append(f"{path} -> {status or body[:40]}")
+    detail = ", ".join(missing) or f"{len(CONSOLE_ENDPOINTS)} console endpoints, all 200"
+    return Result("deployed API answers", not missing, detail)
 
 
 def check_console_live() -> Result:
