@@ -77,10 +77,15 @@ rate**, and it is the metric this project promotes on.
 
 Two consequences run through the whole report:
 
-1. **Recall @1% FPR is the decision metric.** ROC-AUC is reported because it is
-   comparable to the literature, but a model can gain AUC while losing shortlist
-   recall — stage 4's capacity arm did exactly that (§4, row 4) — and when the
-   two disagree, recall governs.
+1. **Recall @1% FPR is the decision metric.** ROC-AUC is reported beside it
+   because it is far the more stable of the two — a bootstrap standard deviation
+   of 0.0059 against 0.0410 on the same rows (§6.4) — and because it is the
+   number this field prints. It is **not** reported because it is comparable to
+   published work: an audit on 2026-09-10 found every candidate AUC comparison
+   fails on population or protocol (§7.2), and an earlier draft of this line
+   claimed otherwise. A model can also gain AUC while losing shortlist recall —
+   stage 4's capacity arm did exactly that (§4, row 4) — and when the two
+   disagree, recall governs.
 2. **Calibration is a first-class metric, not a nicety.** A shortlist is a
    *ranking under a budget*. If scores are not comparable across the list, the
    cut is arbitrary. Expected calibration error (ECE) and the Brier score are
