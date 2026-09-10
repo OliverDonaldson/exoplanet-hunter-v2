@@ -1,0 +1,1 @@
+78  # mypy pipeline/src, recorded 2026-09-07. Lower this, never raise it. See issue #55.

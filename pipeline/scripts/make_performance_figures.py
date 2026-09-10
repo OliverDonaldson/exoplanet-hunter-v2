@@ -107,6 +107,75 @@ def fig_roc_pr(preds: pd.DataFrame, out: Path) -> None:
     log.info("wrote %s", out)
 
 
+#: The follow-up budget the shortlist is cut at. Recall here, not accuracy, is
+#: what promotion is decided on, so the figure marks it rather than leaving the
+#: reader to find it on the curve.
+_OPERATING_FPR = 0.01
+
+
+def _mission_lookup(labels: Path) -> pd.DataFrame | None:
+    if not labels.exists():
+        return None
+    frame = pd.read_parquet(labels, columns=["tic_id", "mission"])
+    return frame.dropna(subset=["tic_id", "mission"]).drop_duplicates("tic_id")
+
+
+def fig_roc_operating_point(preds: pd.DataFrame, labels: Path, out: Path) -> None:
+    """Per-mission ROC at unit aspect, with the 1% FPR operating point marked.
+
+    Unit aspect because the eye reads area off a square ROC and is misled by a
+    stretched one. Missions are drawn apart rather than pooled: the pooled curve
+    averages a 0.99-AUC mission with a 0.91-AUC one and describes neither.
+    """
+    lookup = _mission_lookup(labels)
+    if lookup is None:
+        log.warning("no labels at %s; skipping %s", labels, out.name)
+        return
+    joined = preds.merge(lookup, on="tic_id", how="left").dropna(subset=["mission"])
+
+    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+    colors = {"TESS": "#c2410c", "Kepler": "#1d4ed8", "K2": "#047857"}
+    for mission, g in sorted(joined.groupby("mission"), key=lambda kv: -len(kv[1])):
+        y, p = g.y_true.to_numpy(int), g.prob_calibrated.to_numpy(float)
+        if np.unique(y).size < 2:
+            continue
+        fpr, tpr, _ = roc_curve(y, p)
+        color = colors.get(str(mission), "grey")
+        ax.plot(
+            fpr, tpr, color=color, lw=2, label=f"{mission} (AUC {auc(fpr, tpr):.3f}, n={len(g)})"
+        )
+        # The operating point: the highest TPR reachable without exceeding the
+        # budget, which is where the curve is read, not where it is prettiest.
+        within = fpr <= _OPERATING_FPR
+        i = int(np.flatnonzero(within)[-1])
+        ax.plot([fpr[i]], [tpr[i]], "o", color=color, ms=7, mec="white", mew=1.2)
+        ax.annotate(
+            f"{tpr[i]:.3f}",
+            (fpr[i], tpr[i]),
+            textcoords="offset points",
+            xytext=(10, -4),
+            fontsize=9,
+            color=color,
+        )
+
+    ax.axvline(_OPERATING_FPR, color="grey", ls="--", lw=1)
+    ax.text(_OPERATING_FPR + 0.012, 0.04, f"{_OPERATING_FPR:.0%} FPR", fontsize=9, color="grey")
+    ax.plot([0, 1], [0, 1], ":", color="grey", lw=1)
+    ax.set(
+        xlim=(0, 1),
+        ylim=(0, 1),
+        xlabel="false positive rate",
+        ylabel="true positive rate (recall)",
+        title="Out-of-fold ROC by mission, shortlist point marked",
+    )
+    ax.set_aspect("equal")
+    ax.legend(fontsize=9, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    log.info("wrote %s", out)
+
+
 def _reliability(y: np.ndarray, p: np.ndarray, n_bins: int = 10):
     edges = np.linspace(0, 1, n_bins + 1)
     which = np.clip(np.digitize(p, edges) - 1, 0, n_bins - 1)
@@ -250,6 +319,7 @@ def main() -> None:
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
     parser.add_argument("--shards", type=Path, default=Path("data/processed/tfrecords"))
     parser.add_argument("--mlflow-db", type=Path, default=Path("mlflow.db"))
+    parser.add_argument("--labels", type=Path, default=Path("data/tables/labels/labels.parquet"))
     parser.add_argument("--out", type=Path, default=Path("docs/figures"))
     args = parser.parse_args()
 
@@ -261,6 +331,7 @@ def main() -> None:
 
     fig_training_curves(args.mlflow_db, run_id, args.out / "training_curves.png")
     fig_roc_pr(preds, args.out / "roc_pr.png")
+    fig_roc_operating_point(preds, args.labels, args.out / "roc_operating_point.png")
     fig_calibration(preds, args.out / "calibration.png")
     fig_embedding_3d(run_dir, args.shards, preds, args.out / "embedding_3d.png")
 

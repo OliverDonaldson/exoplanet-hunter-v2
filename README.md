@@ -69,8 +69,18 @@ refresh need them pulled.
 
 ## Documentation
 
+**Start with [docs/report.pdf](docs/report.pdf)** — the write-up, sectioned on
+the problem, the data, preprocessing, model selection, training, evaluation,
+limitations and reproducibility. Every number in it traces to a file in
+`models/` or `docs/experiments/`.
+
 [docs/index.md](docs/index.md) maps every document. `docs/PLAN.md` is where the
-project stands; `docs/experiments/` is the record of what was measured.
+project stands; `docs/experiments/` is the record of what was measured;
+`docs/known-limits.md` is what this model cannot do.
+
+```bash
+make ready        # is the repository fit to show? prints LOOKS GOOD or NOT YET
+```
 
 ## Licence
 

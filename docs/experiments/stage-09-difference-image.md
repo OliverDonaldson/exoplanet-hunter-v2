@@ -403,3 +403,33 @@ already returns phase-folded global/local/odd/even views, a centroid track, a
 periodogram, five diagnostic suites, and a calibrated probability with its
 MC-dropout band and per-fold members. **The product gap runs in our favour and
 it is large.**
+
+---
+
+## Correction, 2026-09-07 — the `target_imgs` line pointer is wrong
+
+A citation audit of every source claim in the project checked the ExoMiner++
+table above against the code in `ExoMiner-main`, and one pointer is wrong.
+
+The row **target pixel position** cites
+`src_preprocessing/diff_img/preprocessing/utils_diff_img.py:183`. Line 183 is
+inside `set_data_example_to_placeholder_values`, under the comment
+`# set target position to center of image` — the *fallback for missing data*,
+which puts the marker at the image centre regardless of where the star actually
+is. That is the one function in the file that contradicts the claim it was cited
+for. Anyone checking this experiment's premise at the cited line would find
+evidence against it.
+
+**The claim itself holds.** The real mechanism is `create_target_image`
+(`utils_diff_img.py:500`), which sets `target_img[col, row] = 1` at the rounded
+target pixel, and `map_target_subpixel_location_to_discrete_grid`
+(`utils_diff_img.py:527`) for the sub-pixel offsets, called from
+`preprocess_diff_img.py:88`. The configuration declares the input —
+`exominer_plusplus.yaml:72`, `target_imgs: {dim: [33, 33, 5]}` — and feeds it to
+the branch at `:201`.
+
+So the premise Phase 1 tested — that ExoMiner++ supplies the star's own pixel
+position alongside the stamps and this project's stage-9 branch did not — is
+correct, and Phase 1's falsification of it stands unchanged. Only the line
+number was wrong. Per the record's rules this is a dated note, not an edit: the
+table above keeps its original text.

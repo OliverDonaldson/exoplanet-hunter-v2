@@ -83,12 +83,13 @@ for the branch-per-diagnostic restructure: the odd/even, secondary and centroid
 | Disposition | Label | Source |
 |---|---|---|
 | CP, KP (TESS) / CONFIRMED (Kepler, K2) | 1 | NASA Exoplanet Archive |
-| FP, FA (TESS) / FALSE POSITIVE, REFUTED | 0 | archive + DR25 certification |
+| FP, FA (TESS) / FALSE POSITIVE, REFUTED | 0 | archive + DR25 Robovetter score |
 | PC, CANDIDATE | −1, held out | not trained on |
 
-Kepler negatives are restricted to DR25-certified false positives
-(`koi_score < 0.5`), so the negative class is genuinely certain rather than
-merely unconfirmed. See [data_provenance.md](data_provenance.md).
+Kepler negatives are restricted to DR25 FALSE POSITIVE KOIs with a Robovetter
+disposition score below 0.5 — a majority false-positive vote under perturbation.
+That is a reconstruction of, not the same thing as, the Kepler Certified False
+Positive table, which is no longer served by the archive. See [data_provenance.md](data_provenance.md).
 
 ## 2. Architecture
 
@@ -132,13 +133,20 @@ multi-member training existed, including the served model's.
 
 ## 3. Not currently used
 
-Available upstream and adopted in [roadmap.md](roadmap.md), but absent today.
+Available upstream, absent from the served model today.
 
-| Input | Why it matters |
+| Input | Status |
 |---|---|
-| Difference images | pixel-level source location; the strongest nearby-EB discriminant |
-| Gaia RUWE | astrometric excess noise — unresolved binaries |
+| Difference images | built and tested; carries no measured signal — see below |
+| Gaia RUWE | never built; astrometric excess noise, an unresolved-binary discriminant |
 
-Difference images are the largest single gap. The stamps are 11–17 px rather
-than the fixed 33×33 the design assumed — that is Kepler's size — so they must
-be re-gridded before the branch can consume them.
+**Difference images are no longer an open gap.** They were the largest one until
+2026-09-05. The branch was built (stage 9), the stamps re-gridded from the 11–17
+px they actually are rather than the fixed 33x33 the design assumed, and the one
+remaining explanation for stage 9's null — that the stamps were fed without the
+star's own pixel position, so the network had no reference frame for a centroid
+shift — was built and tested as Phase 1. The paired contrast moved -0.0254 on
+TESS recall @1% FPR on `dv_usable` rows against a floor of 0.0979, which is 0.26x
+its floor, so the explanation is **falsified** and no third stamp variant is
+commissioned. See [experiments/phase-1-result.md](experiments/phase-1-result.md)
+and the closing entry in [decisions.md](decisions.md).
