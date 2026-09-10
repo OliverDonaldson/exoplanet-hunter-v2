@@ -325,20 +325,31 @@ def check_tests() -> Result:
     )
 
 
-def _get(url: str, timeout: int = 25) -> tuple[int, str]:
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            return r.status, r.read(4096).decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, ""
-    except Exception as exc:  # network, DNS, TLS — all mean "a visitor sees nothing"
-        return 0, str(exc)
+def _get(url: str, timeout: int = 25, retry_slow: bool = False) -> tuple[int, str]:
+    """`retry_slow` retries once after a timeout and only after a timeout, which
+    is the same rule app.api.js::probeApi follows and for the same reason: the
+    API suspends when idle, so the first request of the day pays a machine
+    resume and a TensorFlow warm. A refused connection or a bad host does not
+    get better on a second go."""
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                return r.status, r.read(4096).decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            return exc.code, ""
+        except TimeoutError as exc:
+            if retry_slow and attempt == 0:
+                continue
+            return 0, str(exc) or "timed out"
+        except Exception as exc:  # network, DNS, TLS — all mean "a visitor sees nothing"
+            return 0, str(exc)
+    return 0, "timed out twice"
 
 
 def check_api_live() -> Result:
     missing = []
-    for path in CONSOLE_ENDPOINTS:
-        status, body = _get(f"{API_URL}{path}")
+    for i, path in enumerate(CONSOLE_ENDPOINTS):
+        status, body = _get(f"{API_URL}{path}", retry_slow=i == 0)
         if status != 200:
             missing.append(f"{path} -> {status or body[:40]}")
     detail = ", ".join(missing) or f"{len(CONSOLE_ENDPOINTS)} console endpoints, all 200"
@@ -349,6 +360,24 @@ def check_console_live() -> Result:
     status, body = _get(CONSOLE_URL)
     ok = status == 200 and "<" in body
     return Result("deployed console answers", ok, f"{CONSOLE_URL} -> {status}")
+
+
+def check_link_preview() -> Result:
+    """A shared link is how most people meet this project, and a card with no
+    image is the same grey box as a dead link. The tag is only half of it: the
+    URL it names has to answer, which is a separate deploy from the HTML."""
+    status, body = _get(CONSOLE_URL)
+    if status != 200:
+        return Result("shared link previews", False, f"{CONSOLE_URL} -> {status}")
+    match = re.search(r'<meta property="og:image" content="([^"]+)"', body)
+    if not match:
+        return Result("shared link previews", False, "no og:image tag in the served head")
+    img_status, _ = _get(match.group(1))
+    return Result(
+        "shared link previews",
+        img_status == 200,
+        f"og:image -> {img_status}" if img_status != 200 else match.group(1).rsplit("/", 1)[-1],
+    )
 
 
 def main() -> int:
@@ -379,7 +408,7 @@ def main() -> int:
     if not args.quick:
         checks.append(check_tests)
     if args.live:
-        checks += [check_api_live, check_console_live]
+        checks += [check_api_live, check_console_live, check_link_preview]
 
     print(f"\n  Showcase readiness — {ROOT}\n")
     results = []
