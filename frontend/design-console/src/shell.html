@@ -349,6 +349,20 @@ select option{background:#0A0C10;color:#F0EEE8;}
 .about-body b{color:rgba(240,238,232,0.9);font-weight:500;}
 .about-body code{font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:#4DFFD2;}
 .about-lede{display:flex;align-items:center;gap:2rem;margin-bottom:2.5rem;flex-wrap:wrap;}
+/* The About page is the one page read end to end, so it is the only place that
+   needs link, table and figure rules. Tables scroll inside .about-scroll rather
+   than widening the page: three columns of measurements do not fit 375px. */
+.about-body a,.note .txt a{color:#4DFFD2;border-bottom:1px solid rgba(77,255,210,0.3);}
+.about-body a:hover,.about-body a:focus-visible,.note .txt a:hover,.note .txt a:focus-visible{border-bottom-color:#4DFFD2;}
+.about-body i{font-style:italic;color:rgba(240,238,232,0.8);}
+.about-scroll{overflow-x:auto;margin:0 0 0.9rem;}
+.about-body table{border-collapse:collapse;width:100%;min-width:20rem;font-family:'JetBrains Mono',monospace;font-size:0.72rem;}
+.about-body th,.about-body td{padding:0.4rem 0.7rem;border-bottom:1px solid rgba(255,255,255,0.06);text-align:right;white-space:nowrap;}
+.about-body tr:last-child td{border-bottom:none;}
+.about-body th:first-child,.about-body td:first-child{text-align:left;font-family:'Inter',sans-serif;white-space:normal;}
+.about-body thead th{font-family:'Ailerons',sans-serif;font-size:0.55rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#8A8FA8;}
+.about-body td{color:rgba(240,238,232,0.9);}
+.about-body td:first-child{color:rgba(240,238,232,0.62);}
 @media(max-width:640px){ .about-body{padding-left:0;} .about-lede{gap:1.25rem;} }
 
 .interval{position:relative;height:3px;background:rgba(255,255,255,0.07);margin-top:0.55rem;}
