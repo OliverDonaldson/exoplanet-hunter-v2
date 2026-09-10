@@ -58,15 +58,13 @@ class ViewSet:
     gap_view: np.ndarray  # (301, 2) [missing fraction, present]
     periodogram_view: np.ndarray  # (256, 2) [BLS power, present], fixed grid
     periodogram_masked_view: np.ndarray  # (256, 2) same, transits removed
-    #: (8, 17, 17, 4) per-sector difference-image stamps, and (8, 2) the quality
-    #: DV assigns each one. The only view sourced from the DV report rather than
-    #: the light curve, so it is absent for every Kepler and K2 row by
-    #: construction — 58.9% of the set carries presence 0 here.
+    #: (8, 17, 17, 4) per-sector difference-image stamps, and (8, 2) DV's quality
+    #: for each. The only view sourced from the DV report rather than the light
+    #: curve, so it is absent for every Kepler and K2 row by construction.
     difference_view: np.ndarray
     difference_quality_view: np.ndarray
-    #: (201, 2) [dump fraction, present] over the local window. TESS-only: the
-    #: spacecraft systematic has no Kepler or K2 analogue, so those rows carry
-    #: presence 0 by construction rather than by a fetch failure.
+    #: (201, 2) [dump fraction, present] over the local window. TESS-only, so
+    #: Kepler and K2 rows carry presence 0 by construction, not by a fetch failure.
     momentum_dump_view: np.ndarray
     #: Coverage the folded views cannot express: a single-transit candidate and
     #: a 40-transit one look identical once folded.

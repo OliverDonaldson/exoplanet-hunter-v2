@@ -318,17 +318,10 @@ def gap_table(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Summary pieces shared by BOTH trainers.
-#
-# These lived in train_branches.py, which meant the dual-view trainer wrote no
-# per-mission block and no recall floor — so the promotion gate could not slice
-# a dual-view candidate's population and refused to compare it at all, and
-# `decision_floor` fell back to a constant already measured as too tight. One
-# definition, both trainers delegating, for the same reason
-# `member_checkpoint_name` was centralised: two that drifted would change what a
-# bar was computed from.
-# ---------------------------------------------------------------------------
+# Summary pieces shared by BOTH trainers. These lived in train_branches.py, so
+# the dual-view trainer wrote no per-mission block and no recall floor — and the
+# gate then refused to compare a dual-view candidate at all. Two definitions that
+# drifted would change what a bar was computed from.
 
 
 def pooled_member_draws(predictions: pd.DataFrame) -> dict[str, Any]:

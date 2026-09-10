@@ -308,15 +308,11 @@ class PromotionDecision:
     #: "owes a written explanation in the roadmap before promotion" is a
     #: condition no unattended run can satisfy.
     alarms: list[str] = field(default_factory=list)
-    #: Every tolerance and floor **as actually applied to this comparison**, not
-    #: as defaulted in the signature. `recall_tolerance` is resolved at call time
-    #: from the candidate's own variance block and the floors are derived from
-    #: both runs, so a reader holding only the reasons text cannot tell a measured
-    #: floor from `LEGACY_RECALL_TOLERANCE` standing in for one. Carried on the
-    #: decision rather than recomputed by whoever records it, for the reason
-    #: `VERDICT_EXIT_CODES` is defined here: a number derived in two places is a
-    #: number that drifts. Empty when there was no champion, where nothing was
-    #: compared and no threshold applied.
+    #: Every tolerance and floor **as actually applied**, not as defaulted in the
+    #: signature — a reader holding only the reasons text cannot otherwise tell a
+    #: measured floor from `LEGACY_RECALL_TOLERANCE` standing in for one. Carried
+    #: on the decision rather than recomputed: a number derived in two places
+    #: drifts. Empty when there was no champion.
     thresholds: dict[str, Any] = field(default_factory=dict)
 
     @property

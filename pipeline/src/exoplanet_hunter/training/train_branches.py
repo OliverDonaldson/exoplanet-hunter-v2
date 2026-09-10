@@ -391,14 +391,11 @@ def run_fold(
     predictions = index.iloc[np.sort(test_idx)].copy()
     predictions["score"] = calibrated
     # Each member's own uncalibrated score per row, so the *pooled* out-of-fold
-    # statistic can be re-formed one member at a time after the run. That is the
-    # only way to get the reseeding spread of the number the gate actually reads:
-    # a fold's TESS slice holds ~215 negatives, so its 1% FPR cut is two rows and
-    # the fold-level statistic is far coarser than the pooled one it is used to
-    # bound. Costs three float columns; no extra training and no extra inference.
-    # Uncalibrated on purpose — the Platt fit was fitted on the ensemble mean, so
-    # applying it to a single member would describe a calibrator that never
-    # existed, and every statistic taken from these is rank-based anyway.
+    # statistic can be re-formed one member at a time — the only way to get the
+    # reseeding spread of the number the gate actually reads, since a fold's own
+    # 1% FPR cut is two rows. Uncalibrated on purpose: the Platt fit was fitted on
+    # the ensemble mean, so applying it to one member would describe a calibrator
+    # that never existed, and these statistics are rank-based anyway.
     for i, member in enumerate(runs):
         predictions[f"{MEMBER_SCORE_PREFIX}{i}"] = member.test_scores
     # The stream yields test rows in ascending index position, so they line up

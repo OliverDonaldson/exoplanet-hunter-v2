@@ -88,14 +88,12 @@ def _detrend_axis(
         # 2. per-segment median subtraction
         seg_c -= float(np.median(seg_c[finite]))
 
-        # 3. rolling-median detrend via scipy.ndimage.median_filter (C-impl).
-        # Window size derived from the segment's median cadence — Kepler
-        # 30-min cadence with 1-day window → ~49 samples; TESS 2-min cadence
-        # → ~721 samples. Both ~50× faster than pandas time-based rolling
-        # for the segment lengths we see in practice (60–90k cadences).
-        # NaN-safe: fill with segment median before filter, restore mask after.
-        # Sort first — stitched multi-quarter LCs may have minor non-monotonic
-        # cadences that would skew the median window.
+        # 3. rolling-median detrend via scipy.ndimage.median_filter, window sized
+        # from the segment's own median cadence — far faster than pandas
+        # time-based rolling at these segment lengths. NaN-safe: fill with the
+        # segment median before filtering, restore the mask after. Sort first,
+        # because stitched multi-quarter curves carry non-monotonic cadences that
+        # would skew the window.
         order = np.argsort(seg_t, kind="stable")
         inv_order = np.argsort(order)
         seg_t_sorted = seg_t[order]

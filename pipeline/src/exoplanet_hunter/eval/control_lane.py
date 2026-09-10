@@ -29,15 +29,12 @@ from exoplanet_hunter.validation.promotion import GATE_MISSION
 #: number, which is the failure mode this project keeps finding.
 MIN_GATE_ROWS = 1000
 
-#: How far the lane may differ from the original scoring path **measured on the
-#: same inputs on the same day** before it is considered to be computing
-#: something other than what that path computes. Same weights, same shards, same
-#: labels, same folds: the only expected difference is floating-point.
-#:
-#: 4.1c set this against a summary produced on a *different date*, which made it
-#: a test of whether the population had moved — the one thing this lane exists to
-#: stop assuming. 4.1d removed time from the comparison instead of loosening the
-#: number: the tolerance is unchanged, what it ranges over is not.
+#: How far the lane may differ from the original path **on the same inputs on the
+#: same day**: same weights, shards, labels and folds, so the only expected
+#: difference is floating-point. Set once against a summary from a different
+#: date, which made it a test of whether the population had moved — the one thing
+#: this lane exists to stop assuming. See
+#: `docs/experiments/refresh-gate-calibration-4-1.md`.
 REPRODUCTION_TOLERANCE = 1e-6
 
 

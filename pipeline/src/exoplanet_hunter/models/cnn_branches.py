@@ -596,15 +596,12 @@ class MaskedTransitPool(layers.Layer):
         variance = tf.reduce_sum(tf.square(deviation), axis=1) / divisor
         spread = tf.sqrt(variance + self.epsilon)
 
-        # Lowest representable rather than zero: `max` over `encoded * mask`
-        # would be correct only while the tower ends in a ReLU, and would go
-        # silently wrong the day it does not.
-        #
-        # A *scalar* `lowest`, broadcast by `tf.where`, rather than a
-        # `tf.fill(tf.shape(encoded), ...)`: filling from a dynamic shape leaves
-        # the result with no static shape, the concat below inherits that, and
-        # `_ConcatGradV2` then aborts the process — not an exception — when the
-        # gradient runs.
+        # Lowest representable rather than zero: `max` over `encoded * mask` is
+        # correct only while the tower ends in a ReLU. A *scalar* `lowest`
+        # broadcast by `tf.where`, not `tf.fill(tf.shape(...))`: a dynamic shape
+        # leaves the result with no static shape, the concat inherits that, and
+        # `_ConcatGradV2` aborts the process — not an exception — on the backward
+        # pass.
         lowest = tf.constant(encoded.dtype.min, dtype=encoded.dtype)
         largest = tf.reduce_max(tf.where(mask > 0.0, encoded, lowest), axis=1)
         largest = tf.where(count > 0.0, largest, tf.zeros_like(largest))

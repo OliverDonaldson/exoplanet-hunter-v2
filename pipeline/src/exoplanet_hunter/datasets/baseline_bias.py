@@ -236,15 +236,11 @@ def stratified_negative_sample(
         for value in values
     }
 
-    # A GLOBAL negative-to-positive ratio, not a per-stratum cap. Capping each
-    # stratum's negatives at its own positive count only balances the strata
-    # where negatives dominate: on the real shape of this catalogue the
-    # long-baseline strata hold ~228 planets against ~22 false positives, so a
-    # per-stratum cap leaves them at a ratio of 0.10 while the short-baseline
-    # strata are cut to 1.00 — and P(label | baseline) is still a staircase. It
-    # took the residual from +0.696 to +0.244 and stopped, which the guard below
-    # caught. Equalising the ratio across strata is what makes label and stratum
-    # independent, and only the scarcest stratum can set it.
+    # A GLOBAL negative-to-positive ratio, not a per-stratum cap. A per-stratum
+    # cap only balances the strata where negatives dominate, leaving
+    # P(label | baseline) a staircase — it stalled halfway and the guard below
+    # caught it. Equalising the ratio across strata is what makes label and
+    # stratum independent, and only the scarcest stratum can set it.
     ratios = []
     for value, (positives, negatives) in counts.items():
         if len(positives) == 0 or len(negatives) == 0:

@@ -89,15 +89,12 @@ _NOISED = (
 #: depth scaling applies. A gap fraction and a peak-normalised periodogram are
 #: not depths and do not move when the transit gets deeper.
 _DEPTH_SCALED = (ViewKind.FOLDED_FLUX, ViewKind.UNFOLDED_FLUX)
-#: Views where zero is the *neutral* value, so dropping a bin to it removes a
-#: measurement rather than asserting a different one. On folded flux, zero is
-#: the out-of-transit baseline and masking reads as "nothing to see here".
-#: Elsewhere it is a claim: zero in a gap fraction says **no cadence was
-#: missing**, and zero in a peak-normalised periodogram says **no power at this
-#: period** — both stated confidently while `present` still says the bin was
-#: measured. That is the flip this module's docstring exists to prevent, applied
-#: by the module itself. Deliberately its own constant rather than reusing
-#: `_DEPTH_SCALED`: the two sets coincide today for unrelated reasons.
+#: Views where zero is the *neutral* value, so masking a bin removes a
+#: measurement rather than asserting a different one. On folded flux zero is the
+#: out-of-transit baseline; elsewhere it is a claim — zero in a gap fraction says
+#: no cadence was missing — stated confidently while `present` still says the bin
+#: was measured. Its own constant, not a reuse of `_DEPTH_SCALED`: the two sets
+#: coincide today for unrelated reasons.
 _MASKABLE = (ViewKind.FOLDED_FLUX, ViewKind.UNFOLDED_FLUX)
 
 
