@@ -13,6 +13,11 @@
 # API's absolute origin: the console and the API are different origins, so a
 # relative "/api" would resolve to this static site and 404. The API's
 # FRONTEND_ORIGIN (fly.toml) must name this site back, for CORS.
+#
+# EH_CONSOLE_URL is this site's own origin, baked into og:url and og:image.
+# Unfurlers reject relative image URLs, so the card cannot be linked any other
+# way. If this service is ever renamed, this value moves with it or every
+# shared link loses its preview.
 
 services:
   - type: web
@@ -25,3 +30,5 @@ services:
     envVars:
       - key: EH_API_BASE
         value: https://exoplanet-hunter-api.fly.dev
+      - key: EH_CONSOLE_URL
+        value: https://exoplanet-hunter-console.onrender.com

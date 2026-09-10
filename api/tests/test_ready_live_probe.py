@@ -24,6 +24,7 @@ from app.main import app
 _ROOT = Path(__file__).resolve().parents[2]
 _SRC = _ROOT / "frontend" / "design-console" / "src"
 _GATE = _ROOT / "pipeline" / "scripts" / "check_showcase_ready.py"
+_BUILD = _ROOT / "frontend" / "design-console" / "build.py"
 
 #: The console fetched six endpoints at load time when this was written. The
 #: floor is well under that, so ordinary edits do not trip it and a regex that
@@ -80,11 +81,90 @@ def test_every_load_time_console_call_is_probed(gate):
 def test_a_missing_endpoint_fails_the_check(gate, monkeypatch):
     absent = f"{gate.CONSOLE_ENDPOINTS[-1]}"
     monkeypatch.setattr(
-        gate, "_get", lambda url, timeout=25: (200, "{}") if absent not in url else (404, "")
+        gate,
+        "_get",
+        lambda url, timeout=25, retry_slow=False: (200, "{}") if absent not in url else (404, ""),
     )
     assert not gate.check_api_live().ok
 
 
 def test_all_endpoints_answering_passes_the_check(gate, monkeypatch):
-    monkeypatch.setattr(gate, "_get", lambda url, timeout=25: (200, "{}"))
+    monkeypatch.setattr(gate, "_get", lambda url, timeout=25, retry_slow=False: (200, "{}"))
     assert gate.check_api_live().ok
+
+
+class _Calls:
+    """A stand-in for _get that records what it was asked and answers a script."""
+
+    def __init__(self, *answers):
+        self.answers, self.urls = list(answers), []
+
+    def __call__(self, url, timeout=25, retry_slow=False):
+        self.urls.append(url)
+        return self.answers[min(len(self.urls) - 1, len(self.answers) - 1)]
+
+
+def test_a_slow_first_probe_is_retried_once(gate, monkeypatch):
+    tries = []
+
+    def boom(url, timeout=25):
+        tries.append(url)
+        raise TimeoutError("the read operation timed out")
+
+    monkeypatch.setattr(gate.urllib.request, "urlopen", boom)
+    status, _ = gate._get("https://example.invalid/healthz", retry_slow=True)
+    assert status == 0 and len(tries) == 2
+
+
+def test_a_refused_connection_is_not_retried(gate, monkeypatch):
+    tries = []
+
+    def refused(url, timeout=25):
+        tries.append(url)
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(gate.urllib.request, "urlopen", refused)
+    gate._get("https://example.invalid/healthz", retry_slow=True)
+    assert len(tries) == 1
+
+
+def test_only_the_first_endpoint_pays_the_resume(gate, monkeypatch):
+    seen = []
+
+    def spy(url, timeout=25, retry_slow=False):
+        seen.append(retry_slow)
+        return 200, "{}"
+
+    monkeypatch.setattr(gate, "_get", spy)
+    gate.check_api_live()
+    assert seen[0] is True and not any(seen[1:])
+
+
+def test_a_head_with_no_og_image_fails_the_preview_check(gate, monkeypatch):
+    monkeypatch.setattr(gate, "_get", _Calls((200, "<head><title>x</title></head>")))
+    assert not gate.check_link_preview().ok
+
+
+def test_an_og_image_that_does_not_answer_fails_the_check(gate, monkeypatch):
+    page = '<meta property="og:image" content="https://example.test/og.png">'
+    monkeypatch.setattr(gate, "_get", _Calls((200, page), (404, "")))
+    assert not gate.check_link_preview().ok
+
+
+def test_a_card_that_answers_passes_the_check(gate, monkeypatch):
+    page = '<meta property="og:image" content="https://example.test/og.png">'
+    calls = _Calls((200, page), (200, "PNG"))
+    monkeypatch.setattr(gate, "_get", calls)
+    assert gate.check_link_preview().ok
+    assert calls.urls[1] == "https://example.test/og.png"
+
+
+def test_the_gate_reads_the_tag_the_console_actually_writes(gate, monkeypatch):
+    """The check greps the served HTML, so a reformatted tag in build.py would
+    silently stop matching and the card would go unchecked."""
+    emitted = '\'<meta property="og:image" content="{console_url}/og.png">\''
+    assert emitted in _BUILD.read_text()
+
+    page = '<meta property="og:image" content="https://example.test/og.png">'
+    monkeypatch.setattr(gate, "_get", _Calls((200, page), (200, "PNG")))
+    assert gate.check_link_preview().ok

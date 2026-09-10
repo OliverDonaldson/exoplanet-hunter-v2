@@ -24,6 +24,7 @@ import base64
 import os
 import pathlib
 import re
+import shutil
 import sys
 from urllib.parse import quote
 
@@ -65,6 +66,22 @@ ICONS = {
     "__ICON_MARK_FULL__": "logo.svg",
 }
 
+# What an unfurler reads. Every one of them (LinkedIn, Slack, X, iMessage)
+# wants Open Graph, and none accept a data: URI for og:image, so the card is a
+# real file at a real origin: tools/og_card.py draws it, it is committed under
+# assets/icon/, and it is copied into dist/ below because Render's build image
+# has neither Pillow nor fontTools. preview.html shares these bytes with
+# index.html by design, so a local preview carries the deployed URLs; harmless,
+# and cheaper than maintaining two heads.
+OG_DESCRIPTION = (
+    "A calibrated deep-learning pipeline for vetting transit candidates in NASA "
+    "TESS, Kepler and K2 photometry. Live scoring, with the evidence behind every number."
+)
+OG_IMAGE_ALT = (
+    "The Exoplanet Hunter mark, a ringed planet inside an acquisition reticle, "
+    "beside the wordmark on a dark grid."
+)
+
 # The favicon goes into the standalone wrapper's <head>, not into shell.html:
 # that file is the artifact body, and the artifact host sets the tab icon
 # itself. dist/index.html is the copy that gets deployed and needs its own.
@@ -84,6 +101,12 @@ def main() -> int:
     api_base = os.environ.get("EH_API_BASE", "").strip()
     meta = f'<meta name="eh-api-base" content="{api_base}">\n' if api_base else ""
 
+    # og:url and og:image have to be absolute, so the deployed origin is a
+    # build-time input like EH_API_BASE. render.yaml supplies it.
+    console_url = os.environ.get(
+        "EH_CONSOLE_URL", "https://exoplanet-hunter-console.onrender.com"
+    ).rstrip("/")
+
     shell = meta + (HERE / "src/shell.html").read_text()
     for token, filename in FONTS.items():
         blob = (HERE / "assets/fonts" / filename).read_bytes()
@@ -97,6 +120,21 @@ def main() -> int:
 
     svg = (HERE / "assets/icon/favicon.svg").read_text()
     png = (HERE / "assets/icon/favicon-32.png").read_bytes()
+    social = (
+        f'<meta name="description" content="{OG_DESCRIPTION}">'
+        '<meta property="og:type" content="website">'
+        '<meta property="og:site_name" content="Exoplanet Hunter">'
+        '<meta property="og:title" content="Exoplanet Hunter">'
+        f'<meta property="og:description" content="{OG_DESCRIPTION}">'
+        f'<meta property="og:url" content="{console_url}/">'
+        f'<meta property="og:image" content="{console_url}/og.png">'
+        '<meta property="og:image:type" content="image/png">'
+        '<meta property="og:image:width" content="1200">'
+        '<meta property="og:image:height" content="630">'
+        f'<meta property="og:image:alt" content="{OG_IMAGE_ALT}">'
+        '<meta name="twitter:card" content="summary_large_image">'
+    )
+
     icon_links = (
         '<link rel="icon" type="image/svg+xml" '
         f'href="data:image/svg+xml,{quote(svg, safe=chr(47) + chr(58))}">'
@@ -153,11 +191,13 @@ def main() -> int:
         # band above a near-black page
         '<meta name="theme-color" content="#050608">'
         "<title>Exoplanet Hunter</title>"
+        + social
         + icon_links
         + "<style>body{margin:0;padding:0}</style></head><body>"
         + out
         + "</body></html>"
     )
+    shutil.copyfile(HERE / "assets/icon/og-card.png", dist / "og.png")
     (dist / "preview.html").write_text(standalone)
     # index.html is what a static host serves at /. Same bytes as preview.html
     # — one file, two names, so opening from disk and deploying cannot diverge.
@@ -166,6 +206,7 @@ def main() -> int:
     print(f"anime.js inlined — {len(pairs)} exports")
     print(f"dist/exoplanet-hunter.html — {len(out) / 1024:.0f} KB")
     print(f"dist/index.html + dist/preview.html — API base {api_base or '/api (default)'}")
+    print(f"dist/og.png — social card, og:url {console_url}/")
     return 0
 
 
