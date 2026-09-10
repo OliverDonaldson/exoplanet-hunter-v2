@@ -425,20 +425,37 @@ the calibrator fit.
 Champion `ca906040cdb74ba6b07353a500244777`, promoted 2026-07-19, unchanged
 since. Its five folds are MLflow child runs of that parent:
 
-| Fold | Epochs recorded |
-|---|---:|
-| fold-0 | none — no per-epoch series was logged |
-| fold-1 | 78 |
-| fold-2 | 79 |
-| fold-3 | 70 |
-| fold-4 | 84 |
+| Fold | Epochs run | Weights restored from |
+|---|---:|---:|
+| fold-0 | none — no per-epoch series was logged | — |
+| fold-1 | 77 | 51 |
+| fold-2 | 78 | 52 |
+| fold-3 | 69 | 43 |
+| fold-4 | 83 | 57 |
 
-Early stopping on inner-validation loss accounts for the spread. Fold-0's
-missing series is a logging gap, not a training failure: its weights, its
-out-of-fold predictions and its calibration bundle are all present and it
+Early stopping accounts for the spread. It monitors inner-validation **ROC-AUC**
+with patience 25 and restores the best epoch's weights, so the shipped weights
+come from the epoch in the third column, not the last one run — exactly 25
+epochs earlier in every fold, which is what patience 25 means. It is also a
+different epoch from the validation-loss minimum, which falls 2 to 25 epochs
+later: on the metric this project promotes on, the loss minimum is not the
+right place to stop.
+
+Fold-0's missing series is a logging gap, not a training failure: its weights,
+its out-of-fold predictions and its calibration bundle are all present and it
 contributes to every pooled number in §6. The training-curve figure names the
 missing fold in its title rather than silently drawing four lines and calling
 them five.
+
+*Corrected 2026-09-11.* This table read 78/79/70/84 and named validation loss
+as the early-stopping criterion; both were wrong. MLflow's autologger re-logs
+every metric for the restored weights at one step past the last epoch, so each
+series carried a trailing sample that is a bitwise copy of the best epoch
+rather than an epoch of its own — counted as one, and drawn as one by
+`figures/training_curves.png`, which made every curve appear to end exactly on
+its own best value. `export_training_history.py` now drops it, raising rather
+than trimming if the trailing sample is not an exact copy, and the figure reads
+that export so it and the console cannot disagree.
 
 ## 5.3 Calibration and uncertainty
 
@@ -584,7 +601,7 @@ bins, pooled out of fold.](figures/calibration.png)
 | `figures/roc_operating_point.png` | Per-mission ROC at unit aspect, 1% FPR operating point marked |
 | `figures/roc_pr.png` | Pooled ROC and precision–recall curves |
 | `figures/calibration.png` | Reliability diagram, 10 bins, with the diagonal |
-| `figures/training_curves.png` | Per-fold loss and AUC by epoch; the title names the fold with no series |
+| `figures/training_curves.png` | Per-fold loss and AUC by epoch, dotted at the epoch early stopping restored; the title names the fold with no series |
 | `figures/embedding_3d.png` | Penultimate-layer embedding, coloured by label |
 | `figures/risk_coverage.png` | Risk against coverage as the score threshold sweeps |
 | `figures/completeness.png` | Recovery against transit depth and period |
@@ -663,10 +680,10 @@ wrong, and the correction is unfavourable.** ROC curves are non-decreasing, so
 any published operating point at an FPR below 1% is a valid lower bound on
 recall @1% FPR, and two of the five sources publish one:
 
-| source | published point | implied FPR | ⇒ bound | ours |
+| source | published point | implied FPR | $\Rightarrow$ bound | ours |
 |---|---|---:|---:|---:|
-| ExoMiner 2022 (Kepler) | recall 0.936 at 99% precision | 0.077% | ≥ 0.936 | 0.8129 |
-| ExoMiner++ (TESS) | recall 0.951 | 0.47% | **≥ 0.951** | **0.3113** |
+| ExoMiner 2022 (Kepler) | recall 0.936 at 99% precision | 0.077% | $\ge$ 0.936 | 0.8129 |
+| ExoMiner++ (TESS) | recall 0.951 | 0.47% | **$\ge$ 0.951** | **0.3113** |
 
 This project's own realised cuts are stricter still — 0.94% FPR on TESS, 0.70%
 on Kepler — so the inequality runs the right way and the comparison is valid

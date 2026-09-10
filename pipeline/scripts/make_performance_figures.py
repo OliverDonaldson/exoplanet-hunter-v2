@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 from pathlib import Path
 
 import joblib
@@ -30,48 +29,49 @@ log = get_logger(__name__)
 FOLD_COLORS = plt.cm.viridis(np.linspace(0.15, 0.85, 5))
 
 
-def _epoch_series(con: sqlite3.Connection, run_uuid: str, key: str) -> np.ndarray:
-    rows = con.execute(
-        "select value from metrics where run_uuid=? and key=? order by step", (run_uuid, key)
-    ).fetchall()
-    return np.array([r[0] for r in rows], dtype=float)
+def fig_training_curves(history_path: Path, out: Path) -> None:
+    """Per-fold loss and ROC-AUC by epoch, from the exported history.
 
-
-def fig_training_curves(db_path: Path, run_id: str, out: Path) -> None:
-    con = sqlite3.connect(db_path)
-    folds = dict(
-        con.execute(
-            "select name, run_uuid from runs where run_uuid in "
-            "(select run_uuid from tags where key='mlflow.parentRunId' and value=?)",
-            (run_id,),
-        ).fetchall()
-    )
+    Reads `models/history/<run>.json` rather than MLflow directly, so this
+    figure and the console's Training History panel plot the same samples by
+    construction. The exporter is what drops the autologger's trailing
+    restore record, which is a copy of the best epoch rather than an epoch —
+    see export_training_history.py. Until 2026-09-11 this drew it, and every
+    curve therefore appeared to end exactly on its own best value.
+    """
+    if not history_path.exists():
+        raise SystemExit(
+            f"{history_path} does not exist — run "
+            "`python pipeline/scripts/export_training_history.py` first"
+        )
+    history = json.loads(history_path.read_text())
     # A fold with no epoch series gets no line and no legend entry. ca906040's
     # fold 0 is exactly that case: it logged its 31 summary metrics and no
     # per-epoch history, so plotting it unconditionally put a fifth label on a
     # legend over four curves — a chart claiming a fold it does not show.
-    drawn: set[int] = set()
+    drawn = [f for f in history["folds"] if f["epochs"]]
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
-    for name, ax, ylabel in (
+    for keys, ax, ylabel in (
         (("loss", "val_loss"), axes[0], "loss"),
         (("auc", "val_auc"), axes[1], "ROC-AUC"),
     ):
-        for i in range(5):
-            uuid = folds.get(f"fold-{i}")
-            if uuid is None:
-                continue
-            train, val = _epoch_series(con, uuid, name[0]), _epoch_series(con, uuid, name[1])
-            if not len(val):
-                continue
-            drawn.add(i)
-            ax.plot(train, color=FOLD_COLORS[i], alpha=0.25)
-            ax.plot(val, color=FOLD_COLORS[i], label=f"fold {i}")
+        for f in drawn:
+            colour = FOLD_COLORS[f["fold"]]
+            ax.plot(f[keys[0]], color=colour, alpha=0.25)
+            ax.plot(f[keys[1]], color=colour, label=f"fold {f['fold']}")
+            # The epoch whose weights shipped, not the last one run: early
+            # stopping restores the val_auc maximum and the two are up to 25
+            # epochs apart on this run.
+            ax.axvline(f["restored_epoch"], color=colour, alpha=0.55, lw=0.9, ls=":")
         ax.set_xlabel("epoch")
         ax.set_ylabel(ylabel)
-    missing = sorted(set(range(5)) - drawn)
-    note = f" · no epoch history logged for fold {', '.join(map(str, missing))}" if missing else ""
-    axes[0].set_title(f"Loss by epoch (faint = train, solid = validation){note}", fontsize=10)
-    axes[1].set_title("ROC-AUC by epoch", fontsize=10)
+    missing = sorted(f["fold"] for f in history["folds"] if not f["epochs"])
+    note = f"\nno epoch history logged for fold {', '.join(map(str, missing))}" if missing else ""
+    axes[0].set_title(f"Loss by epoch — faint = train, solid = validation{note}", fontsize=9)
+    axes[1].set_title(
+        f"ROC-AUC by epoch — dotted = epoch restored\nby early stopping on {history['monitor']}",
+        fontsize=9,
+    )
     if missing:
         log.warning("no epoch history for folds %s — drawn from %d of 5", missing, len(drawn))
     axes[1].legend(fontsize=8, loc="lower right")
@@ -318,7 +318,6 @@ def main() -> None:
     parser.add_argument("--run", default=None, help="run id (default: the promoted run)")
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
     parser.add_argument("--shards", type=Path, default=Path("data/processed/tfrecords"))
-    parser.add_argument("--mlflow-db", type=Path, default=Path("mlflow.db"))
     parser.add_argument("--labels", type=Path, default=Path("data/tables/labels/labels.parquet"))
     parser.add_argument("--out", type=Path, default=Path("docs/figures"))
     args = parser.parse_args()
@@ -329,7 +328,9 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     log.info("figures for run %s (%d OOF predictions)", run_id[:8], len(preds))
 
-    fig_training_curves(args.mlflow_db, run_id, args.out / "training_curves.png")
+    fig_training_curves(
+        args.models_dir / "history" / f"{run_id}.json", args.out / "training_curves.png"
+    )
     fig_roc_pr(preds, args.out / "roc_pr.png")
     fig_roc_operating_point(preds, args.labels, args.out / "roc_operating_point.png")
     fig_calibration(preds, args.out / "calibration.png")
