@@ -1679,22 +1679,35 @@ function Discovery() {
   </div>`;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   ABOUT — scaffold. Sections are placeholders to be written.
-   ═══════════════════════════════════════════════════════════ */
 /* ── ABOUT ───────────────────────────────────────────────
-   Written from docs/report.md, which is the evidence for every claim below.
-   The prose is fixed; the numbers are not — each one is read off SERVED so the
-   page follows a promotion instead of going stale, and renders an em dash
-   rather than a figure when the API did not answer. That is the same rule the
-   Model page runs under, and this page makes more claims than that one. */
+   Written from docs/report.md, which is the evidence for every claim below,
+   and linked from the page so a reader can go and check it.
+
+   The prose is fixed; the numbers are not. Every figure the served run knows
+   about itself is read off SERVED, so the page follows a promotion instead of
+   going stale, and renders an em dash rather than a figure when the API did not
+   answer. Figures that belong to the record rather than to the run (the label
+   counts, the closed branch line, the bulk-pass distribution) are written here,
+   because no promotion changes them.
+
+   Prose on this page carries no em dashes: it is the one page a visitor reads
+   end to end, and the dash is the page's own "no value" glyph. Only the note
+   that explains that glyph uses one. */
+
+const REPORT_URL =
+  'https://github.com/OliverDonaldson/exoplanet-hunter-v2/blob/main/docs/report.pdf';
+const REPO_URL = 'https://github.com/OliverDonaldson/exoplanet-hunter-v2';
 
 const dp = (v, d = 4) => (has(v) ? v.toFixed(d) : '—');
 const pc = (v, d = 1) => (has(v) ? `${(v * 100).toFixed(d)}%` : '—');
 
-/** A mission's slice, or null. Named rather than inlined because four of the
-    six sections quote one and a missing mission must not throw. */
+/** A mission's slice, or null. Named rather than inlined because most of the
+    sections quote one and a missing mission must not throw. */
 const missionNamed = name => SERVED.missions.find(m => m.mission === name) || null;
+
+/** mean ± sd, or an em dash. The pair is quoted together everywhere on this
+    page for the reason section 05 gives: the margin alone is not a result. */
+const pmSd = (v, e, d = 4) => (has(v) ? `${v.toFixed(d)}${has(e) ? ` ± ${e.toFixed(d)}` : ''}` : '—');
 
 function aboutSections() {
   const tess = missionNamed('TESS');
@@ -1702,101 +1715,224 @@ function aboutSections() {
   const met = SERVED.metrics || {};
   const run = esc(SERVED.runId || 'the served run');
   const floor = SERVED.noiseFloor || {};
+  const cv = k => (met[k] ? pmSd(met[k].mean, met[k].std) : '—');
 
   return [
     ['What this is', `
       <p>This vets transiting-planet candidates. It does not search for them.</p>
-      <p>The input is a signal somebody has already flagged — a TESS Object of
-      Interest, a Kepler Object of Interest, a K2 candidate — carrying a published
-      ephemeris. The output is a calibrated probability that the signal is a
+      <p>The input is a signal somebody has already flagged, carrying a published
+      ephemeris: a TESS Object of Interest, a Kepler Object of Interest, a K2
+      candidate. The output is a calibrated probability that the signal is a
       planet rather than an eclipsing binary, a blend, or an instrumental
-      artefact. Ranking a shortlist for follow-up is the job; finding new signals
-      in raw photometry is a different one, and it is deliberately out of scope
+      artefact. Ranking a shortlist for follow-up is the job. Finding new signals
+      in raw photometry is a different job, and it is deliberately out of scope
       rather than unfinished.</p>
+      <p><b>Why that job is worth doing.</b> Confirming a planet costs telescope
+      time, and there are far more candidates than nights. The held-out catalogue
+      this console lists is 12,472 rows, of which 5,104 are genuinely unresolved:
+      flagged by a detection pipeline, never adjudicated. A ranking that puts real
+      planets near the top of a short list is worth more than one that is right on
+      average, because nobody observes the average.</p>
       <p>It is a portfolio piece built on the machine-learning workflow taught in
-      DATA 301 at Victoria University of Wellington — formalise, collect,
-      preprocess, select, train, evaluate, report — and the report is the
+      DATA 301 at Victoria University of Wellington: formalise, collect,
+      preprocess, select, train, evaluate, report. The
+      <a href="${REPORT_URL}" target="_blank" rel="noopener">report</a> is the
       deliverable that carries the evidence for everything on this page.</p>`],
+
+    ['The data', `
+      <p>Labels come from archive dispositions, one row per host star, with
+      duplicates removed before splitting so no star can appear in two folds.
+      <b>5,812 labelled rows</b>: TESS 2,782, Kepler 2,500, K2 530. Confirmed and
+      known planets are positive; false positives and refuted signals are
+      negative. Anything still dispositioned "candidate" is held out entirely,
+      never trained on and never evaluated on, because its label is the thing
+      being predicted.</p>
+      <p><b>A negative here has a specific meaning.</b> Kepler negatives are DR25
+      false positives whose Robovetter disposition score is below 0.5, which is a
+      majority reject across the Robovetter's perturbed runs. That is stronger
+      than "not yet confirmed" and weaker than "certified against follow-up
+      observations". Without some such restriction the negative class would be
+      contaminated with undiscovered planets, and every recall figure on this page
+      would be optimistic by an unknown amount.</p>
+      <p><b>The Kepler count is a cap, not a population.</b> Exactly 1,250 / 1,250
+      is the signature of a configured balanced subsample. Roughly 2,748 eligible
+      confirmed planets and 3,813 eligible false positives exist under the same
+      criteria, so the served model trained on about 45% less Kepler data than was
+      available to it. The subsample is unbiased with respect to anything
+      astrophysical and stable across refreshes, but it costs statistical power in
+      a project that has none to spare.</p>
+      <p><b>The served run saw no K2 rows at all.</b> They were added to the
+      labelled set after ${run} was trained. That is why the Model page shows no
+      K2 card: a mission the run never evaluated gets no card, rather than a card
+      of numbers transferred from a mission it did.</p>`],
 
     ['How it works', `
       <p>A weekly refresh pulls the dispositions and ephemerides, runs the
-      validation gates, and rebuilds what changed. A candidate's light curve is
-      stitched across sectors or quarters, detrended with the in-transit points
-      held out of the fit — a filter fitted through the transit flattens the dip
-      it exists to preserve — and phase-folded at the published ephemeris, or at
-      a BLS period where none is published.</p>
-      <p>That fold becomes two views: a <b>global view</b> of 2,001 bins across
-      the whole phase, carrying orbital shape and any secondary eclipse, and a
-      <b>local view</b> of 201 bins across ±3 transit durations, carrying the
+      validation gates, and rebuilds whatever changed. A candidate's light curve
+      is stitched across sectors or quarters and detrended with the in-transit
+      points held out of the fit, because a filter fitted through the transit
+      flattens the dip it exists to preserve. It is then phase-folded at the
+      published ephemeris, or at a box-least-squares period where none is
+      published.</p>
+      <p>That fold becomes two views. The <b>global view</b> is 2,001 bins across
+      the whole phase and carries orbital shape and any secondary eclipse. The
+      <b>local view</b> is 201 bins across ±3 transit durations and carries the
       transit's own profile at a resolution the global view cannot afford. Nine
-      auxiliary scalars ride alongside — stellar temperature, radius, log g,
-      magnitude, depth, duration, log period, pink S/N and centroid S/N — built
-      by the one function training and serving both call, so the two cannot
-      drift apart.</p>
-      <p>The model is a dual-view 1-D CNN after Shallue &amp; Vanderburg, trained
-      with 5-fold cross-validation grouped by host star and Platt-calibrated per
-      fold on that fold's own held-out logits. ${run} is what answers this
+      auxiliary scalars ride alongside: stellar temperature, radius, log g,
+      magnitude, depth, duration, log period, pink S/N and centroid S/N. All of
+      them are built by the one function that training and serving both call, so
+      the two cannot drift apart.</p>
+      <p>The model is a dual-view 1-D CNN after Shallue and Vanderburg, trained
+      with 5-fold cross-validation grouped by host star, Platt-calibrated per fold
+      on that fold's own held-out logits. Each fold trains until validation
+      ROC-AUC has not improved for 25 epochs, then restores the weights from its
+      best epoch; the Model page shows those curves and marks the epoch that
+      shipped. Uncertainty is Monte-Carlo dropout at inference.</p>
+      <p><b>Nothing ships without clearing a gate.</b> A candidate run is scored
+      on the same folds as the champion and has to beat it on the decision metric
+      by more than that metric's seed-to-seed noise floor, without degrading
+      calibration or shortlist recall. ${run} is what answers this
       console${SERVED.promotedAt ? `, promoted ${esc(SERVED.promotedAt)}` : ''}.
-      Nothing replaces it without clearing a promotion gate, and the gate has
-      returned no for every candidate since.</p>`],
+      The gate has returned no to every candidate since.</p>`],
+
+    ['What it scores', `
+      <p>Every figure here is out of fold: each candidate is scored by the one
+      fold that never saw it in training. Fold means with the spread across the
+      five folds beside them.</p>
+      <div class="about-scroll"><table>
+        <thead><tr><th>Across both missions</th><th>mean ± sd</th></tr></thead>
+        <tbody>
+          <tr><td>ROC-AUC</td><td>${cv('roc_auc')}</td></tr>
+          <tr><td>PR-AUC</td><td>${cv('pr_auc')}</td></tr>
+          <tr><td>Brier</td><td>${cv('brier')}</td></tr>
+          <tr><td>Expected calibration error</td><td>${cv('ece')}</td></tr>
+        </tbody>
+      </table></div>
+      <p><b>There is no pooled headline.</b> The two missions have different label
+      provenance and different class balance, so a single averaged figure would
+      not mean anything, and the mission that decides promotion is the one the
+      service actually scores. Per mission, each cut at its own 1% false-positive
+      threshold:</p>
+      <div class="about-scroll"><table>
+        <thead><tr><th></th><th>TESS (gating)</th><th>Kepler (diagnostic)</th></tr></thead>
+        <tbody>
+          <tr><td>n / positive</td>
+              <td>${tess ? `${tess.n.toLocaleString()} / ${tess.nPositive.toLocaleString()}` : '—'}</td>
+              <td>${kepler ? `${kepler.n.toLocaleString()} / ${kepler.nPositive.toLocaleString()}` : '—'}</td></tr>
+          <tr><td>ROC-AUC</td>
+              <td>${tess ? pmSd(tess.auc, tess.aucErr) : '—'}</td>
+              <td>${kepler ? pmSd(kepler.auc, kepler.aucErr) : '—'}</td></tr>
+          <tr><td>Recall @1% FPR</td>
+              <td><b>${tess ? pmSd(tess.recall, tess.recallErr) : '—'}</b></td>
+              <td>${kepler ? pmSd(kepler.recall, kepler.recallErr) : '—'}</td></tr>
+          <tr><td>Precision at that cut</td>
+              <td>${tess ? pmSd(tess.precision, tess.precisionErr) : '—'}</td>
+              <td>${kepler ? pmSd(kepler.precision, kepler.precisionErr) : '—'}</td></tr>
+          <tr><td>Brier</td>
+              <td>${tess ? pmSd(tess.brier, tess.brierErr) : '—'}</td>
+              <td>${kepler ? pmSd(kepler.brier, kepler.brierErr) : '—'}</td></tr>
+        </tbody>
+      </table></div>
+      <p><b>The gap between those two columns is the honest headline.</b> Kepler
+      is four years of continuous staring at one field; TESS is 27 days per sector
+      on most of the sky. The same model reads one far better than the other, and
+      TESS is the harder one, so TESS is what the gate is allowed to look at.</p>
+      <p>On the most recent bulk pass, 3,919 of 4,685 attempted candidates scored;
+      744 had no light curve at MAST and 22 failed preprocessing. Of those scored,
+      <b>82.85% score at or above 0.5</b> and 1.28% at or above 0.9. That
+      distribution is itself a result, and section 05 is about what follows
+      from it.</p>`],
 
     ['How to read a score', `
       <p><b>The probability is calibrated, and that is a claim about frequency.</b>
       Platt scaling maps the network's raw output onto the rate actually observed
-      out of fold, so 0.9 is meant to mean nine in ten — not "the network is
+      out of fold, so 0.9 is meant to mean nine in ten, not "the network is
       confident". Expected calibration error and the Brier score
       ${has(met.ece) ? `(<b>ECE ${dp(met.ece.mean)}</b>, <b>Brier ${dp((met.brier || {}).mean)}</b>)` : ''}
-      are how well that holds, and they are reported as first-class metrics
-      rather than as a footnote.</p>
+      are how well that holds, and they are reported as first-class metrics rather
+      than as a footnote.</p>
       <p><b>The band around a score is model disagreement, not truth.</b> It is
       the spread over Monte-Carlo dropout samples: how much this ensemble argues
-      with itself about one candidate. A narrow band on a wrong score is
-      perfectly possible.</p>
-      <p><b>0.5 is close to meaningless on this population.</b> Of the candidates
-      scored in the last bulk pass, the large majority sit at or above it — the
-      list is already filtered to things that look planet-like. That is why the
-      catalogue ranks under an explicit budget instead of cutting at a fixed
-      threshold, and why the headline metric is recall at a 1% false-positive
-      rate: with a fixed number of telescope nights, what matters is how many
-      real planets reach a shortlist that short.
+      with itself about one candidate. A narrow band on a wrong score is perfectly
+      possible.</p>
+      <p><b>0.5 is close to meaningless on this population.</b> The large majority
+      of scored candidates sit at or above it, because the list is already
+      filtered to things that look planet-like. That is why the catalogue ranks
+      under an explicit budget instead of cutting at a fixed threshold, and why
+      the headline metric is recall at a 1% false-positive rate: with a fixed
+      number of telescope nights, what matters is how many real planets reach a
+      shortlist that short.
       ${tess ? `On TESS that is <b>${pc(tess.recall)}</b>` : ''}${tess && kepler ? `; on Kepler, <b>${pc(kepler.recall)}</b>` : ''}.</p>
       <p><b>A margin smaller than its own noise floor is not a difference.</b>
       ${floor.measured && has(floor.auc)
         ? `This run measures its own floor over ${floor.n_models_per_fold} members per fold: AUC ±${dp(floor.auc)}.`
-        : `The served run trains one model per fold, so it has no seed spread of its own and no floor is published beside its numbers.`}
-      That rule is applied throughout, and it is what closed the largest line of
-      work in the project rather than what excused it.</p>`],
+        : `The served run trains one model per fold, so it has no seed spread of its own, and no floor is published beside its numbers.`}
+      That rule is applied throughout. Section 06 is what it cost.</p>`],
+
+    ['What did not work', `
+      <p>The largest line of work in this project produced a negative result. It
+      is on this page because leaving it off would misrepresent what was done.</p>
+      <p>The served model is deliberately simple, and the obvious way to beat it
+      is an ExoMiner-style multi-branch network: eleven views, one convolutional
+      branch each, reduced to per-branch embeddings and fused in a shared head.
+      Its structural argument is the unfolded view, up to 20 individual transits
+      fed unstacked, so the network can see whether a signal <i>recurs</i> rather
+      than only the average of everything that recurred. That was built, trained,
+      ablated, and ensembled across ten recorded model-selection rows.</p>
+      <p><b>It lost.</b> Across three runs it scored 0.238, 0.126 and 0.145 TESS
+      shortlist recall against the champion's 0.307, on a decision floor of 0.034:
+      rejections at up to 4.8 times the floor, not close calls. A capacity arm
+      closed the "it is simply too small" explanation. A resolution hypothesis was
+      falsified in the wrong direction. A difference-image branch, the strongest
+      single discriminant for a nearby eclipsing binary, delivered nothing
+      measurable, and the final experiment testing the last standing explanation
+      for that null came back inside its pre-registered floor on every cell. The
+      line is closed in writing rather than left quietly open.</p>
+      <p>Two things did survive it. Propensity weighting removed the branch
+      model's amplification of the observation-baseline confound at no cost in
+      recall, and is recorded as a <b>bias fix</b> rather than a promotion,
+      because it removes a reason to distrust the ranking without improving the
+      decision metric. And an ensemble of the two architectures reached 0.436
+      shortlist recall against a common-fold member's 0.305, which is the
+      strongest evidence in the record that the branch line was learning something
+      the dual-view model was not. It was banked rather than shipped: an ensemble
+      of two architectures doubles inference cost on a scale-to-zero deployment,
+      and the gate compares single models to the champion.</p>
+      <p>The compute spent on that line bought no improvement to the served model.
+      It bought a documented reason to believe the served model is not being
+      beaten by an obvious alternative, and a demonstration that this project's
+      gate cannot be talked past.</p>`],
 
     ['Known limits', `
       <p><b>How long a star was watched correlates with its label.</b> On TESS the
       correlation between observation baseline and label is <b>+0.387</b>: longer
       baselines yield more confirmations, so a model can gain apparent skill by
       learning observing strategy rather than astrophysics. This is measured, not
-      suspected — one architecture amplified it to +0.5155, above the labels' own
-      — and every recall figure here is read under it. The baseline is shown on
-      each candidate row so it can be seen rather than taken on trust.</p>
+      suspected, and one architecture amplified it to +0.5155, above the labels'
+      own. Every recall figure here is read under it, and the baseline is printed
+      on each candidate row so it can be seen rather than taken on trust.</p>
       <p><b>The model sees the star, not only the transit.</b> Stellar parameters
       are inputs, so some of the separation is host-level rather than
       signal-level.</p>
       <p><b>There is no classical baseline.</b> A random-forest configuration
       exists in the repository with a documented rationale, but no scored
       cross-validated result for it does. The CNN's advantage over classical
-      machine learning is assumed here, not measured, and it is reported as
-      absent rather than quietly omitted.</p>
+      machine learning is assumed here, not measured, and it is reported as absent
+      rather than quietly omitted.</p>
       <p><b>The decision metric is a statistic on eight to ten rows.</b> Recall at
-      1% FPR is cut at the tenth-highest negative score, which gives it a
-      sampling standard deviation of 0.0437. Any architecture difference below
-      roughly 0.09 on it is undetectable at this sample size, however many models
-      are trained — which is why so much of the model-selection record reads
-      "within floor" rather than "worse".</p>
+      1% FPR is cut at the tenth-highest negative score, which gives it a sampling
+      standard deviation of 0.0437. Any architecture difference below roughly 0.09
+      on it is undetectable at this sample size, however many models are trained.
+      That is why so much of the model-selection record reads "within floor"
+      rather than "worse", and it is what the next phase of work is aimed at.</p>
       <p><b>It is behind the published state of the art on the metric that
       governs.</b> Most literature comparisons fail on population or protocol and
-      cannot be made either way, but the one that survives is unfavourable:
-      ROC monotonicity makes a published operating point below 1% FPR a lower
-      bound on recall at 1% FPR, putting ExoMiner at ≥0.936 against this
-      project's Kepler ${dp(kepler && kepler.recall)} and ExoMiner++ at ≥0.951
-      against its TESS ${dp(tess && tess.recall)}. Stated because an audit that
-      refuses the comparison on the one unflattering metric is not rigour.</p>`],
+      cannot be made either way, but the one that survives is unfavourable. ROC
+      monotonicity makes a published operating point below 1% FPR a lower bound on
+      recall at 1% FPR, putting ExoMiner at ≥0.936 against this project's Kepler
+      ${dp(kepler && kepler.recall)} and ExoMiner++ at ≥0.951 against its TESS
+      ${dp(tess && tess.recall)}. Stated because an audit that refuses the
+      comparison on the one unflattering metric is not rigour.</p>`],
 
     ['Data and provenance', `
       <p>Dispositions, ephemerides and stellar parameters come from the
@@ -1806,23 +1942,26 @@ function aboutSections() {
       against <b>Gaia DR3</b>.</p>
       <p>Raw FITS are treated as an evictable cache of immutable archive files.
       Everything derived from them is rebuilt by current code and versioned in
-      DVC, so a number can be traced back to the bytes it came from rather than
-      to a directory that happened to be on someone's disk.</p>
+      DVC, so a number can be traced back to the bytes it came from rather than to
+      a directory that happened to be on someone's disk.</p>
       <p>Every screen that shows a metric also shows which model version produced
-      it${SERVED.modelVersion ? ` — this session is reading <code>${esc(SERVED.modelVersion)}</code>` : ''}.
-      A figure without a version beside it is a figure nobody can check later.</p>`],
+      it${SERVED.modelVersion ? `. This session is reading <code>${esc(SERVED.modelVersion)}</code>` : ''}.
+      A figure without a version beside it is a figure nobody can check later.</p>
+      <p>The code, the record of every experiment and the report are all in
+      <a href="${REPO_URL}" target="_blank" rel="noopener">one public
+      repository</a>.</p>`],
 
     ['Credits and licence', `
-      <p>The served architecture follows <b>Shallue &amp; Vanderburg (2018)</b>,
+      <p>The served architecture follows <b>Shallue and Vanderburg (2018)</b>,
       whose dual-view convolutional design this is a direct descendant of.</p>
       <p>The multi-branch design this project built, ran, ablated, ensembled and
       ultimately did not promote was inspired by <b>ExoMiner</b> and
-      <b>ExoMiner++</b>. Those papers are also the benchmark the limitations
-      section reads this work against, and they are ahead of it.</p>
+      <b>ExoMiner++</b>. Those papers are also the benchmark section 07 reads this
+      work against, and they are ahead of it.</p>
       <p>This product uses data from the NASA Exoplanet Archive, ExoFOP, MAST and
       the ESA Gaia mission, whose respective teams and funding agencies are
-      acknowledged. The Mission-page backdrop is generated artwork and is
-      labelled as such — it is not an observation.</p>
+      acknowledged. The Mission-page backdrop is generated artwork and is labelled
+      as such, not an observation.</p>
       <p>Released under the <b>MIT Licence</b>, © 2026 Oliver Donaldson.</p>`],
   ];
 }
@@ -1843,9 +1982,16 @@ function About() {
         </div>
       </div>
 
+      ${API.mode === 'live' ? '' : `
+      <div class="note" style="margin-bottom:1rem;border-color:rgba(245,166,35,0.45)">
+        <span class="ico">▲</span>
+        <span class="txt"><b style="color:#F5A623;font-weight:500">The API did not answer, so every figure below is prototype data.</b>
+        This page quotes the served run whenever the service is reachable. What is rendering now is the console's stand-in set, which exists so the page works offline and is not a measurement of anything.</span>
+      </div>`}
+
       <div class="note" style="margin-bottom:2.5rem">
         <span class="ico">▸</span>
-        <span class="txt">Everything here is drawn from the project report, which carries the evidence for it. The numbers follow whatever run is served rather than being written into the page, so they change when the model does — and read as an em dash rather than a figure when the service does not answer.</span>
+        <span class="txt">Everything here is drawn from the <a href="${REPORT_URL}" target="_blank" rel="noopener">project report</a>, which carries the evidence for it. The numbers follow whatever run is served rather than being written into the page, so they change when the model does — and read as an em dash rather than a figure when the service does not answer.</span>
       </div>
 
       <div style="display:grid;gap:1.25rem">
