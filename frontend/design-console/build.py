@@ -56,6 +56,15 @@ IMAGES = {
     "__BG_ORION__": "orion-hero.webp",
 }
 
+# The mark, inlined rather than linked: the console is one file and an <img>
+# would be a second request the artifact host's CSP blocks anyway. Two grades of
+# the same drawing -- see the comments in each file -- and the use site sizes
+# them from CSS, so neither carries a width of its own.
+ICONS = {
+    "__ICON_MARK__": "favicon.svg",
+    "__ICON_MARK_FULL__": "logo.svg",
+}
+
 # The favicon goes into the standalone wrapper's <head>, not into shell.html:
 # that file is the artifact body, and the artifact host sets the tab icon
 # itself. dist/index.html is the copy that gets deployed and needs its own.
@@ -114,6 +123,22 @@ def main() -> int:
     anime = anime[: match.start()] + "const ANIME={" + ",".join(pairs) + "};\n"
 
     out = shell + '\n<script type="module">\n' + anime + "\n" + app + "\n</script>\n"
+
+    # After concatenation, because the shell carries the nav mark and the About
+    # page carries the full one, and one substitution over the whole file is
+    # less to keep in step than two over its halves.
+    for token, filename in ICONS.items():
+        markup = (HERE / "assets/icon" / filename).read_text().strip()
+        # A token can land inside a JS template literal -- the About page's
+        # does -- where a backtick or ${ ends the string and the whole module
+        # fails to parse. A comment in logo.svg did exactly that once, and the
+        # only symptom was the console never leaving its boot overlay.
+        bad = [c for c in ("`", "${") if c in markup]
+        if bad:
+            print(f"error: {filename} contains {bad} — see build.py", file=sys.stderr)
+            return 1
+        out = out.replace(token, markup)
+    assert "__ICON_" not in out, "unreplaced icon placeholder"
 
     dist = HERE / "dist"
     dist.mkdir(exist_ok=True)

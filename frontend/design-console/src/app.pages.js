@@ -1682,42 +1682,180 @@ function Discovery() {
 /* ═══════════════════════════════════════════════════════════
    ABOUT — scaffold. Sections are placeholders to be written.
    ═══════════════════════════════════════════════════════════ */
-const ABOUT_SECTIONS = [
-  ['What this is', 'A one-paragraph statement of the project: what it classifies, for whom, and what it does not do.'],
-  ['How it works', 'The pipeline end to end: catalogue refresh, validation gates, the eleven input views, the five-fold ensemble, calibration, the promotion gate.'],
-  ['How to read a score', 'What a calibrated probability means here, what the MC-dropout band is, and why a margin under the noise floor is not a difference.'],
-  ['Known limits', 'The measured defects, stated plainly: observation baseline correlates with the label on TESS, and the model scores the star as well as the transit.'],
-  ['Data and provenance', 'Where every input comes from (MAST, ExoFOP, the NASA archive, Gaia), and which model version served any given number.'],
-  ['Credits and licence', 'Attribution, the ExoMiner work this builds on, and the licence this is released under.'],
-];
+/* ── ABOUT ───────────────────────────────────────────────
+   Written from docs/report.md, which is the evidence for every claim below.
+   The prose is fixed; the numbers are not — each one is read off SERVED so the
+   page follows a promotion instead of going stale, and renders an em dash
+   rather than a figure when the API did not answer. That is the same rule the
+   Model page runs under, and this page makes more claims than that one. */
+
+const dp = (v, d = 4) => (has(v) ? v.toFixed(d) : '—');
+const pc = (v, d = 1) => (has(v) ? `${(v * 100).toFixed(d)}%` : '—');
+
+/** A mission's slice, or null. Named rather than inlined because four of the
+    six sections quote one and a missing mission must not throw. */
+const missionNamed = name => SERVED.missions.find(m => m.mission === name) || null;
+
+function aboutSections() {
+  const tess = missionNamed('TESS');
+  const kepler = missionNamed('Kepler');
+  const met = SERVED.metrics || {};
+  const run = esc(SERVED.runId || 'the served run');
+  const floor = SERVED.noiseFloor || {};
+
+  return [
+    ['What this is', `
+      <p>This vets transiting-planet candidates. It does not search for them.</p>
+      <p>The input is a signal somebody has already flagged — a TESS Object of
+      Interest, a Kepler Object of Interest, a K2 candidate — carrying a published
+      ephemeris. The output is a calibrated probability that the signal is a
+      planet rather than an eclipsing binary, a blend, or an instrumental
+      artefact. Ranking a shortlist for follow-up is the job; finding new signals
+      in raw photometry is a different one, and it is deliberately out of scope
+      rather than unfinished.</p>
+      <p>It is a portfolio piece built on the machine-learning workflow taught in
+      DATA 301 at Victoria University of Wellington — formalise, collect,
+      preprocess, select, train, evaluate, report — and the report is the
+      deliverable that carries the evidence for everything on this page.</p>`],
+
+    ['How it works', `
+      <p>A weekly refresh pulls the dispositions and ephemerides, runs the
+      validation gates, and rebuilds what changed. A candidate's light curve is
+      stitched across sectors or quarters, detrended with the in-transit points
+      held out of the fit — a filter fitted through the transit flattens the dip
+      it exists to preserve — and phase-folded at the published ephemeris, or at
+      a BLS period where none is published.</p>
+      <p>That fold becomes two views: a <b>global view</b> of 2,001 bins across
+      the whole phase, carrying orbital shape and any secondary eclipse, and a
+      <b>local view</b> of 201 bins across ±3 transit durations, carrying the
+      transit's own profile at a resolution the global view cannot afford. Nine
+      auxiliary scalars ride alongside — stellar temperature, radius, log g,
+      magnitude, depth, duration, log period, pink S/N and centroid S/N — built
+      by the one function training and serving both call, so the two cannot
+      drift apart.</p>
+      <p>The model is a dual-view 1-D CNN after Shallue &amp; Vanderburg, trained
+      with 5-fold cross-validation grouped by host star and Platt-calibrated per
+      fold on that fold's own held-out logits. ${run} is what answers this
+      console${SERVED.promotedAt ? `, promoted ${esc(SERVED.promotedAt)}` : ''}.
+      Nothing replaces it without clearing a promotion gate, and the gate has
+      returned no for every candidate since.</p>`],
+
+    ['How to read a score', `
+      <p><b>The probability is calibrated, and that is a claim about frequency.</b>
+      Platt scaling maps the network's raw output onto the rate actually observed
+      out of fold, so 0.9 is meant to mean nine in ten — not "the network is
+      confident". Expected calibration error and the Brier score
+      ${has(met.ece) ? `(<b>ECE ${dp(met.ece.mean)}</b>, <b>Brier ${dp((met.brier || {}).mean)}</b>)` : ''}
+      are how well that holds, and they are reported as first-class metrics
+      rather than as a footnote.</p>
+      <p><b>The band around a score is model disagreement, not truth.</b> It is
+      the spread over Monte-Carlo dropout samples: how much this ensemble argues
+      with itself about one candidate. A narrow band on a wrong score is
+      perfectly possible.</p>
+      <p><b>0.5 is close to meaningless on this population.</b> Of the candidates
+      scored in the last bulk pass, the large majority sit at or above it — the
+      list is already filtered to things that look planet-like. That is why the
+      catalogue ranks under an explicit budget instead of cutting at a fixed
+      threshold, and why the headline metric is recall at a 1% false-positive
+      rate: with a fixed number of telescope nights, what matters is how many
+      real planets reach a shortlist that short.
+      ${tess ? `On TESS that is <b>${pc(tess.recall)}</b>` : ''}${tess && kepler ? `; on Kepler, <b>${pc(kepler.recall)}</b>` : ''}.</p>
+      <p><b>A margin smaller than its own noise floor is not a difference.</b>
+      ${floor.measured && has(floor.auc)
+        ? `This run measures its own floor over ${floor.n_models_per_fold} members per fold: AUC ±${dp(floor.auc)}.`
+        : `The served run trains one model per fold, so it has no seed spread of its own and no floor is published beside its numbers.`}
+      That rule is applied throughout, and it is what closed the largest line of
+      work in the project rather than what excused it.</p>`],
+
+    ['Known limits', `
+      <p><b>How long a star was watched correlates with its label.</b> On TESS the
+      correlation between observation baseline and label is <b>+0.387</b>: longer
+      baselines yield more confirmations, so a model can gain apparent skill by
+      learning observing strategy rather than astrophysics. This is measured, not
+      suspected — one architecture amplified it to +0.5155, above the labels' own
+      — and every recall figure here is read under it. The baseline is shown on
+      each candidate row so it can be seen rather than taken on trust.</p>
+      <p><b>The model sees the star, not only the transit.</b> Stellar parameters
+      are inputs, so some of the separation is host-level rather than
+      signal-level.</p>
+      <p><b>There is no classical baseline.</b> A random-forest configuration
+      exists in the repository with a documented rationale, but no scored
+      cross-validated result for it does. The CNN's advantage over classical
+      machine learning is assumed here, not measured, and it is reported as
+      absent rather than quietly omitted.</p>
+      <p><b>The decision metric is a statistic on eight to ten rows.</b> Recall at
+      1% FPR is cut at the tenth-highest negative score, which gives it a
+      sampling standard deviation of 0.0437. Any architecture difference below
+      roughly 0.09 on it is undetectable at this sample size, however many models
+      are trained — which is why so much of the model-selection record reads
+      "within floor" rather than "worse".</p>
+      <p><b>It is behind the published state of the art on the metric that
+      governs.</b> Most literature comparisons fail on population or protocol and
+      cannot be made either way, but the one that survives is unfavourable:
+      ROC monotonicity makes a published operating point below 1% FPR a lower
+      bound on recall at 1% FPR, putting ExoMiner at ≥0.936 against this
+      project's Kepler ${dp(kepler && kepler.recall)} and ExoMiner++ at ≥0.951
+      against its TESS ${dp(tess && tess.recall)}. Stated because an audit that
+      refuses the comparison on the one unflattering metric is not rigour.</p>`],
+
+    ['Data and provenance', `
+      <p>Dispositions, ephemerides and stellar parameters come from the
+      <b>NASA Exoplanet Archive</b> (TOI, KOI DR25 and K2 tables) and
+      <b>ExoFOP</b>; light curves are SPOC and Kepler products from <b>MAST</b>,
+      fetched with <code>lightkurve</code>; stellar parameters are crossmatched
+      against <b>Gaia DR3</b>.</p>
+      <p>Raw FITS are treated as an evictable cache of immutable archive files.
+      Everything derived from them is rebuilt by current code and versioned in
+      DVC, so a number can be traced back to the bytes it came from rather than
+      to a directory that happened to be on someone's disk.</p>
+      <p>Every screen that shows a metric also shows which model version produced
+      it${SERVED.modelVersion ? ` — this session is reading <code>${esc(SERVED.modelVersion)}</code>` : ''}.
+      A figure without a version beside it is a figure nobody can check later.</p>`],
+
+    ['Credits and licence', `
+      <p>The served architecture follows <b>Shallue &amp; Vanderburg (2018)</b>,
+      whose dual-view convolutional design this is a direct descendant of.</p>
+      <p>The multi-branch design this project built, ran, ablated, ensembled and
+      ultimately did not promote was inspired by <b>ExoMiner</b> and
+      <b>ExoMiner++</b>. Those papers are also the benchmark the limitations
+      section reads this work against, and they are ahead of it.</p>
+      <p>This product uses data from the NASA Exoplanet Archive, ExoFOP, MAST and
+      the ESA Gaia mission, whose respective teams and funding agencies are
+      acknowledged. The Mission-page backdrop is generated artwork and is
+      labelled as such — it is not an observation.</p>
+      <p>Released under the <b>MIT Licence</b>, © 2026 Oliver Donaldson.</p>`],
+  ];
+}
 
 function About() {
   app.innerHTML = `
   <div style="min-height:100vh;background:#050608;padding-top:56px;padding-bottom:40px">
     <div class="page-pad" style="max-width:1440px;margin:0 auto;padding:3rem 3rem 0">
       <div class="section-label" style="margin-bottom:0.75rem">About</div>
-      <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:1.25rem">EXOPLANET HUNTER.</h1>
-      <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin-bottom:2.5rem">
-        A calibrated deep-learning pipeline for vetting transit candidates in NASA
-        TESS, Kepler and K2 photometry.
-      </p>
-
-      <div class="soon" style="margin-bottom:2.5rem">
-        <div class="h">Scaffold <span class="tag-chip tag-soon" style="margin-left:0.4rem">to write</span></div>
-        <div class="d">
-          The sections below are placeholders. Each one is a heading that needs
-          its prose written; nothing here is a claim yet.
+      <div class="about-lede">
+        __ICON_MARK_FULL__
+        <div>
+          <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:1.25rem">EXOPLANET HUNTER.</h1>
+          <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin:0">
+            A calibrated deep-learning pipeline for vetting transit candidates in NASA
+            TESS, Kepler and K2 photometry.
+          </p>
         </div>
       </div>
 
+      <div class="note" style="margin-bottom:2.5rem">
+        <span class="ico">▸</span>
+        <span class="txt">Everything here is drawn from the project report, which carries the evidence for it. The numbers follow whatever run is served rather than being written into the page, so they change when the model does — and read as an em dash rather than a figure when the service does not answer.</span>
+      </div>
+
       <div style="display:grid;gap:1.25rem">
-        ${ABOUT_SECTIONS.map(([h, d], i) => `
+        ${aboutSections().map(([h, body], i) => `
           <div class="panel" style="padding:1.75rem">
             <div style="display:flex;align-items:baseline;gap:0.9rem;margin-bottom:0.6rem">
               <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2">${String(i + 1).padStart(2, '0')}</span>
               <span style="font-family:'Ailerons';font-size:1rem;font-weight:600;color:#F0EEE8">${h}</span>
             </div>
-            <div style="font-family:'Inter';font-size:0.8rem;line-height:1.7;color:rgba(138,143,168,0.75);padding-left:2.1rem">${d}</div>
+            <div class="about-body">${body}</div>
           </div>`).join('')}
       </div>
     </div>
