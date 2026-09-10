@@ -246,6 +246,24 @@ def check_test_names() -> Result:
     )
 
 
+#: The console is the project's primary artefact — the thing a visitor actually
+#: opens. A gate that passes while it cannot be built is checking the wrong
+#: deliverable, which this one did until 2026-09-10.
+def check_console_builds() -> Result:
+    """The static console builds into the single file Render serves."""
+    frontend = ROOT / "frontend"
+    if not (frontend / "node_modules").exists():
+        return Result("console builds", False, "no node_modules — run `npm install` in frontend/")
+    code, out = run(["python3", "design-console/build.py"], cwd=frontend, timeout=300)
+    built = frontend / "design-console" / "dist" / "index.html"
+    size = built.stat().st_size if built.exists() else 0
+    ok = code == 0 and size > 0
+    if ok:
+        return Result("console builds", True, f"dist/index.html, {size / 1024:.0f} kB")
+    tail = next((ln for ln in reversed(out.strip().splitlines()) if ln.strip()), "no output")
+    return Result("console builds", False, tail[:90])
+
+
 def check_git_clean() -> Result:
     code, out = run(["git", "status", "--porcelain"])
     dirty = [ln for ln in out.splitlines() if ln.strip()]
@@ -330,6 +348,7 @@ def main() -> int:
         check_doc_links,
         check_registry_matches_served,
         check_plan_complete,
+        check_console_builds,
         check_comment_share,
         check_module_docstrings,
         check_test_names,

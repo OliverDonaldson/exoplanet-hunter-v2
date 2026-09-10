@@ -17,9 +17,14 @@ done by writing about it.
 
 Ready to **show**, not ready to be finished. The bar is:
 
-> A stranger can open the repository, read `docs/report.pdf`, understand what
-> the model does and what it does not, and check any number in it against a
-> file on disk — without asking the author anything.
+> A stranger can open the **console**, understand what it is showing them and
+> how far to trust it; and can open the repository, read `docs/report.pdf`, and
+> check any number behind it against a file on disk — without asking the author
+> anything.
+
+The console is the deliverable. The report is the evidence behind it. A gate
+that only checked the second one was checking the wrong thing, and did until
+2026-09-10.
 
 That bar is deliberately about *honesty and legibility*, not about the science
 being complete. The branch line is closed with a null result; the classical
@@ -37,6 +42,8 @@ a number on the live site the API never served.
 | report figures exist | Every figure the report references resolves. A missing figure in a PDF is the most visible possible defect. |
 | every doc link resolves | One dead link tells a reviewer the docs are not maintained, and they are right. |
 | registry points at a real run | `models/registry.json` must name a run whose `cv_summary.json` and `predictions.parquet` are on disk. Otherwise no number in the report can be traced. |
+| **console builds** | The console is the primary artefact — the thing a visitor opens. A gate that passes while it cannot be built is checking the wrong deliverable, which this one did until 2026-09-10. Runs `design-console/build.py` and asserts the single file Render serves is non-empty. |
+| comment share under 25% · no module docstring over 15 lines · test names under 60 characters | PLAN.md step 8's exit criteria, measured every run rather than recorded once. The pass landed seven lines under the comment-share bar; one thorough docstring erases that. |
 | every delivery step landed | Reads the status table in [PLAN.md](PLAN.md). No step still "not started" or "in progress". |
 | working tree is clean | Whatever is shown must be what is committed. |
 | ruff clean | The lint gate CI runs. |
