@@ -86,11 +86,18 @@ def check_report_current() -> Result:
     )
 
 
+def _strip_code_fences(text: str) -> str:
+    """Drop fenced blocks. A link inside one is quoted text — often drafted prose
+    for another file, where its relative path is correct and ours is not."""
+    return re.sub(r"^```.*?^```", "", text, flags=re.DOTALL | re.MULTILINE)
+
+
 def check_doc_links() -> Result:
     """Every relative link in docs/ resolves. A dead link is a reader hitting a wall."""
     broken: list[str] = []
     for path in sorted((ROOT / "docs").rglob("*.md")):
-        for target in re.findall(r"\]\(([^)#][^)]*)\)", path.read_text(encoding="utf-8")):
+        body = _strip_code_fences(path.read_text(encoding="utf-8"))
+        for target in re.findall(r"\]\(([^)#][^)]*)\)", body):
             if target.startswith(("http://", "https://", "mailto:")):
                 continue
             resolved = (path.parent / target.split("#")[0]).resolve()

@@ -131,6 +131,17 @@ duplicates.
 | K2 | 215 | 315 | 530 |
 | **All** | **2,827** | **2,985** | **5,812** |
 
+**The Kepler counts are a configured cap, not the available population.** The
+exact 1,250 / 1,250 is the signature: `catalog.py::_stable_sample` ranks rows by
+`md5(seed:tic_id)` and takes the first *n*, so the subsample is unbiased with
+respect to anything astrophysical and stable across refreshes — but it is a
+subsample. Roughly 2,748 eligible confirmed Kepler planets and 3,813 eligible
+false positives exist under the same criteria, so the served model was trained on
+about 45% less Kepler data than was available to it. That is a deliberate
+balance choice, and it costs statistical power precisely where §6.4 shows this
+project has none to spare. Any comparison of this project's set size to a
+published one should quote both numbers.
+
 Label rules:
 
 | Disposition | Label |
@@ -374,11 +385,24 @@ gate cannot be talked past.
 ## 5.1 Cross-validation
 
 **5-fold `StratifiedGroupKFold`, grouped by host star, stratified on label.**
-The grouping is the correctness-critical part: multi-planet systems and
-re-observed targets contribute several rows that share a star, and a star split
-across folds leaks. In the predecessor project, moving from a single 70/15/15
-split to grouped k-fold cost 2–5 AUC points — that drop is the leakage being
-removed, not a regression.
+
+**The grouping is inert on this labelled set, and an earlier draft of this
+report credited it with work it does not do.** The splitter is passed `tic_id`
+as the group key, but `labels.parquet` holds 5,812 rows on 5,812 distinct
+`tic_id` — every group has size one, so `StratifiedGroupKFold` produces the same
+partition `StratifiedKFold` would. Verified 2026-09-10; the maximum group size
+is 1 and no host appears twice.
+
+This project is nonetheless free of the multi-planet leakage the grouping exists
+to prevent, but the mechanism is upstream: the label builder emits one row per
+host, so a star cannot be split across folds because a star cannot appear twice
+at all. The splitter is a correct guard that currently has nothing to guard —
+worth keeping, since a future TCE-level labelled set (deferred item #37) would
+make it load-bearing overnight, but it earns no credit for the current numbers.
+
+The cost of the dedup is real and is not stated elsewhere: collapsing to one row
+per host discards the multi-planet systems' additional signals. It is a
+correctness choice with a power price, not a free one.
 
 Within each outer fold an inner 88/12 `GroupShuffleSplit` separates training from
 validation. The inner validation set drives three things and is never used for
@@ -610,6 +634,18 @@ Phase 1 arm ranged from 25 to 78 minutes with no bound on the slowest fold,
 which makes compute budgeting unreliable for any future sweep.
 
 **Evaluation is out of fold, not on a fresh holdout.** §6.1.
+
+**The Kepler set is a 45% subsample of what was available**, and the host-level
+dedup that makes the split leak-free also discards every multi-planet system's
+additional rows. §2.2 and §5.1. Both cost power.
+
+**Only one of this project's headline numbers is comparable to a published one.**
+A benchmark-comparability audit on 2026-09-10 found that of six candidate
+comparisons, five fail on population, protocol or metric definition, and the
+survivor — TESS ROC-AUC against ExoMiner++ — is one this project loses. The
+decision metric it promotes on, recall @1% FPR, has no published counterpart in
+any of the five studies examined. See
+[`experiments/benchmark-comparability-2026-09-10.md`](experiments/benchmark-comparability-2026-09-10.md).
 
 **The decision metric has too little power to settle architecture questions.**
 §6.4. This is the limitation that most shapes what §4 can and cannot claim.
