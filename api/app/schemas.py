@@ -287,11 +287,20 @@ class RocPoint(BaseModel):
 class MissionMetrics(BaseModel):
     """One mission's slice of the run's out-of-fold predictions. Every metric
     is nullable — recall is undefined without negatives, a spread needs two
-    folds — and null reaches the console as "not measured", never as zero."""
+    folds — and null reaches the console as "not measured", never as zero.
+
+    There is no `evaluation` field. It existed, and was the string
+    "out-of-fold" for every mission of every run: these slices are cut from
+    `predictions.parquet`, which holds held-out rows and nothing else, so a
+    zero-shot mission could not appear in one. A field with a single reachable
+    value is a literal wearing a wire contract, and the console had a whole
+    rendering branch waiting on the value it could never take. Issue #12.
+    A run that is genuinely zero-shot on a mission — `ca906040` is, on K2 —
+    needs that mission scored, which is an evaluation nobody has run, not a
+    field."""
 
     mission: str
     role: str
-    evaluation: str
     n: int
     auc: float | None = None
     aucErr: float | None = None

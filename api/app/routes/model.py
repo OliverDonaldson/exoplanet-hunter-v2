@@ -252,9 +252,6 @@ def _mission_metrics(frame: pd.DataFrame, mission: str) -> MissionMetrics:
     return MissionMetrics(
         mission=mission,
         role="gating" if mission == _GATING_MISSION else "diagnostic",
-        # Every mission in this run's predictions was in a training fold; a
-        # zero-shot one would need its own label, being incomparable to these.
-        evaluation="out-of-fold",
         n=len(frame),
         auc=_roc_auc(y, p),
         aucErr=_spread(per_fold["auc"]),

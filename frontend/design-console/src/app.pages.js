@@ -950,7 +950,6 @@ function ModelPerformance() {
                 <span style="font-family:'Ailerons';font-size:1.05rem;font-weight:700;letter-spacing:0.04em;color:#F0EEE8">${m.mission}</span>
                 <span class="tag-chip tag-gate">${m.role}</span>
               </div>
-              <span class="tag-chip ${m.evaluation === 'zero-shot' ? 'tag-zeroshot' : 'tag-oof'}">${m.evaluation}</span>
             </div>
             ${metricBlock('ROC-AUC', m.auc, m.aucErr, m.role === 'gating')}
             <div style="height:1.25rem"></div>
@@ -967,8 +966,8 @@ function ModelPerformance() {
         <span class="ico">▸</span>
         <span class="txt">
           There is no pooled headline: the missions have different label provenance and different class balance, so a single averaged figure would not mean anything.
-          <b style="color:rgba(240,238,232,0.85);font-weight:500">${SERVED.missions.filter(m => m.evaluation === 'zero-shot').map(m => m.mission).join(', ') || 'None'}</b>
-          ${SERVED.missions.some(m => m.evaluation === 'zero-shot') ? 'has no out-of-fold evaluation for this run, so its numbers are zero-shot transfer and are not comparable with the out-of-fold columns.' : 'runs are all out-of-fold.'}
+          <b style="color:rgba(240,238,232,0.85);font-weight:500">Every card here is out-of-fold.</b>
+          These slices are cut from the run's own held-out predictions, so a mission the run never evaluated has no card at all rather than a card of transfer numbers — which is why ${SERVED.runId} shows none for K2: its labels were added after the run was trained.
 ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
             ? `Noise floor, measured on this run over ${SERVED.noiseFloor.n_models_per_fold} members per fold: AUC ±${SERVED.noiseFloor.auc.toFixed(4)}, shortlist recall ±${has(SERVED.noiseFloor.recall) ? SERVED.noiseFloor.recall.toFixed(4) : '—'}. Differences smaller than these are not differences.`
             : `Noise floor: not measured for this run. It trains one model per fold, so there is no seed spread to take the floor from, and a floor measured on another architecture would not apply to these numbers.`}
@@ -1065,16 +1064,11 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
     const f1 = has(m.f1) ? m.f1 : null;
 
     detail.innerHTML = `
-      ${m.evaluation === 'zero-shot' ? `
-      <div class="note" style="margin-bottom:1.25rem;border-color:rgba(245,166,35,0.35)">
-        <span class="ico">▲</span>
-        <span class="txt"><b style="color:#F5A623;font-weight:500">Zero-shot slice.</b> ${m.mission} was never in a training fold for ${SERVED.runId}; these curves show transfer, not held-out performance. Do not compare them against the out-of-fold missions.</span>
-      </div>` : ''}
 
       <div class="charts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin-bottom:2rem">
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.5rem">${m.mission} ROC Curve</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:0.35rem">AUC = ${has(m.auc) ? m.auc.toFixed(4) : '—'} ± ${has(m.aucErr) ? m.aucErr.toFixed(4) : '—'} · ${m.evaluation}</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:0.35rem">AUC = ${has(m.auc) ? m.auc.toFixed(4) : '—'} ± ${has(m.aucErr) ? m.aucErr.toFixed(4) : '—'}</div>
           <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:rgba(138,143,168,0.75);margin-bottom:1rem">${Array.isArray(m.roc) && m.roc.length
             ? `${m.roc.length} measured thresholds${has(m.fprActual) ? ` · shortlist cut marked at ${(m.fprActual * 100).toFixed(2)}% FPR` : ''}`
             : 'binormal curve implied by the AUC · per-threshold points not measured'}</div>
@@ -1091,8 +1085,8 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
         <div class="panel" style="padding:1.5rem">
           <div class="stat-label" style="margin-bottom:0.35rem">${m.mission} Confusion Matrix</div>
           <div style="font-family:'JetBrains Mono';font-size:0.6rem;color:#8A8FA8;margin-bottom:1.25rem">${cm && has(m.fprActual)
-            ? `at the shortlist cut, score &gt; ${m.threshold.toFixed(4)}, ${(m.fprActual * 100).toFixed(2)}% of ${(m.n - m.nPositive).toLocaleString()} false positives · ${m.evaluation}`
-            : `at the 1% FPR operating point · ${m.evaluation}`}</div>
+            ? `at the shortlist cut, score &gt; ${m.threshold.toFixed(4)}, ${(m.fprActual * 100).toFixed(2)}% of ${(m.n - m.nPositive).toLocaleString()} false positives`
+            : 'at the 1% FPR operating point'}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,0.08)">
             ${[
               { label:'True Positive',  value:cm && cm.tp, color:'#4DFFD2' },

@@ -331,7 +331,7 @@ async function hydrate() {
       // The run evaluated no resolvable mission slice. One pooled card rather
       // than three invented ones — see the endpoint docstring.
       SERVED.missions = [{
-        mission: 'ALL MISSIONS', role: 'gating', evaluation: 'out-of-fold', n: n || 0,
+        mission: 'ALL MISSIONS', role: 'gating', n: n || 0,
         auc: met.roc_auc ? met.roc_auc.mean : null, aucErr: met.roc_auc ? met.roc_auc.std : null,
         recall: null, recallErr: null,
         brier: met.brier ? met.brier.mean : null, brierErr: met.brier ? met.brier.std : null,
@@ -345,7 +345,7 @@ async function hydrate() {
     // mission cards on screen because /model 404'd is worse than showing none,
     // since everything around them is real and they would not read as mock.
     SERVED.missions = [{
-      mission: 'ALL MISSIONS', role: 'gating', evaluation: 'out-of-fold', n: 0,
+      mission: 'ALL MISSIONS', role: 'gating', n: 0,
       auc: null, aucErr: null, recall: null, recallErr: null,
       brier: null, brierErr: null, ece: null, eceErr: null,
     }];
