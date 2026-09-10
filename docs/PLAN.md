@@ -8,7 +8,7 @@ weaknesses are [`known-limits.md`](known-limits.md), the decisions are
 maps every old section number to where its text lives. There are no handover
 files; a session that wants to explain itself does it in the PR body. Every
 step, defect, decision and deferred item is an issue on the repository,
-collected on the [project board](https://github.com/users/OliverDonaldson/projects/2) (private, like the repository); a PR
+collected on the [project board](https://github.com/users/OliverDonaldson/projects/2) (private; the repository itself is public); a PR
 closes the issues it resolves.
 
 **Direction, decided 2026-09-04 and now executed: freeze the science after
@@ -45,8 +45,8 @@ and 11. This plan finishes Phase 1 and defers Phases 2 and 3.
 | 4 | Close the science: Phase 1 arms read, branch line closed, API floor fixed | #6 | [#48](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/48), [#49](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/49) | merged; both arms gated UNRESOLVED, Phase 1 falsified, branch line closed in writing, `registry.json` untouched | 2026-09-05 |
 | 5 | Console tells the truth: wrong before empty | #7 | [#47](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/47) | merged | 2026-09-05 |
 | 6 | Console: empty to filled | #8 | [#52](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/52), [#53](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/53), [#57](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/57), [#58](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/58), [#59](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/59), [#60](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/60) | merged; API redeployed | 2026-09-06 |
-| 7 | The report | #9 | [#61](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/61) | landed on `docs/report`; PR open. Report, `make ready`, citation-audit fixes, the comparability audit and its two measurement-backed corrections | 2026-09-10 |
-| 8 | Peer-review pass | #10 | this branch | landed on `docs/peer-review`, stacked on #61. Docstrings and comments cut to rule 10, 132 test names shortened, every module labelled, `CONTRIBUTING.md` written | 2026-09-10 |
+| 7 | The report | #9 | [#61](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/61) | merged. Report, `make ready`, citation-audit fixes, the comparability audit and its two measurement-backed corrections | 2026-09-11 |
+| 8 | Peer-review pass | #10 | [#65](https://github.com/OliverDonaldson/exoplanet-hunter-v2/pull/65) | merged. Docstrings and comments cut to rule 10, 132 test names shortened, every module labelled, `CONTRIBUTING.md` written | 2026-09-11 |
 
 **Is it fit to show?** `make ready` answers that, and nothing else does. It
 checks the documents a reader is entitled to find, that the report PDF is
