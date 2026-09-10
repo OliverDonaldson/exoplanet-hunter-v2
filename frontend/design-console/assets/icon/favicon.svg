@@ -1,12 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- The light curve: flat baseline, transit dip, flat baseline. The same
-       motif the boot dial draws and the scoring loader animates.
-       Drawn heavy on purpose. A curve at the stroke weight it wants visually
-       disappears into a smudge at 16 px, which is the size a favicon is
-       actually read at, so the line is thick and the dip is deep and square
-       rather than faithful to a real ingress. -->
-  <rect width="32" height="32" rx="7" fill="#050608"/>
-  <path d="M3.5 12.5h6.2l1.9 7h8.8l1.9-7h6.2"
-        fill="none" stroke="#4DFFD2" stroke-width="3.4"
-        stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" class="mark mark-small" aria-hidden="true">
+  <!-- The mark: a ringed planet inside a reticle. Ollie's concept sheet
+       (issue #62) grades it by size, and this is the small grade — at 16 px,
+       the size a favicon is actually read at, the dashed acquisition circle
+       and the planet's fill/stroke distinction both dissolve into a smudge.
+       So the planet is solid, the ring and ticks are heavy, and the dashed
+       circle is dropped rather than drawn illegibly. logo.svg is the full
+       grade for sizes that can carry it. -->
+  <rect width="120" height="120" rx="26" fill="#050608"/>
+  <circle cx="60" cy="60" r="20" fill="#4DFFD2"/>
+  <ellipse cx="60" cy="60" rx="38" ry="11" fill="none" stroke="#4DFFD2"
+           stroke-width="4.5" transform="rotate(-20 60 60)"/>
+  <g stroke="#4DFFD2" stroke-width="6" stroke-linecap="butt">
+    <line x1="60" y1="8" x2="60" y2="22"/>
+    <line x1="60" y1="98" x2="60" y2="112"/>
+    <line x1="8" y1="60" x2="22" y2="60"/>
+    <line x1="98" y1="60" x2="112" y2="60"/>
+  </g>
 </svg>
