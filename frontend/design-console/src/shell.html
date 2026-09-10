@@ -340,6 +340,17 @@ select option{background:#0A0C10;color:#F0EEE8;}
 .mark-full{width:112px;height:112px;display:block;flex:none;}
 @media(max-width:640px){ .mark-full{width:84px;height:84px;} }
 
+/* About-page prose and its lede. The page is the only one that is mostly
+   writing, so its paragraphs get a measure and a rhythm rather than inheriting
+   the panel defaults tuned for figures. */
+.about-body{font-family:'Inter',sans-serif;font-size:0.82rem;line-height:1.75;color:rgba(240,238,232,0.62);padding-left:2.1rem;max-width:78ch;}
+.about-body p{margin:0 0 0.9rem;}
+.about-body p:last-child{margin-bottom:0;}
+.about-body b{color:rgba(240,238,232,0.9);font-weight:500;}
+.about-body code{font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:#4DFFD2;}
+.about-lede{display:flex;align-items:center;gap:2rem;margin-bottom:2.5rem;flex-wrap:wrap;}
+@media(max-width:640px){ .about-body{padding-left:0;} .about-lede{gap:1.25rem;} }
+
 .interval{position:relative;height:3px;background:rgba(255,255,255,0.07);margin-top:0.55rem;}
 .interval span{position:absolute;top:0;bottom:0;background:rgba(77,255,210,0.45);}
 .interval i{position:absolute;top:-2px;bottom:-2px;width:1px;background:#4DFFD2;}
