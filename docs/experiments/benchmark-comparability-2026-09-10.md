@@ -156,6 +156,16 @@ recorded as silent and not inferred.
 | Pooled F1 **0.9001 ± 0.0125** at the per-fold fitted threshold; TESS F1 **0.4718** at the 1% FPR cut | **Xie et al. 2025** F1 **0.957** (Kepler) / **0.995** (TESS), both at threshold 0.5, single 9:1 split | **NOT COMPARABLE** | Our own two F1s differ by 0.43 on the same model at the same moment, which is the whole argument: F1 is a function of the threshold, and the threshold is not shared. Theirs is 0.5; ours is a per-fold F1-optimal sweep on the inner validation split. Their TESS population is 97% negative (391 PC of 13,207), where F1 on the minority class and accuracy 0.999 are near-vacuous. Their paper is **silent** on host grouping. |
 | **TESS recall @1% FPR 0.3113 ± 0.0656**; Kepler 0.8129 ± 0.0511 | — | **NOT COMPARABLE — no published counterpart exists** | The metric the project actually promotes on has no match in any of the five sources. The nearest is ExoMiner's recall at *fixed precision* 99%, which is a different budget: precision fixes the cost per selected candidate, FPR fixes the cost per negative examined, and they diverge exactly where the class prior differs — which is where we differ most. **This is the most important line in the table.** The decision metric is unbenchmarkable against the literature as it stands. |
 
+> **Dated pointer, 2026-09-10 — §8 governs this table.** All six verdicts
+> above were put through a three-refuter adversarial panel after they were
+> written, and **all six were formally overturned**; NOT COMPARABLE holds
+> substantively on five. The last row is the exception in kind, not degree:
+> its claim that recall @1% FPR has no published counterpart is **wrong**.
+> ROC monotonicity makes a published point below 1% FPR a valid lower bound,
+> and this project is about 12 points behind on Kepler and 64 on TESS. The
+> verdict text above is left exactly as written, per the record's freeze
+> rule; read §8 before quoting anything from this table.
+
 **Two comparisons survive in any form, and only one is favourable to state:**
 TESS 0.9100 against ExoMiner++ 0.998 with the caveat above, which is a
 comparison we lose. The other four are refusals.
@@ -225,26 +235,138 @@ hand in the main session and should be treated as **not exhaustive**.
 | 142–150 | the negative-class paragraph | that the 21% attrition is the `koi_score` rule doing ambiguity-filtering | The report is **correct** as written ("disputed or unvetted") — but it is silent on the mechanism, which is why the hypothesis in §1 was able to form. Worth stating positively. |
 | 677 | "`valizadegan2022`, `valizadegan2025` — the per-diagnostic branch design §4 is *inspired by*, not a reimplementation of" | correctly scoped to architecture | **Yes.** This one is right and should be the model for the others. |
 
-## 8. What this audit did not establish
+## 8. What the adversarial panel returned
 
-- **The six verdicts in §4 were not adversarially refuted.** The audit design
-  specified three independent refuters per verdict under distinct lenses
-  (population, protocol, over-generosity). That fleet failed on a session limit
-  and the verdicts were reached by hand instead. They are one reader's judgment
-  on well-sourced evidence, which is weaker than this record's usual standard.
-- **The implied-comparison scan of §7 was likewise done by hand** and covers
-  `report.md` only — not `data_provenance.md`, `overview.md`, `README.md` or the
-  console copy.
-- **No ROC-AUC could be established for Valizadegan 2022** from the primary
-  source; its metric definitions section truncated on every fetch.
+> **Updated 2026-09-10, second revision.** This section originally said the
+> panel had not run; then that it had run in part. **It has now run in full.**
+> §4 is not rewritten — it stands as first published, and the panel's
+> corrections to it live here and in §11.
+
+Eighteen refuters ran — **three per verdict**, one per lens (population,
+protocol, over-generosity), majority kills.
+
+**Every one of the eighteen returned `refuted = true`. Eighteen for eighteen.
+The workflow's own tally: `Verdicts settled: 0 survived, 6 overturned by a
+refuter majority`.**
+
+Two readings of that follow, and they must not be blurred. **Formally, all six
+verdicts are overturned** — every one drew 3 of 3 refutations. **Substantively,
+the disposition NOT COMPARABLE survives on five of six**, because most refuters
+attacked the *grounds* while keeping or tightening the label. Where a refuter
+would move the label, it is recorded below. Nowhere does the panel license a
+comparison §4 refused; on two pairs it demands a stricter handling than §4 gave.
+
+| verdict | panel | label | what the panel did to it |
+|---|---|---|---|
+| Kepler 0.9914 vs ExoMiner | 3 of 3 refuted | **→ UNDETERMINABLE** (1 of 3 pushes past NOT COMPARABLE) | The load-bearing claim — that ExoMiner reports no Kepler ROC-AUC — is an *unverified absence*: the reading agent's own `unestablished` field records the metrics section truncating on every fetch, and ExoMiner++ reports a Kepler 0.999 "following the approach in Valizadegan et al. (2022)". Stricter, not laxer: **quote no ExoMiner figure beside 0.9914 at all, including inside a disclaimer** — the disclaimer would itself assert unverified facts. |
+| Kepler + pooled vs Islam | 3 of 3 refuted | **NOT COMPARABLE holds; grounds split** | Refuters divide between UNDETERMINABLE and "do not cite Islam at all, with or without disclosure". One (population) dissents that the *Kepler-only* pair is comparable in kind and adverse in degree. Common ground: the pooled 0.9581 was never a candidate, and the verdict silently substituted 0.9914 for it. |
+| Pooled 0.9581 vs Shallue | 3 of 3 refuted | **NOT COMPARABLE holds; protocol axis struck 3–0** | Their 0.988 is the **maximum of a 0.922–0.988 table** of architecture×view cells, carrying the same selection exposure §4 charged only to us — net protocol adjustment ≈ 0 ± 0.005. And §4's unit-of-analysis claim is **false**: a KOI *is* a dispositioned transit signal, so both sides count one signal per row. Ours is deduplicated to one per star; theirs is not. Sampling, not unit. |
+| **TESS 0.9100 vs ExoMiner++** | **3 of 3 refuted** | **NOT COMPARABLE holds 2–1; grounds struck 3–0** | See below. |
+| F1 vs Xie | 3 of 3 refuted | **NOT COMPARABLE holds; one pushes to UNDETERMINABLE** | Xie's "F1" is argued to be not the positive-class F1 the pairing assumes, which would make the published quantity unidentified rather than merely mismatched. |
+| Recall @1% FPR | 3 of 3 refuted | **§4's headline claim is WRONG — see below** | §4 called "no published counterpart exists" the most important line in the audit. One refuter breaks it on ROC monotonicity, and the corrected version is worse for this project, not better. |
+
+### The TESS verdict: the flattering reading is dead
+
+This is the one that mattered, because the verdict agent had overturned this
+file's original COMPARABLE WITH STATED CAVEAT to **NOT COMPARABLE** on the
+ground that the bias *flatters ExoMiner++* — that "the project is currently
+publishing a defeat it has not earned." That is the only claim anywhere in this
+audit that makes the project look better than it says it is, and it drew all
+three lenses.
+
+**The label survives 2–1. The flattering ground does not survive at all.**
+
+- **population (dissenting on the label, fatal to the grounds).** The verdict
+  assumed ExoMiner++'s NTP/EB-dominated negatives are "far more separable" than
+  our ExoFOP dispositions, and sized that at the scale of the whole 0.088 gap.
+  **Measured on our own predictions, the sign is backwards.** Our 1,067 served
+  TESS negatives are 978 FP + 89 FA, and FA is the ExoFOP analogue of exactly
+  the instrumental-triage class the verdict called easy. Out of fold against all
+  1,304 TESS positives: **FP-only AUC 0.9123, FA-only AUC 0.8846, difference
+  −0.0277.** The class the verdict said a vetter separates "almost for free" is
+  the *harder* one on the only evidence we have. This refuter would restore
+  COMPARABLE WITH A NAMED CAVEAT — but a caveat stating the composition effect
+  is **unestablished in sign and size**, not one that excuses the gap.
+- **protocol and overclaim (concurring on the label, striking the grounds).**
+  Both kill the verdict's single affirmative concession — that the two share a
+  star-grouped protocol — by citing §3(c) of this file back at it: our
+  `StratifiedGroupKFold` is a measured no-op, group-size distribution
+  `{1: 5812}`. ExoMiner++'s grouping constrains 57,162 per-sector TCEs onto far
+  fewer stars and is load-bearing; ours constrains nothing. The two "star
+  groupings" are different operations, and ours is a further population thinning
+  rather than a protocol match. Fold count (5 vs 10), per-fold ensembling (1 vs
+  10 models) and score post-processing all differ too.
+
+**Consequence for the report: the gap may not be excused, and it may not be
+sized either.** Direction may be stated — their negative population differs in
+composition — but no magnitude, and the "same protocol" sentence must go
+wherever it appears.
+
+### The recall @1% FPR finding was wrong, and the truth is worse
+
+§4's last row called it "the most important line in the table": the metric this
+project promotes on has **no published counterpart**. The panel broke it.
+
+**ROC curves are non-decreasing, so a published operating point at FPR below 1%
+is a valid lower bound on recall @1% FPR.** Two of the five sources publish one,
+and both are the protocol-matched ones:
+
+| source | published point | implied FPR | ⇒ bound on recall @1% FPR | ours |
+|---|---|---:|---:|---:|
+| ExoMiner 2022 (Kepler) | recall 0.936 at 99% precision | 0.077% | **≥ 0.936** | 0.8129 |
+| ExoMiner++ (TESS) | recall 0.951 | 0.47% | **≥ 0.951** | **0.3113** |
+
+Our own realized cuts are stricter than advertised — 0.94% FPR on TESS, 0.70% on
+Kepler — so the inequality runs the right way and the comparison is valid
+**one-sided**: roughly **12 points behind on Kepler and 64 points behind on
+TESS**. Negative-class composition affects the magnitude, not the sign.
+
+The refuter also caught the verdict contradicting itself: it wrote that the
+number "must not be quoted against any published number" and then, in its own
+bias field, quoted it — "~95% recall inside our own operating regime against our
+31.1% on TESS". **A verdict that performs the comparison it forbids has not
+established non-comparability; it has established that the comparison is
+unflattering.**
+
+**This is the single most consequential correction the panel made, and it cuts
+against the project.** §4's refusal read as methodological rigour; on the metric
+that governs promotion it was functioning as suppression of a 64-point deficit.
+The bound belongs *beside* the number, not in place of it.
+
+### Two defects the panel found outside this audit
+
+Both are in files this session must not touch. Recorded here for whoever holds
+the pen.
+
+1. **`known-limits.md` now contradicts itself.** Its carried-limits table says
+   "**The CV grouping is inert**" in one row and, two rows later, licenses the
+   ExoMiner++ comparison with "**same protocol, so the gap is not a protocol
+   artefact**". The panel struck that concession 3–0. One of those two rows has
+   to go, and it is the second.
+2. **`known-limits.md` carries §2's superseded arithmetic** — "roughly 2,748
+   eligible confirmed and 3,813 eligible FPs". Corrected figures are **1,945**
+   and **3,719** (§11). The error propagated out of this file before §11
+   existed.
+
+*(A third possibility — that the inner split is `StratifiedGroupKFold` rather
+than the `GroupShuffleSplit` §5.1 describes — was raised by the protocol refuter
+citing `train_branches.py`. That is the branch trainer, not the served
+dual-view path, and `splits.py` documents `GroupShuffleSplit` for the inner
+split. **Not asserted as a defect**; worth one check by someone with the file
+open.)*
+
+### Still unestablished
+
+- **No ROC-AUC could be established for Valizadegan 2022**, and per the panel
+  that absence is not itself a finding.
 - **Valizadegan 2022's grouping sentence is corroborated, not verbatim.**
-- **Shallue & Vanderburg and Xie are both silent on host grouping.** Their
-  splits are described at signal granularity, which makes star-level leakage
-  likely in both, but neither paper rules it in or out and this audit does not
-  assert it. Gemini's audit does assert it; see §9.
-- **The counterfactual Kepler AUC is a resampling bound, not a measurement.**
-  The discarded rows were never scored. Scoring them would settle it and is
-  cheap — 1,026 rows through the served model.
+- **Shallue & Vanderburg and Xie are both silent on host grouping.** Leakage is
+  likely in both and is asserted by neither this audit nor those papers.
+- **The counterfactual Kepler AUC is a resampling bound on inputs §11 corrects**,
+  not a measurement. The discarded rows were never scored.
+- **§7 is superseded, not corrected.** It was hand-built and found 5 implied
+  comparisons; the fleet's scan agent found **35**. Read the scan output in its
+  place before calling any report edit finished.
 
 ## 9. Note on the Gemini audit of 2026-09-09
 
@@ -277,15 +399,97 @@ it proposes report edits, recording the specific defects matters:
 
 1. Apply the §7 edits drafted for the next session. The `report.md` change with
    the highest value per word is line 81.
-2. **Score the 1,026 discarded false positives** through `ca906040` and replace
-   the §2 bound with a measurement. It is one bulk pass and it converts the
-   audit's weakest quantitative claim into its strongest.
+2. **Score the 921 discarded false positives** through `ca906040` and replace
+   the §2 bound with a measurement — in particular the **795 absent from DR25**,
+   whose median SNR of 9.8 makes them the population that would actually move
+   the number. It is one bulk pass and it converts the audit's weakest
+   quantitative claim into its strongest. *(Count corrected in §11.)*
+5. **Run the thirteen refuters that never ran** (§8), TESS-vs-ExoMiner++ first.
+   Five of five that did run overturned or struck their verdict; three verdicts
+   have never been tested at all.
+6. **Take the 0.9687 scalar-only baseline to `known-limits.md`.** The "no
+   classical baseline" entry records the CNN's advantage as assumed rather than
+   measured. On Kepler it is now measured, at about 0.023 AUC, and that is a
+   report-level finding rather than an audit footnote.
 3. Add `islam2026` and `xie2025` to `references.bib` **only if** §4's refusals
    are stated alongside them. Citing them without the verdicts would create the
    comparison this audit exists to prevent.
 4. Correct §5.1's rationale for the grouping, or make the grouping real by
    admitting sibling KOIs. The current text describes a protection that is doing
    nothing on this data.
+
+## 11. Correction note — 2026-09-10, after independent replication
+
+> Appended under the entries it corrects, per this record's rule. §2 and §3 are
+> **not** rewritten. Every figure below was re-derived independently by the
+> replication agent and then re-verified by hand in the main session against
+> `q1_q17_dr25_koi` and `cumulative`; all of it reproduces.
+
+**§2's arithmetic was computed on the wrong population, and the conclusion
+survives it.** `_query_koi` returns `df.drop_duplicates(subset="tic_id")`
+([`catalog.py:283`](../../pipeline/src/exoplanet_hunter/data/catalog.py)) —
+where `tic_id` is the KIC id, the **star** — and that dedup runs across all
+dispositions *before* the false-positive filter. §2 applied the cut to the raw
+`cumulative` FP list instead. Corrected:
+
+| quantity | §2 as published | corrected |
+|---|---:|---:|
+| eligible FP pool | 4,839 | **4,640** |
+| retained by the cut | 3,813 (78.8%) | **3,719 (80.15%)** |
+| discarded | 1,026 | **921** |
+| — absent from DR25 | 893 | **795** (86.3%) |
+| — DR25 CANDIDATE | 129 | **123** (13.4%) |
+| — DR25 FP, `koi_score` ≥ 0.5 | 4 | **3** (0.33%) |
+| eligible *positive* pool | 2,748 | **1,945** — the dedup destroys 803 CONFIRMED rows before `_stable_sample` ever sees them |
+| CANDIDATE rows excluded | "1,977 DR25" | 1,977 is the **`cumulative`** count; DR25 has **1,358**. The substance holds — `labels.parquet` contains zero CANDIDATE rows. |
+
+**The mechanism finding is unchanged and slightly stronger: three KOIs, not
+four.**
+
+**But §2 named the wrong clause of the `WHERE`, and the replication found the
+right one.** The hypothesis said the *score comparison* strips the hard
+negatives. §2 said the attrition was "DR25 table membership" and treated that as
+benign bookkeeping. It is not benign. The 795 cumulative false positives absent
+from DR25 have median `koi_model_snr` **9.8** and median depth 3.2e-4, against
+**52.9** and 8.7e-4 for the 3,719 retained — a **5.4× SNR gap**. They are not
+post-DR25 discoveries; KOI numbers run 65–7620. **Requiring DR25 membership
+silently deletes the low-SNR marginal false-positive population, which is
+precisely where a vetter earns its keep.** So the commissioning hypothesis is
+*directionally right about the effect and wrong only about which clause
+produces it* — a materially more generous reading than §2 gives it, and the
+correct one.
+
+**§2's monotone AUC decline is not statistically established.** 2,000-resample
+bootstrap 95% CIs: [0, 0.001) 0.9899–0.9947; [0.001, 0.1) 0.9800–0.9963;
+[0.1, 0.25) 0.9550–0.9990; [0.25, 0.5) 0.9209–0.9893. **Every CI overlaps its
+neighbour**, and the widest band rests on 18 negatives. The trend is suggestive,
+not measured, and §2 states it too firmly.
+
+**§3(b) is confirmed and its cause relocated.** `_stable_sample` is clean —
+two-sample KS against the eligible pools gives no statistic above D=0.0193 and
+no p below 0.86 across `koi_model_snr`, `koi_depth`, `koi_period`, `koi_prad`,
+`koi_max_mult_ev`, `koi_num_transits`, `koi_kepmag`, `koi_score`, `koi_duration`
+and `koi_steff`. The md5 ranking is uncorrelated with every transit observable,
+as §3(b) argued. **The selection bias is one step earlier, in the dedup**, which
+keeps the first TAP-order row per star and discards 803 confirmed planets as
+weaker multi-planet siblings.
+
+**The finding this audit did not go looking for, and the most consequential one
+in it.** A `HistGradientBoostingClassifier` given **only catalogue scalars** —
+depth, `prad`, SNR, period, duration, MES, transit count, `srad`, `steff`,
+`kepmag`, and **no light curve at all** — reaches 5-fold CV **AUC 0.9687** on
+our Kepler rows, against the served deep model's 0.9914. Depth and `prad` alone
+give 0.8774. The two classes are physically different populations rather than
+two verdicts on similar signals: 52.4% of our negatives have `koi_prad` > 15
+R⊕ against 1.0% of positives; 53.6% carry `koi_fpflag_ss` and 44.2%
+`koi_fpflag_co`, against 1.0% and 0.3%. **Roughly 97% of the achievable Kepler
+separation is sitting in the metadata of the same catalogue rows, and the
+light-curve model is buying about 0.023 AUC over a table lookup.** This bears
+directly on the "no classical baseline" entry in `known-limits.md`, which
+records the CNN's advantage over hand-crafted features as *assumed, never
+measured*. It is now measured on Kepler, and it is small.
+
+---
 
 ---
 
@@ -313,9 +517,10 @@ Replace with:
 1. **Recall @1% FPR is the decision metric.** ROC-AUC is reported because it is
    threshold-free and stable — a bootstrap sd of 0.0059 against the decision
    metric's 0.0437 — not because it is comparable to published numbers. It is
-   not; the 2026-09-10 comparability audit found no published ROC-AUC computed
-   on a population like ours, and no published counterpart at all for recall
-   @1% FPR. A model can also gain AUC while losing shortlist recall — stage 4's
+   not; the 2026-09-10 comparability audit tested six pairings against the five
+   studies this report cites and sustained none of them, and found no published
+   counterpart at all for recall @1% FPR. A model can also gain AUC while losing
+   shortlist recall — stage 4's
    capacity arm did exactly that (§4, row 4) — and when the two disagree,
    recall governs.
 ```
@@ -355,45 +560,85 @@ rest are dropped as disputed or unvetted.
 Replace with:
 
 ```
-KOI table instead. About 79% of the bare cumulative false positives pass it —
-3,813 of 4,839. The 1,026 that do not are dropped almost entirely on DR25
-membership rather than on the score: 893 are absent from the DR25 table and 129
-are dispositioned CANDIDATE there, against **four** that are DR25 false
-positives failing the 0.5 threshold. The threshold is close to inert, because
-`koi_score` is near-degenerate on the class it filters — 89% of DR25 false
-positives score below 0.001. Measured 2026-09-10; see the
-[comparability audit](experiments/benchmark-comparability-2026-09-10.md) §2.
+KOI table instead. **80.2% of the eligible cumulative false positives pass it —
+3,719 of 4,640** — but not for the reason the threshold suggests. Of the 921
+that do not, **795 are absent from the DR25 table** and 123 are dispositioned
+CANDIDATE there, against **three** that are DR25 false positives failing the 0.5
+threshold. The score comparison is close to inert; the DR25 membership
+requirement is not. **The 795 rows it removes have median transit SNR 9.8
+against 52.9 for those retained — a 5.4x gap — so the rule silently deletes the
+low-SNR marginal false positives, which is the population a vetter is hardest
+pressed by.** Every Kepler figure in §6 is to be read as measured on a
+negative class with that population removed. Measured 2026-09-10; see the
+[comparability audit](experiments/benchmark-comparability-2026-09-10.md) §2
+and its §11 correction note.
 ```
+
+**Both counts are post-dedup.** `_query_koi` collapses to one KOI per host star
+before the filter runs, so the eligible pool is 4,640, not the 4,839 raw
+cumulative false positives — and the same dedup removes 803 confirmed planets
+from the positive pool. The audit's §2 got this wrong and §11 corrects it; use
+the figures above, not §2's.
 
 The current wording is *correct*. This edit makes it specific, so the reading
 that "the cut discards the ambiguous false positives" cannot form again.
 
-## Edit 4 — §6.4, after the Kepler–TESS gap paragraph (insert after line 503). The stated caveat. REQUIRED.
+## Edit 4 — §6.4, after the Kepler–TESS gap paragraph. The stated caveat. REQUIRED.
+
+> **Redrafted 2026-09-10, then confirmed against the full panel.** The original
+> draft rested on TESS-vs-ExoMiner++ surviving as the one comparison worth
+> stating. It does not: NOT COMPARABLE holds 2–1, and all three refuters struck
+> the verdict's grounds (§8). The draft below claims **nothing about direction**
+> on any pair and names no published figure this audit can't stand behind — a
+> choice the panel has now independently vindicated, since the one refuter who
+> would restore a caveat wants it to say the composition effect is
+> **unestablished in sign and size**, which is what saying nothing amounts to.
 
 Insert as a new paragraph immediately after the paragraph ending "why
 per-mission slicing is not optional.":
 
 ```
-**These numbers are not benchmarks, and the audit that tried to make them into
-benchmarks failed on purpose.** Of six candidate comparisons against the five
-studies this report cites, one survives: TESS ROC-AUC 0.9100 against
-ExoMiner++'s 0.998 [@valizadegan2025], which shares our protocol — out-of-fold
-k-fold cross-validation grouped by host star — and which we lose by a wide
-margin on a population 24 times larger. Every other comparison fails on
-population rather than on performance. Shallue & Vanderburg [@shallue2018] and
-Xie et al. score threshold-crossing events at a 23% and 3% planet prior; our row
-is a host star at 44%. Islam's Kepler AUC of 0.955 rests on the *unfiltered*
-cumulative false-positive list that our §2.2 rule reduces by 21%, and on a
-70/15/15 split deduplicated by KOI name rather than by host — 23.7% of Kepler
-KOIs have a sibling on the same star. Our Kepler 0.9914 is worth roughly
-0.004–0.007 of AUC less on his negative class, before any leakage in his split
-is counted. **And the metric this project actually promotes on — recall at a
-fixed 1% false-positive rate — has no published counterpart in any of the five.**
-ExoMiner's nearest figure fixes precision rather than false-positive rate, which
-is a different budget wherever the class prior differs, and ours differs most.
-The full working is in the
+**These numbers are not benchmarks.** A comparability audit on 2026-09-10 tested
+six pairings of the figures above against the five studies this report cites and
+**sustained none of them**. The obstacle is population, not performance, and it
+runs in both directions. Our row is one transit signal per host star drawn from
+a near-balanced subsample; the published sets score every threshold-crossing
+event a pipeline emitted, at planet rates from 3% to 23%. ROC-AUC is a property
+of the negative population as much as of the model, so two AUCs over negative
+classes that differ in kind are not two measurements of the same thing. Our
+Kepler negatives in particular exclude the low-SNR marginal false positives —
+median transit SNR 9.8 against 52.9 for those retained (§2.2) — and a
+gradient-boosted classifier given only catalogue scalars and no light curve at
+all already reaches 0.9687 on those same rows, against this model's 0.9914.
+**The one exception is the metric this project actually promotes on, and it is
+not a favourable one.** No source publishes a recall at a fixed 1%
+false-positive rate directly, but two — ExoMiner and ExoMiner++, the two whose
+protocol is closest to ours — publish operating points *stricter* than 1% FPR.
+Because a ROC curve is non-decreasing, each is a valid lower bound: **≥ 0.936 on
+Kepler and ≥ 0.951 on TESS**, against our 0.8129 and **0.3113**. Our own
+realized cuts (0.94% FPR on TESS, 0.70% on Kepler) are stricter still, so the
+inequality holds in the direction that counts. That comparison is one-sided but
+sound, and it is adverse by roughly 12 points on Kepler and **64 points on
+TESS**. Negative-class composition changes the size of that gap, not its sign.
+Nothing else in this section should be read as a placing against published work
+in either direction. The full working, including what the audit could not
+settle, is the
 [comparability audit](experiments/benchmark-comparability-2026-09-10.md).
 ```
+
+**Do not add a "we beat X / we trail Y" sentence to this paragraph in either
+direction, and do not excuse the TESS gap.** The panel tested exactly this. The
+verdict agent's reversal — that the bias flatters ExoMiner++ and the project is
+"publishing a defeat it has not earned" — was killed by measurement on our own
+predictions: our FA negatives, the analogue of the class the excuse calls easy,
+score **AUC 0.8846 against 0.9123** for our FP negatives, −0.0277 the *wrong
+way*. The gap may not be sized and may not be excused. Direction of the
+population difference may be named; magnitude may not.
+
+**Also strike the phrase "same protocol" wherever it licenses this comparison.**
+Three refuters killed it 3–0 on §3(c): our `StratifiedGroupKFold` is a measured
+no-op at group size 1, while ExoMiner++'s grouping is load-bearing over 57,162
+per-sector TCEs. `known-limits.md` currently carries that phrase — see Edit 8.
 
 ## Edit 5 — §5.1, lines 376–381. The grouping rationale is wrong on this data.
 
@@ -449,6 +694,27 @@ Suggested §9 rows:
 | `islam2026` | Kepler ROC-AUC 0.955 — cited in §6.4 to say why it is **not** comparable to ours: unfiltered negative class, deduplicated by KOI name rather than host star |
 | `xie2025` | F1 0.957 / 0.995 at threshold 0.5 — cited in §6.4 to say why F1 at an unshared threshold is **not** a comparison |
 ```
+
+## Edit 8 — `docs/known-limits.md`, carried-limits table. REQUIRED — it now contradicts itself.
+
+Two defects, both introduced downstream of this audit and both in a file this
+session did not touch.
+
+**8a. The self-contradiction.** The table asserts, in one row, "**The CV
+grouping is inert; the dedup upstream is what prevents leakage**" — and two rows
+later licenses the ExoMiner++ comparison with "**same protocol, so the gap is
+not a protocol artefact**". These cannot both stand. The panel struck the second
+3–0 (§8). Replace that row's justification with:
+
+```
+| **Only one headline number is benchmarkable, and it loses** | Of six candidate comparisons to published work, none survives adversarial review with its grounds intact. TESS ROC-AUC 0.9100 against ExoMiner++'s 0.998 is the closest pairing, but **not on shared protocol** — our `StratifiedGroupKFold` is inert at group size 1 while theirs constrains 57,162 per-sector TCEs, and fold count, per-fold ensembling and score aggregation all differ. The negative populations also differ in composition, in a direction whose **sign and size are unestablished**: our own FA negatives, the analogue of their dominant class, score 0.8846 against 0.9123 for our FP negatives. The gap may not be excused and may not be sized. |
+```
+
+**8b. It carries superseded arithmetic.** The subsample row reads "roughly 2,748
+eligible confirmed and 3,813 eligible FPs". Both are pre-dedup counts. Correct
+to **1,945 eligible confirmed and 3,719 eligible FPs**, and note that
+`_query_koi`'s `drop_duplicates(subset="tic_id")` destroys 803 confirmed rows
+before `_stable_sample` runs. See §11.
 
 ## Do NOT apply
 
