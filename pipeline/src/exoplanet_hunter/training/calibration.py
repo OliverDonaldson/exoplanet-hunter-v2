@@ -57,21 +57,17 @@ def _assert_converged(res: Any, fit: str) -> None:
 def _nll(z: np.ndarray, labels: np.ndarray) -> float:
     """Mean binary cross-entropy from *logits*, without clipping anything.
 
-    `softplus(z) - y*z` is algebraically the same as
-    `-[y log s(z) + (1-y) log(1-s(z))]`, and `np.logaddexp` evaluates it
-    stably at every magnitude — so the objective needs no `clip` to stay
-    finite, and its exact derivative with respect to `z` is `s(z) - y`.
+    `softplus(z) - y*z` is algebraically the cross-entropy and `np.logaddexp`
+    evaluates it stably at every magnitude, so the objective needs no clip to stay
+    finite and its exact derivative is `s(z) - y`.
 
-    **That exactness is the point, not the stability.** The clipped form this
-    replaces was paired with an *unclipped* analytic gradient, so once any row
-    saturated past `_EPS` the function and its jacobian described different
-    problems and BFGS's line search failed on the inconsistency. Measured
-    2026-08-09 on the stage 6 re-baseline's fold 0: 4 of 868 validation rows
-    clipped (p down to 3.5e-10), BFGS stalled after 5 iterations at
-    ||grad|| 8.6e-3 and reported "precision loss"; this form converges in 9 at
-    ||grad|| 1.3e-6. Before `_assert_converged` existed the stalled iterate was
-    returned silently, so runs predating it calibrated on a non-converged fit —
-    ranking is untouched (Platt is monotone) but Brier and ECE are not.
+    That exactness is the point, not the stability. The clipped form this replaces
+    was paired with an *unclipped* analytic gradient, so once any row saturated the
+    function and its jacobian described different problems and BFGS's line search
+    failed on the inconsistency — it stalled after five iterations and reported
+    precision loss where this form converges in nine. Before `_assert_converged`
+    existed the stalled iterate was returned silently, so runs predating it
+    calibrated on a non-converged fit: ranking untouched, Brier and ECE not.
     """
     return float(np.mean(np.logaddexp(0.0, z) - labels * z))
 

@@ -1,42 +1,16 @@
-"""Model promotion gate: beat the baseline before you cheer — machine-enforced.
+"""Model promotion gate: a run replaces the champion only by machine decision.
 
-A freshly trained CV run produces `cv_summary.json` (written by the trainer).
-This module decides whether that run replaces the champion in
-`models/registry.json`:
+Reads a run's `cv_summary.json` and decides against `models/registry.json`:
+ROC-AUC strictly higher, Brier and ECE within tolerance, recall @1% FPR not
+falling by more than the run's own measured floor. The recall guard exists
+because a branch arm sat within 0.002 AUC of the champion while recall fell.
 
-  * primary: mean CV test ROC-AUC must be strictly higher than the
-    champion's;
-  * calibration guard: mean CV Brier must not degrade by more than
-    `brier_tolerance` — a model that ranks better but calibrates worse is
-    not an upgrade for a system whose whole point is trustworthy
-    probabilities;
-  * reliability guard: mean CV ECE must not degrade by more than
-    `ece_tolerance` — Brier alone is blind to this, since a discrimination
-    gain can pay for arbitrary miscalibration. Skipped when either summary
-    predates the `test_ece` field;
-  * shortlist guard: recall at 1% FPR must not fall by more than
-    `recall_tolerance`. AUC scores ranking at every threshold; the follow-up
-    shortlist this system exists to produce lives at exactly one. The stage 4
-    branch model is the case that motivated it — TESS AUC within 0.002
-    of the champion while recall at 1% FPR fell 0.307 -> 0.238;
-  * the first-ever run promotes automatically (there is no bar yet — the RF
-    baseline becomes the champion as soon as it's registered).
-
-**Which population decides.** When both summaries carry a `per_mission` block
-the gate reads `GATE_MISSION`, not the aggregate. TESS is 100% of the
-deployment population; the all-mission aggregate's weights are a sampling
-decision (Kepler is drawn at exactly 1,250/1,250 by construction) and it is
-reported but never gates. `DIAGNOSTIC_MISSIONS` are mandatory reported slices:
-a drop beyond `mission_alarm` does not block promotion, but it is surfaced in
-the decision so it cannot be promoted past in silence. Summaries without the
-block fall back to the aggregate, which is what every run before 2026-08-05
-carries.
-
-The registry is a plain JSON pointer, not MLflow state: the serving path and
-the CI gate both read it without a tracking-server dependency. It names the
-winner and nothing else, so every decision is additionally written beside the
-run it judged as `PROMOTION_LOG_NAME` — the only record of why the other runs
-are not the winner, and the only one a rejected run leaves behind at all.
+Three verdicts: PROMOTE, REJECT, and UNRESOLVED for a margin inside the floor.
+`GATE_MISSION` decides when both summaries carry `per_mission`: TESS is 100% of
+the deployment population; `DIAGNOSTIC_MISSIONS` are reported but never block.
+Every decision is written beside the run it judged as `PROMOTION_LOG_NAME`, the
+only record a rejected run leaves. Gate calibration:
+`docs/experiments/gate-calibration-2026-08-12.md`.
 """
 
 from __future__ import annotations
@@ -167,22 +141,17 @@ def paired_folds(
 class DecisionFloor:
     """The smallest margin this run can resolve, from its own recorded variance.
 
-    Stage 6 measured the floors and fixed the rule that turns them into a
-    threshold: **`2 x seed_sd / sqrt(n_models_per_fold)`**. It yielded ~0.007 on
-    gate AUC and **~0.034 on gate recall @1% FPR**, and the roadmap states the
-    consequence plainly — *a recall @1% FPR margin under ~0.034 is not a
-    decision*.
+    Stage 6 fixed the rule that turns measured seed variance into a threshold,
+    `2 x seed_sd / sqrt(n_models_per_fold)`, and stated the consequence plainly: a
+    recall @1% FPR margin under its floor is not a decision.
 
-    The gate did not read any of it. It compared AUC with a strict `>` and no
-    band at all, and rejected on recall at a hardcoded 0.02 — **tighter than the
-    0.034 floor the same project had measured**, so a candidate whose true recall
-    equalled the champion's was rejected by reseeding noise about a third of the
-    time. Both numbers predate stage 6 and neither was revisited when it landed.
-
-    A floor is not a licence to promote a worse model: the gate stays
-    conservative and a tie still leaves the champion served. What the floor
-    changes is what the decision is allowed to *claim* — a margin inside it is
-    reported as level, not as having been beaten.
+    The gate did not read any of it. It compared AUC with a strict `>` and no band,
+    and rejected on recall at a hardcoded constant *tighter* than the floor the same
+    project had measured — so a candidate whose true recall equalled the champion's
+    was rejected by reseeding noise a third of the time. A floor is not a licence to
+    promote a worse model: a tie still leaves the champion served. What it changes is
+    what a decision may *claim*. Numbers:
+    `docs/experiments/stage-06-recall-floor.md`.
     """
 
     auc: float | None
@@ -222,21 +191,19 @@ def decision_floor(
 ) -> DecisionFloor:
     """Resolvable margins, by stage 6's rule applied to what is being compared.
 
-    The quantity under test is a **difference of two run means**, so the
-    tolerance is `2 x se(delta)` with
+    The quantity under test is a *difference of two run means*, so the tolerance is
+    `2 x se(delta)` with
 
         se(delta) = sqrt( sd_cand^2 / n_cand + sd_inc^2 / n_inc )
 
-    not `2 x sd_cand / sqrt(n_cand)`, which is the se of the candidate's mean
-    alone. Reading only the candidate ignored the champion's noise entirely —
-    stage 6's caveat 1 says plainly that it should not — and let a noisier
-    candidate earn itself a wider band to clear. Across the 11 runs on disk that
-    quantity spans 22.1x.
+    not `2 x sd_cand / sqrt(n_cand)`, the se of the candidate's mean alone. Reading
+    only the candidate ignored the champion's noise entirely and let a noisier
+    candidate earn a wider band to clear.
 
-    A noisier candidate still earns a wider band under this rule, correctly:
-    its mean is genuinely less well known. What stops that being exploitable is
-    `Verdict.UNRESOLVED`, which catches exactly the case where a margin has
-    become comparable to its own floor. Adopted and pre-registered in 4.1b.
+    A noisier candidate still earns a wider band under this rule, correctly — its
+    mean is genuinely less well known. What stops that being exploitable is
+    `Verdict.UNRESOLVED`, which catches a margin comparable to its own floor.
+    Pre-registered in `docs/experiments/refresh-gate-calibration-4-1.md`.
     """
     variance, n_models = _variance(summary)
     if n_models is None:
@@ -300,16 +267,11 @@ VERDICT_BY_EXIT_CODE: dict[int, Verdict] = {
 }
 
 
-#: Alarms carrying a standing decision, so a run that fires only these can still
-#: promote unattended. Matched as a **substring** of the alarm text: the rest of
-#: the sentence carries run-specific detail, and a list keyed on whole messages
+#: Alarms carrying a standing decision, so a run firing only these can promote
+#: unattended. Matched as a **substring**, because a list keyed on whole messages
 #: would stop matching the first time one is reworded — silently, and in the
-#: direction that blocks every promotion.
-#:
-#: Nothing belongs here that a candidate could act on. An alarm that fires on
-#: every future run regardless of what is trained is not telling the operator
-#: anything a written explanation could resolve; one that fires on a particular
-#: run is, and stays blocking.
+#: direction that blocks every promotion. Nothing belongs here that a candidate
+#: could act on.
 ACKNOWLEDGED_ALARMS: tuple[str, ...] = (
     # The served model was baselined before K2 entered training, so it carries no
     # K2 slice and no candidate can give it one. The gate decides on TESS alone.
@@ -370,13 +332,11 @@ class PromotionDecision:
 def write_decision(path: Path, decision: PromotionDecision) -> None:
     """Record a decision where a process caller can read it back.
 
-    An exit code cannot carry this on its own. An uncaught exception also exits
-    non-zero, so a caller reading only the code cannot tell a gate that decided
-    REJECT from one that died before deciding anything — and reporting the
-    second as the first is a quality rejection that never happened. This file
-    exists only once a verdict was actually reached, which is what separates
-    the two. It also carries the reasons, so an unattended caller can say why a
-    decision went the way it did instead of naming the verdict alone.
+    An exit code cannot carry this alone: an uncaught exception also exits non-zero,
+    so a caller reading only the code cannot tell a gate that decided REJECT from one
+    that died before deciding — and reporting the second as the first is a quality
+    rejection that never happened. This file exists only once a verdict was reached,
+    and carries the reasons with it.
     """
     path.write_text(json.dumps(_decision_payload(decision), indent=2) + "\n")
 
@@ -391,27 +351,18 @@ def write_promotion_log(
 ) -> None:
     """The durable record: the decision, plus what it was a decision *about*.
 
-    `write_decision` serialises a verdict for a caller that already knows which
-    run it just gated, and nothing else on disk does. `models/registry.json`
-    records only what is currently served, so until this file existed the reason
-    a run was rejected survived exactly as long as the process that computed it —
-    the weekly refresh wrote it into a `TemporaryDirectory` — and `/runs` served
-    `verdict: null` for every row while the console printed "no reason is on
-    record", which was true.
+    `write_decision` serialises a verdict for a caller that already knows which run
+    it gated, and nothing else on disk does — so until this existed, the reason a
+    run was rejected survived only as long as the process that computed it, and
+    `/runs` served `verdict: null` for every row.
 
     A wrapper rather than more arguments on `write_decision`, because
-    `read_decision` has to stay a faithful inverse of what it reads: provenance
-    folded into the decision payload would come back as a `PromotionDecision`
-    that had silently dropped half the file. Additive keys instead — a promotion
-    log round-trips through `read_decision` unchanged, and a caller that wants
-    the provenance reads the JSON.
-
-    `champion_run_id` is the **registry's** served run, not the directory the
-    champion's metrics were read from. The weekly refresh gates against the
-    control lane, which re-measures whatever is served on this week's population
-    and writes into `models/cv/control-lane/`; naming that directory would record
-    "control-lane" as the champion, and control-lane is not a model.
-    `champion_summary` names the measurement, so both questions stay answerable.
+    `read_decision` has to stay a faithful inverse: provenance folded into the
+    payload would come back as a `PromotionDecision` that had silently dropped half
+    the file. `champion_run_id` is the *registry's* served run, not the directory
+    the champion's metrics were read from — the weekly refresh gates against the
+    control lane, and naming that directory would record "control-lane" as the
+    champion. `champion_summary` names the measurement, so both stay answerable.
     """
     payload = _decision_payload(decision) | {
         "candidate_run_id": candidate_run_id,
@@ -464,12 +415,12 @@ def _mean_or_none(summary: dict[str, Any], metric: str) -> float | None:
 def _gate_slice(summary: dict[str, Any]) -> dict[str, float] | None:
     """The deployment slice's metrics, or None on a summary without the block.
 
-    A summary that carries `per_mission` but no `GATE_MISSION` is not the same
-    case as one that predates the block, and returning None for both is how the
-    fallback gets entered while reporting that the summary is simply old. Worse,
-    `_population_mismatch` compares mission *sets*, so two summaries that both
-    lack TESS agree with each other and never trigger the refusal — leaving the
-    gate deciding on pooled means with nothing saying so. Refuse instead.
+    A summary carrying `per_mission` but no `GATE_MISSION` is not the same case as
+    one predating the block, and returning None for both enters the fallback while
+    reporting the summary as simply old. Worse, `_population_mismatch` compares
+    mission *sets*, so two summaries that both lack TESS agree with each other and
+    never trigger the refusal, leaving the gate on pooled means with nothing saying
+    so. Refuse instead.
     """
     per_mission = summary.get("per_mission")
     if not per_mission:
@@ -511,13 +462,11 @@ def _gate_population_drift(
 ) -> str | None:
     """Whether the two gate slices are measured over the same number of rows.
 
-    `_population_mismatch` compares mission *sets*, so two summaries that both
-    carry TESS agree with each other however much their TESS membership differs.
-    Measured 2026-08-08, the re-baselined champion gates on 2,367 TESS rows and
-    run 2 on 2,399 — a 32-row gap that reads as a model difference. Row counts
-    are the only membership evidence a summary carries, and equal counts do not
-    prove equal rows; unequal counts disprove it. Alarmed rather than blocking,
-    because the catalogue legitimately grows between runs.
+    `_population_mismatch` compares mission *sets*, so two summaries that both carry
+    TESS agree however much their TESS membership differs — a row gap that reads as a
+    model difference. Row counts are the only membership evidence a summary carries;
+    equal counts do not prove equal rows, but unequal counts disprove it. Alarmed
+    rather than blocking, because the catalogue legitimately grows between runs.
     """
     if cand_slice is None or champ_slice is None:
         return None
@@ -537,14 +486,13 @@ def _reproducibility_warning(candidate: dict[str, Any]) -> str | None:
     """Whether the candidate's numbers can be traced to a known code state.
 
     Alarmed, not blocking: a deliberate promotion from a working tree is the
-    operator's call. But promoting a run whose code state contradicts its
-    recorded commit means the served model cannot be rebuilt from the
-    repository, and nothing downstream would ever surface that.
+    operator's call. But promoting a run whose code state contradicts its recorded
+    commit means the served model cannot be rebuilt from the repository, and nothing
+    downstream would surface that.
 
-    Only a *recorded* claim is checked. `git_dirty` absent means the summary
-    predates the field; `git_dirty: None` means provenance ran and git could not
-    be reached, which is a different statement from a clean tree and is the one
-    place this distinction earns its keep.
+    Only a *recorded* claim is checked. `git_dirty` absent means the summary predates
+    the field; `git_dirty: None` means provenance ran and git could not be reached,
+    which is a different statement from a clean tree.
     """
     config = candidate.get("run_config", {})
     if "git_dirty" not in config:
@@ -601,22 +549,18 @@ def evaluate_promotion(
 ) -> PromotionDecision:
     """Compare a candidate cv_summary against the champion's.
 
-    Gates on `GATE_MISSION` when both summaries carry a `per_mission` block.
-    Without it there is no way to check the two means cover the same rows, so
-    the fallback refuses rather than comparing populations that may differ —
-    see `_population_mismatch`. `allow_unmatched_populations` overrides that
-    for a deliberate cross-population read.
+    Gates on `GATE_MISSION` when both summaries carry a `per_mission` block. Without
+    it there is no way to check the two means cover the same rows, so the fallback
+    refuses rather than comparing populations that may differ;
+    `allow_unmatched_populations` overrides that for a deliberate cross-population
+    read. `recall_tolerance` defaults to this run's own measured floor rather than a
+    constant — see `DecisionFloor`.
 
-    `recall_tolerance` defaults to **this run's own measured floor** rather than
-    a constant — see `DecisionFloor`. Passing a number overrides it, which is
-    what the pre-stage-6 tests do deliberately.
-
-    Under `strict` an alarm blocks instead of advising. Alarms are documented as
-    owing "a written explanation in the roadmap before promotion", which is a
-    condition no unattended run can satisfy — so left advisory, the weekly loop
-    promotes straight past every one of them. Blocked runs read UNRESOLVED, not
-    REJECT: an alarm asks for a human, it does not assert the candidate is worse.
-    `ACKNOWLEDGED_ALARMS` carries the standing exceptions.
+    Under `strict` an alarm blocks instead of advising. Alarms owe a written
+    explanation before promotion, which no unattended run can satisfy, so left
+    advisory the weekly loop promotes straight past them. Blocked runs read
+    UNRESOLVED, not REJECT: an alarm asks for a human, it does not assert the
+    candidate is worse. `ACKNOWLEDGED_ALARMS` carries the standing exceptions.
     """
     if champion is None:
         return PromotionDecision(Verdict.PROMOTE, ["first registered model — becomes the champion"])
@@ -849,21 +793,17 @@ def load_champion_summary(
 ) -> dict[str, Any] | None:
     """The champion's summary — the registry's, or an explicit re-baseline.
 
-    **`summary_path` is the other half of stage 3.** The 2026-08-07 audit found
-    that the registry's `ca906040` summary carries no `per_mission` block, so
-    `_gate_slice` returns None, `_population_mismatch` fires and every candidate
-    is refused *before a single metric is compared*. Stage 3 produced the
-    re-baselined summary that fixes it — `models/cv/incumbent-rebaselined/` —
-    and the audit's own note said `promotion_gate.py` had no flag to point at
-    one. That note was never actioned: the roadmap recorded stage 3 as "the gate
-    returns decisions again instead of refusing" while the gate went on refusing
-    everything, and every branch rejection since was decided by hand.
+    The registry's `ca906040` summary carries no `per_mission` block, so
+    `_gate_slice` returns None, `_population_mismatch` fires, and every candidate is
+    refused before a single metric is compared. `summary_path` points at the
+    re-baselined summary that fixes it, without which every branch rejection has to
+    be decided by hand.
 
-    Passing a path here rather than editing `models/registry.json` is deliberate.
-    The registry names what is *served*; the re-baseline is a measurement of that
-    same model on the current view set. Writing the latter into the former would
-    make the serving pointer depend on an evaluation artefact, and touching the
-    registry at all is a stop-and-ask in this project.
+    Passing a path rather than editing `models/registry.json` is deliberate: the
+    registry names what is *served*, and the re-baseline is a measurement of that
+    same model on the current view set. Writing the latter into the former would make
+    the serving pointer depend on an evaluation artefact, and touching the registry
+    at all is a stop-and-ask in this project.
     """
     if summary_path is not None:
         return json.loads(summary_path.read_text())

@@ -1,32 +1,16 @@
 """Stochastic augmentation for the view set — `augment.py`'s semantics, per view.
 
-The champion augments two `(bins, 1)` tensors. The view set has ten views of
-`(bins, channels)`, a `(20, 31, 3)` unfolded stack and a stack of 2-D sky
-stamps, so an exact reuse is not possible. What is preserved is the operation set, their magnitudes and their
-order: coherent phase shift, independent Gaussian noise, coherent depth scale,
-independent bin masking.
+The champion augments two `(bins, 1)` tensors; the view set has ten views of
+`(bins, channels)`, an unfolded stack and 2-D sky stamps, so exact reuse is not
+possible. What is preserved is the operation set, their magnitudes and their
+order: coherent phase shift, independent noise, coherent depth scale, masking.
 
-Two things about the view set change what "per view" means.
-
-**The presence channel is never augmented.** It is the last channel on every
-view, and `_gated` in `cnn_branches.py` reads `reduce_max(present) > 0` to
-decide whether a branch contributes at all. Noise on a genuinely-absent
-branch's zeros flips it to "present" and silently disables the gating the whole
-design rests on — for Kepler and K2, where `dv_usable` is 0%, that is 3,027 of
-5,423 rows. Every op here writes to data channels only, and noise is multiplied
-by `present` so a bin that held no cadence keeps the zero that says so.
-
-**Not every axis is phase.** The periodogram views are indexed by *period*, so
-rolling them shifts the peak onto a different period rather than shifting the
-star in time. They take noise and masking but no phase shift. The unfolded
-stack's phase axis is its second-to-last; axis 0 is transit number, and rolling
-that would reorder the transits. The difference-image stamps are indexed by
-*sky position*, where a roll would move the star across its own aperture —
-inventing the centroid shift the branch exists to detect.
-
-Which view is which lives in `VIEW_KINDS`, keyed by name — a view added to the
-shard writer without a kind here raises rather than being silently augmented as
-if it were folded flux.
+The presence channel is never augmented: `_gated` in `cnn_branches.py` reads
+`reduce_max(present) > 0`, so noise on an absent branch's zeros flips it to
+"present" and disables the gating the design rests on. Nor is every axis phase —
+periodogram views are indexed by period, the unfolded stack's axis 0 is transit
+number, and stamps by sky position, where a roll would invent the centroid shift
+the branch exists to detect. `VIEW_KINDS` keys that; an unlisted view raises.
 """
 
 from __future__ import annotations
@@ -83,18 +67,10 @@ VIEW_KINDS: dict[str, ViewKind] = {
 }
 
 #: Trailing channels that are annotations, not observations, and so are copied
-#: through every op untouched. One everywhere — the presence flag — and **two**
-#: on a difference stamp, where the target marker sits in front of it.
-#:
-#: The marker is the star's catalogue position at sub-pixel resolution. Adding
-#: Gaussian noise to it would invent a positional uncertainty DV did not report,
-#: on the one channel the branch's centroid measurement is taken *against* —
-#: jittering the origin is not a plausible alternative observation of the same
-#: star, it is a different star. The same argument the module docstring makes
-#: for `present`, applied to the channel added beside it on 2026-08-27.
-#:
-#: This leaves the noise op's draw shape on a stamp unchanged at (sectors, row,
-#: col, 2), which is what it was before the marker existed.
+#: through every op untouched: the presence flag everywhere, and the target
+#: marker in front of it on a difference stamp. Jittering the origin the centroid
+#: is measured against is not another observation of the same star, it is a
+#: different star.
 _ANNOTATION_CHANNELS: dict[ViewKind, int] = {ViewKind.SKY_STAMP: 2}
 
 #: Views whose bin axis is phase, so the coherent shift applies.

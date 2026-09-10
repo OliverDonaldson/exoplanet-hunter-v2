@@ -1,9 +1,7 @@
 """The aux feature vector layout — one implementation for every caller.
 
-Training (build_dataset), serving (scoring.service) and batch scoring
-(score_candidates) each used to spell this layout out separately, which is how
-score_candidates ended up stuck on the legacy 9-dim vector after the model
-moved to 13. The layout lives here now; callers supply the values.
+Training, serving and batch scoring each spelled this out separately, which is
+how `score_candidates` stuck on the 9-dim vector after the model moved to 13.
 
     idx  0-3  teff, radius, logg, tmag      stellar context
     idx  4-6  depth, duration, log(period)  transit shape
@@ -11,9 +9,8 @@ moved to 13. The layout lives here now; callers supply the values.
     idx  8    centroid_snr                  BEB diagnostic (>=9)
     idx  9-12 oe_depth_sigma, oe_timing_sigma, secondary_sig, q_ratio (>=13)
 
-pink_snr (Kunimoto 2025 §2.1) replaces the catalogue transit SNR at idx 7 in
-the 13-dim layout: it is computed from the light curve, so it exists for every
-target at train *and* serve time, closing the non-TOI NaN->imputed mismatch.
+pink_snr (Kunimoto 2025 §2.1) replaces the catalogue SNR at idx 7: computed from
+the light curve, it exists at train and serve time, closing a NaN mismatch.
 """
 
 from __future__ import annotations

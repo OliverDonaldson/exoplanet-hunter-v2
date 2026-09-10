@@ -1,21 +1,16 @@
 """Load the registered 5-fold ensemble and aggregate its predictions.
 
-The registry (`models/registry.json`, written by the promotion gate) points
-at a CV run directory of fold_*/ subdirs, each holding the fold's Keras
-checkpoint and its calibration bundle (calibrator, threshold, aux_pipeline —
-the V1 bundle contract). Serving loads all folds once and scores each target
-with every member.
+`models/registry.json`, written by the promotion gate, points at a CV run
+directory of `fold_*/` subdirs, each holding that fold's Keras checkpoint and
+its calibration bundle (calibrator, threshold, aux_pipeline — the V1 bundle
+contract). Serving loads all folds once, scoring each target with every member.
 
-Aggregation, chosen to match what the vetting console displays:
-
-  * per-fold prob   — the fold's deterministic score, calibrated (the
-                      "five dots"); calibrators are fitted on deterministic
-                      scores, so MC means don't feed them.
-  * prob_calibrated — mean of the per-fold calibrated probs (the headline).
-  * prob_mean       — mean of the raw (uncalibrated) deterministic scores.
-  * prob_std        — total uncertainty: sqrt(mean within-fold MC-Dropout
-                      variance + across-fold variance of the means).
-  * threshold       — mean of the folds' F1-optimal thresholds.
+Aggregation matches what the vetting console displays: a per-fold calibrated
+prob (the "five dots"), `prob_calibrated` as their mean (the headline),
+`prob_mean` over the raw scores, `prob_std` combining within-fold MC-Dropout
+variance with across-fold variance, and `threshold` as the mean of the folds'
+F1-optimal thresholds. Calibrators are fitted on deterministic scores, so MC
+means never feed them.
 """
 
 from __future__ import annotations

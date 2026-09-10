@@ -1,28 +1,16 @@
 """The control lane: the served model re-scored on the population in front of it.
 
-A candidate is scored on the current catalogue. The champion's stored summary
+A candidate is scored on the current catalogue; the champion's stored summary
 was measured on the catalogue it was trained against. Subtracting one from the
-other gives a number that is a model difference and a population difference
-added together, and the gate has been reporting that sum as if it were the
-first.
+other sums a model difference and a population difference, and the gate had been
+reporting that sum as if it were the first. This module measures the champion
+again, now, on the rows the candidate is judged on.
 
-This module measures the champion again, now, on the rows the candidate is
-being judged on — so the difference the gate reads is attributable to the model.
-
-**Which rows.** The shared out-of-fold population: rows in both the champion's
+Only the shared out-of-fold population gates: rows in both the champion's
 training set and the current shard set, each scored by the fold that held it
-out. Rows added since the champion was trained are deliberately excluded from
-the comparison. The champion never trained on them, so scoring them means
-averaging all five folds — an ensemble — while the candidate scores each row
-with the single fold that held it out. That would hand the champion a
-five-model advantage on exactly the rows a refresh adds. They are counted and
-reported; they never gate.
-
-**What this cannot fix.** The shared population is pinned to the champion's
-training set while the catalogue grows, so it covers a falling fraction of what
-the model serves. Nothing here hides that: `PopulationOverlap` reports it every
-run, and below `MIN_GATE_ROWS` the lane refuses rather than deciding on a
-remainder too thin to measure.
+out. Rows added since would have to be scored by all five folds — an ensemble —
+handing the champion a five-model advantage, so they are counted, reported and
+never gated. Below `MIN_GATE_ROWS` the lane refuses rather than deciding.
 """
 
 from __future__ import annotations
@@ -118,16 +106,14 @@ def reproduces(
 ) -> list[str]:
     """Metrics where the lane disagrees with the original path on the same inputs.
 
-    **Check A of 4.1d, at the summary level.** Every metric of every
-    `per_mission` slice, not the gate slice alone — a lane that agreed on TESS
-    while disagreeing on Kepler would have passed 4.1c's version of this and
-    still been wrong.
+    Every metric of every `per_mission` slice, not the gate slice alone — a lane
+    that agreed on TESS while disagreeing on Kepler would have passed an earlier
+    version of this check and still been wrong.
 
-    Both summaries must be measurements of the same model over the same shard
-    set and the same labels, so the only difference left between them is the
-    code path. That is the entire question this asks; it is not a test of
-    whether the population has moved, and pointing it at a summary from another
-    date turns it into one.
+    Both summaries must measure the same model over the same shard set and labels,
+    so the only difference left is the code path. That is the entire question;
+    pointing it at a summary from another date turns it into a test of whether the
+    population moved, which it is not.
     """
     left_slices = control.get("per_mission") or {}
     right_slices = stored.get("per_mission") or {}
@@ -159,12 +145,10 @@ def rows_reproduce(
 ) -> list[str]:
     """Row-level disagreements between two scorings of the same model.
 
-    **Check A of 4.1d, at the row level, and the half that has teeth.** Slice
-    metrics are means: two paths can average to the same AUC while disagreeing
-    about individual objects, and the shortlist this system exists to produce is
-    made of individual objects. Membership, fold assignment, ground-truth label
-    and score are all compared, because a difference in any of them makes the
-    two paths different measurements whatever the aggregates say.
+    The half of the reproduction check with teeth. Slice metrics are means: two paths
+    can average to the same AUC while disagreeing about individual objects, and the
+    shortlist this system exists to produce is made of individual objects. Membership,
+    fold assignment, ground-truth label and score are all compared.
     """
     left, right = lane.set_index("tic_id"), original.set_index("tic_id")
     problems: list[str] = []
@@ -222,12 +206,11 @@ def deltas(
 ) -> tuple[dict[str, float], dict[str, float] | None]:
     """The model effect, and the data effect it has been carrying.
 
-    `model` is the candidate against the champion **on the same rows** — what
-    the gate is entitled to call a model difference. `data` is the champion
-    against its own previous measurement: same weights, a different population,
-    and the quantity that has been inside every weekly margin with nothing
-    separating it out. `data` is None on the first run, which has nothing to
-    compare against.
+    `model` is the candidate against the champion *on the same rows* — what the gate
+    is entitled to call a model difference. `data` is the champion against its own
+    previous measurement: same weights, a different population, and the quantity that
+    has been inside every weekly margin with nothing separating it out. `data` is
+    None on the first run.
     """
     cand, ctrl = _gate_slice(candidate), _gate_slice(control)
     metrics = sorted((set(cand) & set(ctrl)) - _NOT_A_METRIC)

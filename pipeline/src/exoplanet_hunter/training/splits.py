@@ -1,42 +1,16 @@
 """The inner train/validation split, group-aware *and* class-aware.
 
-Both trainers cut a validation split inside each CV fold, and that split feeds
-early stopping **and** the Platt fit. `GroupShuffleSplit` is group-aware only:
-it keeps one host's planets on a single side, which is the leakage rule, but it
-makes no promise about class balance.
+Both trainers cut a validation split inside each CV fold, feeding early stopping
+and the Platt fit. `GroupShuffleSplit` keeps a host on one side but promises
+nothing about class balance, and a single-class split converges to a calibrator
+mapping every score to one end — then written to disk as the servable one.
+`StratifiedGroupKFold` keeps the grouping guarantee and adds the balance.
 
-Calibration requires both classes. With every validation label identical the
-NLL is minimised by pushing the fit to its extremes, so the optimiser converges
-happily and returns a scaler that maps every score to one end — and that bundle
-is written to disk as the *servable* calibrator.
-
-`calibration._assert_both_classes` raises on that, which turns a silent bad
-artefact into a failed run. This module removes the cause rather than catching
-it: `StratifiedGroupKFold` keeps the grouping guarantee and adds the balance.
-
-Applying it **changes the inner partition and therefore the numbers**, so it
-belongs between experiments rather than between a run and its own control.
-Landed 2026-08-08 alongside the unfolded-branch rebuild, which already forces a
-fresh baseline — one re-baseline covering both changes rather than two.
-
-Not to be confused with the *outer* split. `train.py`'s `GroupShuffleSplit` at
-the random-forest holdout is a train/test cut that nothing calibrates on, and
-is deliberately left alone.
-
-**The outer split can also be pinned from a file, and stage 10.5 needs it to
-be.** Both trainers build their own `StratifiedGroupKFold` over their own shard
-set, and the two sets are not the same population — `data/processed/tfrecords`
-holds 5,380 examples against `viewset_tfrecords`' 5,426, sharing 5,375. No seed
-makes two different populations partition alike, so an ensemble measured across
-them is comparing two different out-of-fold populations, which is the defect
-stage 10.5 exists to avoid rather than reproduce. `build_fold_assignment` writes
-one group→fold map; `assigned_group_kfold` replays it in either trainer.
-
-Rows whose group the map does not cover are **dropped**, not assigned somewhere
-convenient. That is the pre-registered behaviour (roadmap 4.1a point 3): a joint
-measurement costs both models the rows the other cannot see, and silently
-keeping them would mean the two models were scored on different populations
-again while the summary claimed otherwise.
+The *outer* split can also be pinned from a file, and stage 10.5 needs it to be:
+two trainers over two shard sets partition two different populations, so an
+ensemble across them compares different out-of-fold rows. `build_fold_assignment`
+writes one group-to-fold map, `assigned_group_kfold` replays it, and rows it does
+not cover are dropped and counted. See `docs/experiments/stage-10-5-ensemble.md`.
 """
 
 from __future__ import annotations
@@ -83,17 +57,12 @@ def stratified_inner_split(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Split one fold's train+validation rows into train and validation.
 
-    Parameters
-    ----------
-    trainval : positions into `y` and `groups` that this fold may train on.
-    y        : the full label vector.
-    groups   : the full grouping vector, `tic_id` in both trainers.
-    val_frac : share of `trainval` to hold out, as `1 / n_splits`.
-    seed     : the fold's own seed.
+    `trainval` is positions into `y` and `groups`, `val_frac` the share to hold out
+    as `1 / n_splits`, and `seed` the fold's own.
 
-    Returns positions into `y`, **not** offsets into `trainval`. The call sites
-    used to index `trainval[tr_rel]` themselves, which is one more place for the
-    frame of reference to be got wrong.
+    Returns positions into `y`, **not** offsets into `trainval`. The call sites used
+    to index `trainval[tr_rel]` themselves, which is one more place for the frame of
+    reference to be got wrong.
     """
     if not 0.0 < val_frac < 1.0:
         raise ValueError(f"val_frac must be in (0, 1), got {val_frac}")
@@ -160,24 +129,17 @@ def extend_fold_assignment(
 ) -> tuple[dict[int, int], int]:
     """Keep every already-assigned group where it is; place only the new ones.
 
-    This is what lets a *self-refreshing* model be compared to itself. Pinning a
-    fixed map across refreshes would silently drop every target the catalogue
-    gained since it was written, because uncovered groups are dropped rather
-    than placed somewhere convenient. Rebuilding the map each refresh instead
-    re-partitions the whole population, so a candidate and the champion it is
-    gated against are scored on different splits, and part of any margin is only
-    which rows landed where.
+    This is what lets a self-refreshing model be compared to itself. A pinned map
+    silently drops every target the catalogue gained, since uncovered groups are
+    dropped rather than placed somewhere convenient; rebuilding it each refresh
+    re-partitions the whole population, so a candidate and the champion it is gated
+    against are scored on different splits and part of any margin is only which rows
+    landed where. Extending gives both.
 
-    Extending gives both: a target keeps the fold that has always held it out,
-    so the shared population is compared like for like, and new targets still
-    enter training.
-
-    New groups go to the fold currently holding the fewest of their own class,
-    ties broken on the lowest fold index, after a seeded shuffle. That keeps
-    fold sizes and class balance even without ever moving a group — moving one
-    would place a target in a fold that had already trained on it.
-
-    Returns the extended map and the number of groups added.
+    New groups go to the fold currently holding the fewest of their own class, ties
+    on the lowest fold index, after a seeded shuffle — keeping fold sizes and class
+    balance even without ever moving a group, which would place a target in a fold
+    that had already trained on it. Returns the extended map and the number added.
     """
     if n_splits < MIN_INNER_SPLITS:
         raise ValueError(f"n_splits must be at least {MIN_INNER_SPLITS}, got {n_splits}")
@@ -271,15 +233,14 @@ def assigned_group_kfold(
     *,
     n_splits: int,
 ) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-    """Replay a fixed group→fold map as `StratifiedGroupKFold.split` would.
+    """Replay a fixed group-to-fold map as `StratifiedGroupKFold.split` would.
 
-    Yields `(trainval_idx, test_idx)` positions into `groups`, in fold order, so
-    it is a drop-in for the splitter both trainers already call.
+    Yields `(trainval_idx, test_idx)` positions into `groups` in fold order, a
+    drop-in for the splitter both trainers already call.
 
-    Every guard here raises. A fold assignment that silently covers only part of
-    the data, or collapses to fewer folds than asked for, produces a completely
-    plausible set of metrics over the wrong population — which is this project's
-    defining failure mode, and the reason none of these are warnings.
+    Every guard raises. A fold assignment that silently covers only part of the data,
+    or collapses to fewer folds than asked for, produces a completely plausible set
+    of metrics over the wrong population.
     """
     folds = np.fromiter(
         (assignment.get(int(g), -1) for g in groups), dtype=np.int64, count=len(groups)

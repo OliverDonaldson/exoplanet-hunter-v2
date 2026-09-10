@@ -2,14 +2,12 @@
 
 Semantics preserved exactly:
 
-  * **Coherent phase shift** (±time_shift_frac of the view length) — the same
-    random fraction rolls both views, because they are the same star at the
-    same moment.
-  * **Independent Gaussian noise** per view (sensor noise is uncorrelated
-    between the two binnings).
-  * **Coherent depth scaling** (±scale_range) — simulates depth/variability
-    changes, again shared across views.
-  * **Independent bin masking** (mask_prob) — simulates missing cadences.
+  * **Coherent phase shift** — the same random fraction rolls both views,
+    because they are the same star at the same moment.
+  * **Independent Gaussian noise** per view; sensor noise is uncorrelated
+    between the two binnings.
+  * **Coherent depth scaling**, again shared across views.
+  * **Independent bin masking**, simulating missing cadences.
 
 These run *after* `cache()` in the input pipeline so every epoch sees fresh
 draws (L6: cache the deterministic work, keep the stochastic work live).

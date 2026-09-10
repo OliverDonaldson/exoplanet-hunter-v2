@@ -1,51 +1,15 @@
-"""The offline control arm: does the model score the star, or the transit?
+"""Offline control arm: score real hosts with no injected transit.
 
-With **no injection at all**, 26.4% of hosts passed threshold through the live
-dual-view path — 46.7% of planet hosts against 12.3% of false-positive hosts.
-That is the model recognising the kind of star that tends to have planets, which
-is not vetting, and driving it down is stage 7's success criterion.
+A model that passes such a host is scoring the star, not the transit — the
+defect W2 names. It runs offline because a branch model cannot be scored from a
+light curve through the serving path, so a run directory is scored over a shard
+set built as training's was, through the same parse and scalar normalisation.
 
-**It cannot be measured for a branch model through the serving path.**
-`ScoringEnsemble.from_registry` loads `cnn_dualview.keras` and `TargetScorer`
-builds two views with `preprocess.views`; a branch model needs the eleven that
-`preprocess.viewset` builds. Making a branch model scoreable from a light curve
-is stage 11. This module is the agreed way round it: score a run directory
-*offline*, over a shard set built the same way training's was.
-
-    clean -> flatten -> inject_box_transit(depth=0) -> build_view_set
-          -> write_viewset_shards -> make_viewset_dataset
-          -> the run directory's fold members and calibrator
-
-Writing a shard and reading it back is the construction rather than a shortcut:
-it puts the control arm through the same parse and scalar-normalisation path
-training used, instead of a second implementation that agrees with it by
-inspection.
-
-**Three things are pre-registered in `roadmap.md` and implemented here.**
-
-1. **Out-of-fold routing, or the host is dropped.** A control-arm host is a real
-   labelled target that was in training, so the only honest protocol is the fold
-   that held it out. Mixing in zero-shot rows across one population is the
-   defect stage 3 closed, so an unroutable host is dropped and counted, never
-   scored by an averaged ensemble.
-2. **Two operating points, both reported.** A branch run directory stores no
-   threshold — `bundle["threshold"]` is the *legacy serving* bundle's field, and
-   the branch bundle carries `calibrator`, `platt_a`, `platt_b` and
-   `scalar_constants`. So one is derived: recall @1% FPR is primary, because it
-   is where every gate decision in this project is made, and the F1-optimal
-   point is reported beside it because that is what produced the original 26.4%.
-3. **Baseline-matched hosts.** The statistic of interest is the 46.7 / 12.3
-   split, and observation baseline is the confound it is most exposed to
-   (+0.387 against the label on TESS). Hosts are stratified on `baseline_days`
-   and drawn equally per label within each stratum.
-
-**Two limits, recorded before any number exists.** The offline arm injects at a
-synthetic ephemeris, so no DV report exists for it and the `detection` / `ghost`
-branches run masked — the model handles that by design, but it is a real
-difference from how 56% of training rows were built. And this does **not**
-restore comparability with 26.4%: that came through the dual-view path, so the
-champion is re-measured here and the comparison is made within protocol. No
-number from this module can support a claim about *serving*.
+Pre-registered and implemented here: out-of-fold routing or the host is dropped;
+two operating points side by side, recall @1% FPR primary and F1-optimal beside
+it; baseline-matched strata, baseline being the confound this statistic is most
+exposed to. Numbers, limits and the reading:
+`docs/experiments/stage-07i-control-arm-harness.md`. Nothing here is a serving claim.
 """
 
 from __future__ import annotations
@@ -191,17 +155,15 @@ def baseline_matched_hosts(
 ) -> MatchedHosts:
     """Draw planet and false-positive hosts matched on observation baseline.
 
-    `candidates` needs `tic_id`, `label`, and either `baseline_days` or the
-    `expected_transit_count` + `period` it is derived from. **`labels.parquet`
-    carries neither**, so the caller joins the viewset scalars first — this
-    raises rather than inventing a baseline, because a control arm silently
-    matched on nothing is indistinguishable from one matched correctly.
+    `candidates` needs `tic_id`, `label`, and either `baseline_days` or the columns
+    it derives from. `labels.parquet` carries neither, so the caller joins the
+    viewset scalars first — this raises rather than inventing a baseline, because a
+    control arm silently matched on nothing looks exactly like one matched right.
 
-    Strata are quantile bins of `baseline_days`, and a stratum that cannot
-    supply both labels is **dropped, not backfilled**. Backfilling from the
-    unmatched pool would return a clean number about an easier population, which
-    is the exact confound the matching exists to remove — so the count of
-    dropped strata travels with the result.
+    Strata are quantile bins, and a stratum that cannot supply both labels is
+    dropped, not backfilled: backfilling from the unmatched pool would return a
+    clean number about an easier population. The dropped count travels with the
+    result.
     """
     required = {"tic_id", "label"}
     missing = required - set(candidates.columns)

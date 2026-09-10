@@ -1,19 +1,15 @@
 """Pandera schemas + array checks: the data half of the validation gates.
 
-Four artefacts get validated before anything trains or serves:
+Four artefacts are validated before anything trains or serves: the **label
+catalogue** training consumes (column types, disposition and label domains,
+ephemeris sanity); the **candidate catalogue** the API serves (the browse-table
+contract); the **processed views** (no all-NaN folds, label domain, shape
+consistency); and the **DV archive** (presence-mask integrity, so "never
+queried" can never be read as "this target has no DV products").
 
-  * the **label catalogue** (`data/tables/labels/labels.parquet`) that training
-    consumes — column types, disposition/label domains, ephemeris sanity;
-  * the **candidate catalogue** (`data/tables/catalogue/candidates.parquet`) that
-    the API serves — the browse-table contract;
-  * the **processed views** (views.npz / shard sets) — no all-NaN folds,
-    label domain, shape consistency;
-  * the **DV archive** (`data/raw/tess/dv/`) — presence-mask integrity, so that
-    "never queried" can never be read as "this target has no DV products".
-
-Schemas are deliberately strict on domains and lenient on physical values
-that ExoFOP legitimately leaves blank (nullable=True): the gate's job is to
-catch *structural* corruption from a refresh, not to second-guess astronomy.
+Schemas are deliberately strict on domains and lenient on physical values that
+ExoFOP legitimately leaves blank (nullable=True): the gate's job is to catch
+*structural* corruption from a refresh, not to second-guess astronomy.
 """
 
 from __future__ import annotations

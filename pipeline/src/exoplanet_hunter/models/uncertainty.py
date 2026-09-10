@@ -33,18 +33,13 @@ def mc_dropout_predict(
 ) -> UncertaintyResult:
     """Run T forward passes with dropout active and return mean + std.
 
-    Parameters
-    ----------
-    model     : a trained Keras model whose Dropout layers were built with
-                `training=None` (so we can pass `training=True` here to keep
-                them active).
-    inputs    : the same inputs you'd pass to `model.predict`.
-    n_samples : T, number of stochastic forward passes. 50 is a good default;
-                100+ for tighter intervals.
+    `model`'s Dropout layers must have been built with `training=None`, so
+    `training=True` can be passed here to keep them active. 50 samples is a good
+    default; 100+ gives tighter intervals.
 
-    For a single example the T samples are drawn in one batched forward pass
-    (dropout masks are independent per batch element, so this is equivalent) —
-    T sequential single-example calls pay T rounds of dispatch overhead, which
+    For a single example the T samples are drawn in one batched forward pass —
+    dropout masks are independent per batch element, so this is equivalent, and T
+    sequential single-example calls pay T rounds of dispatch overhead, which
     dominates on CPU serving.
     """
 

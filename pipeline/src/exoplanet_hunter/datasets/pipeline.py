@@ -1,21 +1,15 @@
 """tf.data input pipeline over TFRecord shards (L6 backbone).
 
-Stage order, and why:
+Stage order: TFRecordDataset(shards) -> map(parse) -> filter(tic_id in split)
+-> map(aux normalise) -> cache() -> shuffle -> map(augment) -> batch ->
+prefetch(AUTOTUNE). Everything above `cache()` is deterministic and runs once;
+augmentation sits below it so it is fresh every epoch.
 
-    TFRecordDataset(shards, parallel reads)   sequential I/O, interleaved
-      -> map(parse)                           deterministic
-      -> filter(tic_id in split)              deterministic, via StaticHashTable
-      -> map(aux normalise)                   deterministic (fitted constants)
-      -> cache()                              everything above runs ONCE
-      -> shuffle                              train only
-      -> map(augment)                         stochastic — fresh every epoch
-      -> batch -> prefetch(AUTOTUNE)          keep the GPU fed
-
-Split membership is by TIC ID, not row index: a `StaticHashTable` maps
-tic_id -> split code, so one pass over the shards yields any fold's
-train/val/test streams while preserving the leakage guarantee (a star is in
-exactly one split). Unshuffled datasets preserve shard order == index-row
-order, so `predict()` output aligns positionally with index-derived labels.
+Split membership is by TIC ID, not row index: a `StaticHashTable` maps tic_id
+to a split code, so one pass over the shards yields any fold's train, val and
+test streams while preserving the leakage guarantee — a star is in exactly one
+split. Unshuffled datasets preserve shard order as index-row order, so
+`predict()` output aligns positionally with index-derived labels.
 """
 
 from __future__ import annotations
@@ -56,16 +50,15 @@ def make_weight_table(
 ) -> tf.lookup.StaticHashTable:
     """tic_id -> per-example training weight; unknown TICs map to 1.0.
 
-    Stage 8's propensity-weighting arm. The default is 1.0 rather than 0.0 for
-    the same reason `make_split_table` defaults to a dropped code: a row the
-    caller forgot to weight should train normally and be findable, not vanish
-    from the loss while every batch still looks the right size.
+    Stage 8's propensity-weighting arm. The default is 1.0 rather than 0.0 for the
+    same reason `make_split_table` defaults to a dropped code: a row the caller
+    forgot to weight should train normally and be findable, not vanish from the loss
+    while every batch still looks the right size.
 
-    Weights are looked up by `tic_id` because that is the only identity a shard
-    carries through `tf.data`. The catalogue is one row per TIC — 5,703 rows,
-    5,703 unique TICs — so the mapping is exact today; a multi-planet host would
-    make it many-to-one and every planet of that host would share a weight,
-    which is why `run_cv` asserts uniqueness before building one.
+    Weights are looked up by `tic_id`, the only identity a shard carries through
+    `tf.data`. The catalogue is one row per TIC, so the mapping is exact today; a
+    multi-planet host would make it many-to-one and every planet of that host would
+    share a weight, which is why `run_cv` asserts uniqueness first.
     """
     if len(tic_ids) != len(weights):
         raise ValueError(f"{len(tic_ids)} tic_ids but {len(weights)} weights")

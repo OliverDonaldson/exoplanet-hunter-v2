@@ -1,35 +1,16 @@
 """Two of stage 8's three interventions against observation-baseline dependence.
 
-The defect, measured on TESS: `Spearman(label, baseline_days) = +0.3874`, and the
-branch model reads it at **+0.5155** — above its own labels. The catalogue
-promotes what it has looked at for longest, so in the training labels the
-association is real, and a model that learns it is learning something true about
-the catalogue and useless about the sky. For the deployment use — ranking
-candidates for follow-up — it is worse than useless: it promotes targets that
-already received attention over under-observed ones that may deserve it.
+The catalogue promotes what it has looked at longest, so in the training labels
+the association between baseline and label is real — a model learning it learns
+something true about the catalogue and useless about the sky. For ranking
+follow-up it is worse than useless: it promotes targets that already received
+attention. `synthetic_negatives` adds rows carrying no such association.
 
-`synthetic_negatives` attacks it by adding rows whose labels carry no baseline
-association. This module attacks the *existing* rows two ways:
-
-- **propensity weighting** (`propensity_weights`) — reweight each example by the
-  inverse of how likely its label was given its baseline, so the fitted loss sees
-  a population in which baseline and label are independent. Nothing is discarded.
-- **stratified negative sampling** (`stratified_negative_sample`) — resample the
-  negatives so their baseline distribution matches the positives'. Rows are
-  discarded, and the count is reported rather than absorbed.
-
-**Which to prefer is an empirical question and stage 8 pre-registered it as one:
-each runs as its own arm against a common control.** They are not
-interchangeable. Weighting keeps every row and pays in variance — a handful of
-rare-stratum examples can end up carrying most of the gradient. Sampling keeps
-the effective sample size honest and pays in discarded data.
-
-**The failure mode both share.** An intervention that silently does nothing —
-weights that are all 1.0 because the propensity model saw one stratum, a
-"stratified" sample that is the original negatives in a different order — leaves
-training unchanged while the run is recorded as an arm that was tried and
-failed. Both entry points therefore measure their own effect on the correlation
-and **raise when it has not moved**, rather than trusting that they ran.
+This module reweights or resamples the existing rows: `propensity_weights` by
+the inverse of how likely each label was given its baseline, discarding nothing
+and paying in variance; `stratified_negative_sample` by matching the negatives'
+baseline distribution to the positives'. Both raise when the correlation has not
+moved. Numbers: `docs/experiments/stage-08-labels-and-negatives.md`.
 """
 
 from __future__ import annotations
@@ -101,18 +82,15 @@ def propensity_weights(
     """Inverse-propensity weights that decorrelate label from observation baseline.
 
     The propensity is `P(label = 1 | baseline stratum)`, estimated as the stratum's
-    own positive rate — a saturated model rather than a fitted logistic. With one
-    covariate and quantile strata there is nothing for a parametric fit to add,
-    and a saturated estimate cannot be misspecified, which matters when the whole
-    point is that the reweighted population be *exactly* balanced rather than
-    approximately so.
+    own positive rate — saturated rather than a fitted logistic. With one covariate
+    and quantile strata there is nothing for a parametric fit to add, and a saturated
+    estimate cannot be misspecified, which matters when the point is that the
+    reweighted population be *exactly* balanced rather than approximately so.
 
-    Weights are `1 / p` for positives and `1 / (1 - p)` for negatives, normalised
-    to mean 1 so the effective learning rate does not move with `n_strata`.
-
-    Raises when the reweighted correlation has not collapsed. A weighting that
-    silently did nothing is the expensive failure here: training runs, the arm is
-    recorded, and nothing was ever intervened upon.
+    Weights are `1 / p` for positives and `1 / (1 - p)` for negatives, normalised to
+    mean 1 so the effective learning rate does not move with `n_strata`. Raises when
+    the reweighted correlation has not collapsed: a weighting that silently did
+    nothing is the expensive failure, since training runs and the arm is recorded.
     """
     if "label" not in frame.columns:
         raise KeyError("propensity weighting needs a 'label' column")
@@ -221,15 +199,13 @@ def stratified_negative_sample(
     """Resample negatives so their baseline distribution matches the positives'.
 
     Returns positional indices into `frame` — every positive, plus the negatives
-    kept. Within each baseline stratum the negatives are cut to the positive
-    count, so the joint distribution of (baseline, label) becomes a product by
-    construction.
+    kept. Within each baseline stratum the negatives are cut to the positive count,
+    so the joint distribution of (baseline, label) becomes a product by construction.
 
-    Strata that hold positives but no negatives keep their positives and are
-    counted. The alternative — dropping those positives too — buys a cleaner
-    correlation by deleting the long-baseline planets that are the population
-    the product exists to rank, which would be optimising the metric against the
-    purpose.
+    Strata holding positives but no negatives keep their positives and are counted.
+    Dropping those positives too would buy a cleaner correlation by deleting the
+    long-baseline planets the product exists to rank — optimising the metric against
+    the purpose.
     """
     if "label" not in frame.columns:
         raise KeyError("stratified sampling needs a 'label' column")

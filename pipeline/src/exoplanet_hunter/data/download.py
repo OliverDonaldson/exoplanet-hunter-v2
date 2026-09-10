@@ -40,18 +40,16 @@ _KEPLER_FETCH_WORKERS = 6
 def _lightkurve_stdout_swap_disabled() -> Iterator[None]:
     """Neutralise lightkurve's ``@suppress_stdout`` for the duration.
 
-    It decorates ``SearchResult.download``/``download_all`` and saves/restores
-    the *process-global* ``sys.stdout`` around each call. Under concurrent
-    workers the pairs interleave: one thread saves another's devnull as the
-    "original", the owning thread's ``with open(...)`` closes it, and the
-    restore leaves ``sys.stdout`` pointing at a closed file for the rest of the
-    process. Every later write then raises ``ValueError: I/O operation on
-    closed file`` — including from inside ``download_all``, which turns good
-    downloads into "download error" failures, and from tqdm's flush, which
-    aborts the run outright.
+    It decorates ``SearchResult.download``/``download_all`` and saves and restores
+    the *process-global* ``sys.stdout`` around each call. Under concurrent workers
+    the pairs interleave: one thread saves another's devnull as the "original", the
+    owning thread closes it, and the restore leaves ``sys.stdout`` pointing at a
+    closed file for the rest of the process. Every later write then raises
+    ``ValueError: I/O operation on closed file`` — from inside ``download_all``,
+    turning good downloads into failures, and from tqdm's flush, aborting the run.
 
-    ``functools.wraps`` records the undecorated functions on ``__wrapped__``,
-    so the suppression can simply be lifted while threads are running.
+    ``functools.wraps`` records the undecorated functions on ``__wrapped__``, so the
+    suppression can simply be lifted while threads are running.
     """
     from lightkurve.search import SearchResult
 
@@ -148,16 +146,10 @@ class DownloadResult:
 class LightCurveDownloader:
     """Resumable bulk downloader for TESS and Kepler light curves.
 
-    The downloader keeps a JSON manifest at ``cache_dir/manifest.json`` mapping
-    target ID → DownloadResult metadata, so re-runs skip prior successes and
-    don't repeatedly hammer MAST for known failures.
-
-    Parameters
-    ----------
-    cache_dir : Where TESS raw FITS land (also the default for Kepler).
-    kepler_cache_dir : If set, Kepler FITS go here instead (e.g. external USB).
-    author : ``"SPOC"`` for TESS, ``"Kepler"`` for Kepler (auto-dispatched).
-    cadence : 120 for 2-min TESS; None lets lightkurve pick the best.
+    A JSON manifest at ``cache_dir/manifest.json`` maps target ID to DownloadResult
+    metadata, so re-runs skip prior successes and do not repeatedly hammer MAST for
+    known failures. ``kepler_cache_dir`` sends Kepler FITS elsewhere (an external
+    disk); ``author`` and ``cadence`` are auto-dispatched per mission.
     """
 
     _MISSION_CFG: ClassVar[dict[str, dict[str, Any]]] = {
@@ -481,20 +473,10 @@ class LightCurveDownloader:
     ) -> list[Path]:
         """Download every Kepler LLC FITS for a KIC from archive.stsci.edu.
 
-        Path scheme::
-
-            https://archive.stsci.edu/pub/kepler/lightcurves/{KIC[:4]}/{KIC:09d}/
-
-        Returns the list of local FITS paths (one per quarter).
-
-        Raises
-        ------
-        FileNotFoundError
-            Listing returned 404 or contains no LLC files (permanent gap —
-            this KIC has no Kepler data).
-        requests.RequestException
-            Network / HTTP error against the archive (transient — the caller
-            may fall back to the CAOM search path).
+        Path scheme `pub/kepler/lightcurves/{KIC[:4]}/{KIC:09d}/`; returns one local
+        path per quarter. `FileNotFoundError` means a permanent gap — 404 or no LLC
+        files, so this KIC has no Kepler data. `requests.RequestException` is transient
+        and the caller may fall back to the CAOM search path.
         """
         kic_padded = f"{kic:09d}"
         listing_url = f"{_KEPLER_ARCHIVE_BASE}/{kic_padded[:4]}/{kic_padded}/"
@@ -570,19 +552,12 @@ class LightCurveDownloader:
     ) -> list[DownloadResult]:
         """Download a list of targets with progress logging.
 
-        Parameters
-        ----------
-        target_ids : List of TIC/KIC IDs.
-        missions   : Parallel list of mission strings ("TESS"/"Kepler").
-                     If None, defaults to "TESS" for all.
-        force      : Re-download even when a target is already cached.
-        workers    : Concurrent download threads. ``1`` (default) keeps the
-                     original sequential behaviour; higher values overlap the
-                     30 s-3 min MAST round-trips. Keep it modest (~4) to stay
-                     polite to the archive. Duplicate ``(mission, target_id)``
-                     pairs are collapsed so two threads never rewrite the same
-                     FITS under each other's memory-map — the SIGBUS failure
-                     mode; the shared manifest is lock-guarded.
+        `missions` is a parallel list defaulting to TESS. `workers` overlaps the 30 s to
+        3 min MAST round-trips; keep it modest (~4) to stay polite to the archive.
+
+        Duplicate `(mission, target_id)` pairs are collapsed so two threads never rewrite
+        the same FITS under each other's memory-map — the SIGBUS failure mode — and the
+        shared manifest is lock-guarded.
         """
         from tqdm.auto import tqdm
 

@@ -1,18 +1,16 @@
 """Per-candidate vetting plots.
 
-Six-panel diagnostic figure that astronomers use to triage a TOI:
+Six-panel diagnostic figure used to triage a TOI:
 
   1. Phase-folded global view (full phase range).
   2. Phase-folded local view (zoomed on transit).
-  3. Odd vs even transit overlay (large Δdepth → eclipsing binary).
-  4. BLS periodogram (look for harmonics, dominant alternate periods).
-  5. Centroid shift (large shift → background eclipsing binary, BEB).
-  6. Ensemble probability with MC-Dropout + per-fold uncertainty.
+  3. Odd vs even transit overlay (large depth difference -> eclipsing binary).
+  4. BLS periodogram (harmonics, dominant alternate periods).
+  5. Centroid shift (large shift -> background eclipsing binary).
+  6. Ensemble probability with MC-Dropout and per-fold uncertainty.
 
-Inputs are a raw lightkurve object (must still contain MOM_CENTR1/2 for the
-centroid panel) and a CandidateReport carrying ephemeris + ensemble score.
-Optional uncertainty fields (fold_means, prob_p10/p90, fold_disagree,
-mc_disagree) come from ``scripts/score_candidates.py`` output.
+Inputs are a raw lightkurve object, which must still carry MOM_CENTR1/2 for the
+centroid panel, and a CandidateReport carrying ephemeris and ensemble score.
 """
 
 from __future__ import annotations
@@ -337,24 +335,10 @@ def vetting_figure(
 ) -> Path:
     """Generate and save a six-panel vetting figure.
 
-    Parameters
-    ----------
-    lc
-        Raw lightkurve object (must still carry MOM_CENTR1/2 for the
-        centroid panel). Cleaned + flattened internally for the phase-folded
-        panels unless ``flat_lc`` is supplied.
-    report
-        CandidateReport with ephemeris + ensemble score.
-    out_path
-        Where to save the PNG.
-    flat_lc
-        Pre-flattened lightcurve. If supplied, we skip clean+flatten here.
-    fold_means, prob_p10, prob_p90, fold_disagree, mc_disagree
-        Uncertainty fields from ``scripts/score_candidates.py`` parquet.
-    threshold
-        Decision boundary line drawn on the probability panel.
-    mission
-        Label for the figure title.
+    `lc` must still carry MOM_CENTR1/2 for the centroid panel; it is cleaned and
+    flattened internally unless `flat_lc` is supplied. The uncertainty arguments
+    come from `scripts/score_candidates.py`'s parquet, and `threshold` draws the
+    decision boundary on the probability panel.
     """
     import matplotlib.pyplot as plt
 

@@ -33,16 +33,16 @@ def pink_noise_snr(
     *,
     min_points: int = 5,
 ) -> PinkNoiseResult | None:
-    """SNR = depth / sigma_tr with sigma_tr = sqrt(sig_w²/n + sig_r²/N_tr).
+    """SNR = depth / sigma_tr with sigma_tr = sqrt(sig_w^2/n + sig_r^2/N_tr).
 
-    depth (Eq 1): mean out-of-transit minus mean of points within half a
-    duration of the transit centre. sig_w: std of the flux after masking
-    within one duration of the centres. sig_r (Eq 3): the light curve is
-    binned in time with bin width = duration; sig_r² = std(bin means)² minus
-    the value expected for uncorrelated noise, floored at 0 (white-dominated
-    curves). Deviation from the paper: unweighted means — single-cadence
-    SPOC/Kepler errors are near-homoscedastic per target and the serving
-    path carries no per-point uncertainties.
+    depth (Eq 1) is mean out-of-transit minus the mean within half a duration of the
+    transit centre; sig_w is the std after masking within one duration of the
+    centres; sig_r (Eq 3) bins the curve at the transit duration and subtracts the
+    variance expected for uncorrelated noise, floored at 0.
+
+    Deviation from the paper: unweighted means — single-cadence SPOC and Kepler
+    errors are near-homoscedastic per target, and the serving path carries no
+    per-point uncertainties.
     """
     ok = np.isfinite(time) & np.isfinite(flux)
     t, f = time[ok], flux[ok]

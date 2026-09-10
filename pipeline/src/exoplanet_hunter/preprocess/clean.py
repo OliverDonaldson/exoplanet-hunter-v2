@@ -28,17 +28,12 @@ def clean_lightcurve(
 ) -> lk.LightCurve:
     """Drop NaNs and sigma-clip upper outliers only.
 
-    Two-sided sigma clipping (the lightkurve default) would treat deep
-    transit dips as negative outliers and delete them. We clip only the
-    *upper* tail (cosmic rays, scattered-light spikes, pointing jumps);
-    anything real on the lower tail is kept and handled by the flattening
-    + masking step downstream.
+    Two-sided clipping — the lightkurve default — would treat deep transit dips as
+    negative outliers and delete them. Only the upper tail is clipped (cosmic rays,
+    scattered light, pointing jumps); anything real on the lower tail is kept and
+    handled by flattening and masking downstream.
 
-    Parameters
-    ----------
-    lc          : input lightkurve LightCurve.
-    sigma_clip  : reject points more than this many sigma above the rolling median.
-    min_points  : raise ValueError if fewer good points remain.
+    Raises when fewer than `min_points` good cadences remain.
     """
     cleaned = lc.remove_nans().remove_outliers(sigma_upper=sigma_clip, sigma_lower=np.inf)
     if len(cleaned) < min_points:
@@ -78,17 +73,12 @@ def flatten_lightcurve(
 ) -> lk.LightCurve:
     """Remove long-term stellar variability with a Savitzky-Golay filter.
 
-    `window_length` is in cadences, not days. For 2-min cadence (30 / hour),
-    window 301 ≈ 10 hours — comfortably wider than typical short-period
-    transits (1-6 h) so the transit dip is preserved.
+    `window_length` is in cadences, not days: at 2-min cadence, 301 is about 10
+    hours, comfortably wider than a 1-6 h transit so the dip survives.
 
-    If `period`, `t0`, and `duration` are supplied, the in-transit cadences
-    are masked out of the fit so the spline doesn't flatten the dip itself
-    (the classic "filter learns the transit" failure mode). This requires
-    knowing the ephemeris up-front — typically from the TCE / exoplanet
-    archive catalog. Without an ephemeris, falls back to unmasked flattening.
-
-    Returns a new LightCurve with the trend divided out.
+    Given `period`, `t0` and `duration`, the in-transit cadences are masked out of
+    the fit so the spline cannot flatten the dip itself — the classic "filter learns
+    the transit" failure. Without an ephemeris it falls back to unmasked flattening.
     """
     mask = None
     if period is not None and t0 is not None and duration is not None:

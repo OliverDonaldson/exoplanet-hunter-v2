@@ -350,34 +350,17 @@ def build_view_set(
 ) -> ViewSet:
     """Build every view for one (light curve, ephemeris).
 
-    Parameters
-    ----------
-    lc              : cleaned and flattened light curve.
-    period, t0      : ephemeris [days]; `t0` in the light curve's own time system.
-    duration        : full transit duration [days], not hours.
-    trend_lc        : the same target *before* flattening. The trend view shows
-                      what detrending removed — a transit the spline absorbed
-                      shows up here and nowhere else. Omitted, the branch is all
-                      zeros with `present` 0, which is the honest encoding of
-                      "not available" rather than "flat".
-    raw_lc          : the *unprocessed* curve, for the centroid branch —
-                      `clean_lightcurve` drops `MOM_CENTR1/2`, so it cannot be
-                      recovered downstream. Omitted, that branch reads as absent
-                      rather than as flat.
-    momentum_dumps  : flagged cadence times from `momentum_dumps.parquet`, in
-                      the light curve's own time system. Omitted, that branch is
-                      all zeros with `present` 0 — correct for Kepler and K2,
-                      which never saw a TESS reaction wheel, and the honest
-                      encoding for a TESS row whose dump table was not supplied.
-                      Folded on `raw_lc`'s cadence grid when one is given, so it
-                      counts the cadences the target actually had rather than
-                      the ones that survived cleaning.
-    difference_images : this target's per-sector DV difference images. Omitted,
-                      the branch is all zeros with `present` 0 — which is the
-                      right encoding for the majority of the set, since Kepler
-                      and K2 have no DV report at all. A target that *has* a
-                      report but whose every sector DV declined also lands here,
-                      and both are distinct from a stamp measured flat.
+    `period`, `t0` and `duration` are days, `t0` in the curve's own time system.
+    Each optional input is a branch: `trend_lc` shows what detrending removed,
+    `raw_lc` carries `MOM_CENTR1/2` for the centroid branch (cleaning drops them),
+    `momentum_dumps` the flagged cadence times, `difference_images` the per-sector
+    DV stamps.
+
+    Omitting any of them yields an all-zero view with `present` 0 — the honest
+    encoding of "not available", which is distinct from a branch measured flat.
+    That distinction is the whole point: Kepler and K2 have no DV report and never
+    saw a TESS reaction wheel, so absence is the correct reading for most of the
+    set and must not read as evidence.
     """
     if not np.isfinite(period) or period <= 0:
         raise ValueError(f"invalid period: {period}")

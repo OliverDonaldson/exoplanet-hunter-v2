@@ -36,20 +36,15 @@ class Views:
 def _normalise(view: np.ndarray) -> np.ndarray:
     """Median-subtract and depth-divide.
 
-    Subtracting the median puts the baseline at 0; dividing by |min - median|
-    rescales the deepest dip to -1, regardless of absolute transit depth.
-    This makes the model see *transit shape*, not *transit magnitude*.
+    Subtracting the median puts the baseline at 0; dividing by |min - median| scales
+    the deepest dip to -1 whatever the absolute depth, so the model sees transit
+    *shape*, not magnitude.
 
-    NaN handling: uses nan-aware median/min so that empty bins (NaN, from
-    long data gaps after fold-and-bin) don't poison the whole view. Any
-    remaining NaNs after normalisation are filled with 0 (the baseline) —
-    the model treats them as "no flux deviation here", which is the right
-    inductive bias for a missing observation.
-
-    Raises ValueError if the entire input is NaN — this signals a
-    fundamentally bad target that build_dataset.py should skip and count as
-    preprocess_error (rather than silently shipping an all-NaN row that
-    poisons gradients during training).
+    Nan-aware median and min keep empty bins — from long gaps after fold-and-bin —
+    from poisoning the view, and any NaN left after normalisation is filled with 0,
+    the baseline, which reads as "no flux deviation here". An all-NaN input raises:
+    that is a fundamentally bad target for `build_dataset.py` to count as a
+    preprocess error, rather than an all-NaN row poisoning gradients.
     """
     if not np.isfinite(view).any():
         raise ValueError("view is entirely NaN — no usable cadences after folding")
@@ -73,15 +68,9 @@ def build_views(
 ) -> Views:
     """Build the global + local views for a single (lc, period, t0, duration).
 
-    Parameters
-    ----------
-    lc              : flattened, cleaned light curve.
-    period          : orbital period [days].
-    t0              : transit midpoint epoch (BJD - 2457000) [days].
-    duration        : full transit duration [days] (NOT hours).
-    global_bins     : number of bins spanning the full phase.
-    local_bins      : number of bins spanning ±local_durations of the transit.
-    local_durations : half-width of the local window in transit durations.
+    `lc` is flattened and cleaned, `period` and `duration` are days (not hours), and
+    `t0` is the transit midpoint in BTJD. `local_durations` is the half-width of the
+    local window in transit durations.
     """
     if not np.isfinite(period) or period <= 0:
         raise ValueError(f"invalid period: {period}")
@@ -128,17 +117,14 @@ def flatten_and_build_views(
     """Mask-flatten a cleaned light curve at a known ephemeris, then bin into views.
 
     The shared inference-time preprocessing tail used by both the API's
-    `TargetScorer` and the bulk scorer
-    (`scripts/score_candidates.py`): the transit is masked out of the
-    Savitzky-Golay fit so the spline cannot absorb the dip, then the
-    masked-flat curve is phase-folded into (global, local) views. Keeping this
-    in one place means a single source of truth for inference preprocessing
-    (and a ready entry point for a future interactive scorer).
+    `TargetScorer` and the bulk scorer: the transit is masked out of the
+    Savitzky-Golay fit so the spline cannot absorb the dip, then the masked-flat
+    curve is phase-folded into (global, local) views. One place, so inference
+    preprocessing has a single source of truth.
 
-    `preprocess_cfg` is the Hydra `preprocess` config node (i.e. `cfg.preprocess`),
-    mirroring the `model_cfg: Any` convention used by `build_cnn_dualview`. The
-    caller is responsible for cleaning (`clean_lightcurve`) first, since some
-    callers also need the cleaned curve for an unmasked BLS period search.
+    `preprocess_cfg` is the Hydra `preprocess` config node, mirroring the
+    `model_cfg: Any` convention of `build_cnn_dualview`. The caller cleans first,
+    since some callers also need the cleaned curve for an unmasked BLS search.
     """
     lc = flatten_lightcurve(
         cleaned_lc,

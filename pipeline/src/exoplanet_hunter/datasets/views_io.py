@@ -8,11 +8,9 @@
     tic_ids        (N,)      int64
     aux_features   (N, A)    float32  (optional)
 
-This module is the reader side of that contract (ported from the V1
-data_module). The in-RAM `LightcurveDataset` that used to live next to it is
-gone — training streams from TFRecord shards via `datasets.pipeline` instead.
-`shard_views.py` converts an .npz into shards; the RF baseline still loads
-the .npz directly (its handcrafted features want plain arrays).
+This module is the reader side of that contract. Training streams from TFRecord
+shards via `datasets.pipeline` instead; `shard_views.py` converts an .npz into
+shards, and the RF baseline still loads the .npz directly for plain arrays.
 """
 
 from __future__ import annotations

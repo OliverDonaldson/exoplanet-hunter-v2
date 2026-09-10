@@ -2,16 +2,15 @@
 
 CV ROC-AUC measures *ranking*; it does not answer the detection-efficiency
 question (Christiansen 2015; Coughlin 2015, KSCI-19096): at transit S/N X, what
-fraction of genuine planets does the model actually pass at the serving
-threshold? Inject synthetic transits of known depth/period into real light
-curves, score them through the full preprocess -> ensemble path *with the
-injected ephemeris*, and tally recoveries per S/N bin.
+fraction of genuine planets does the model pass at the serving threshold?
+Inject synthetic transits of known depth and period into real light curves,
+score them through the full preprocess -> ensemble path *with the injected
+ephemeris*, and tally recoveries per S/N bin.
 
 Because the ephemeris is supplied, this is the *classifier* analogue of the
-pipeline injection tests — it measures our model's completeness, not a period
-search. This module holds the model-independent core (injection physics, transit
-S/N, per-bin aggregation); the runner that drives it through the ensemble lives
-in a script so it can target whichever run the registry serves.
+pipeline injection tests — completeness, not a period search. The
+model-independent core lives here; the runner that drives it through the
+ensemble lives in a script, so it can target whichever run the registry serves.
 """
 
 from __future__ import annotations

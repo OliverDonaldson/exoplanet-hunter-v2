@@ -1,17 +1,16 @@
 """Recover the candidates the pipeline cannot see at all.
 
-744 scored candidates come back `no_fits`: SPOC never produced a 2-minute light
-curve for them, so they have no views, no score, and no way into the model.
-They are not badly scored — they are absent. TESS also images them in the
-full-frame images, and several groups publish light curves derived from those,
-so this fetches one per target and puts them back in scope.
+Several hundred scored candidates come back `no_fits`: SPOC never produced a
+2-minute light curve for them, so they have no views and no score. They are not
+badly scored — they are absent. TESS also images them in the full-frame images
+and several groups publish light curves derived from those, so this fetches one
+per target and puts them back in scope.
 
-Tries TESS-SPOC first (same pipeline lineage as our 2-minute data) then QLP,
-and records which author supplied each target: two detrendings mixed is a
-systematic worth being able to mask on later.
-
-Cached in `data/raw/tess/ffi/`, never beside the 2-min light curves, because FFI cadence is 200 s to
-30 min against SPOC's 120 s and the two must not be confused downstream.
+Tries TESS-SPOC first (same pipeline lineage as our 2-minute data) then QLP, and
+records which author supplied each target: two detrendings mixed is a systematic
+worth being able to mask on later. Cached in `data/raw/tess/ffi/`, never beside
+the 2-min curves, because FFI cadence is 200 s to 30 min against SPOC's 120 s
+and the two must not be confused downstream.
 """
 
 from __future__ import annotations

@@ -1,19 +1,16 @@
 """Cross-validated training for the per-diagnostic branch model.
 
-Same evaluation contract as `train.py`: StratifiedGroupKFold with group =
-tic_id, a `stratified_inner_split` for early stopping and the Platt fit, and a
-`cv_summary.json` in the schema the promotion gate reads. Reusing that schema
-matters — two implementations of it would drift, and the gate is what decides
-whether a run is better than the champion.
+Same evaluation contract as `train.py`: StratifiedGroupKFold grouped on tic_id,
+a `stratified_inner_split` for early stopping and the Platt fit, and a
+`cv_summary.json` in the schema the promotion gate reads. Two implementations
+of that schema would drift, and the gate is what decides whether a run beats
+the champion.
 
 Also the same *artefact* contract, which it did not have until 2026-08-06: a
 per-fold checkpoint and calibration bundle, and every metric measured on the
-reloaded checkpoint rather than on whatever `fit()` left in memory. Run 1 of
-stage 4 (old 2(a)) wrote no checkpoint at all, so the model behind its numbers
-no longer exists.
-
-Nothing here promotes anything. It writes a summary; comparing it to the
-champion is `promotion_gate.py`'s job.
+reloaded checkpoint rather than on whatever `fit()` left in memory. Stage 4's
+run 1 wrote no checkpoint, so the model behind its numbers no longer exists.
+Nothing here promotes; that is `promotion_gate.py`'s job.
 """
 
 from __future__ import annotations
@@ -76,21 +73,12 @@ BUNDLE_NAME = "cnn_calibrator.joblib"
 GATE_FPR = 0.01
 
 #: Per-member statistics whose spread `summary.variance` decomposes, as
-#: `(per-member key in each fold row, prefix on the reported sd)`.
-#:
-#: AUC was the only one until 2026-08-08, and the omission mattered: **recall
-#: @1% FPR is the criterion that rejected all four arms of stage 4** — run 3 on
-#: 0.145 against the champion's 0.307 — while having no variance estimate at
-#: all. AUC's floor was measured (`seed_sd 0.0081`, `fold_sd 0.0094`) and "a
-#: margin under ~0.009 is not a decision" adopted from it; the statistic doing
-#: the actual rejecting never got the same treatment, so the capacity arm's
-#: 0.145 -> 0.236 could be neither believed nor dismissed.
-#:
-#: Two recall entries rather than one. `model_recall_at_1pct_fpr` mirrors the
-#: AUC exactly — the whole fold, every mission — and `model_gate_recall_...` is
-#: the same statistic over that fold's `GATE_MISSION` rows alone. They are not
-#: interchangeable: the gate reads TESS, which is ~44% of the rows, so the
-#: all-mission floor is measured on a population no decision is taken over.
+#: `(per-member key in each fold row, prefix on the reported sd)`. Recall @1% FPR
+#: is here because it is the criterion that rejected every stage 4 arm while
+#: having no variance estimate at all. The two recall entries are not
+#: interchangeable: the gate reads `GATE_MISSION`, so the all-mission floor would
+#: be measured on a population no decision is taken over. See
+#: `docs/experiments/stage-06-recall-floor.md`.
 VARIANCE_COMPONENTS = (
     ("model_roc_auc", ""),
     ("model_recall_at_1pct_fpr", "recall_"),
@@ -124,15 +112,14 @@ def _format_sd(value: float | None) -> str:
 def _component_sds(rows: list[dict], key: str) -> tuple[float | None, float | None]:
     """`(fold_sd, seed_sd)` for one per-member statistic.
 
-    A fold that recorded nothing for `key` — an empty list, which is how a fold
-    with no rows in the population reports itself — contributes to neither, so a
-    statistic nobody could measure comes back None rather than as a number
-    computed over the folds that happened to have data.
+    A fold that recorded nothing for `key` — an empty list, which is how a fold with
+    no rows in the population reports itself — contributes to neither, so a statistic
+    nobody could measure comes back None rather than computed over whichever folds
+    had data.
 
     A fold that recorded a *non-finite* value raises instead. NaN loses every
-    inequality, so a `recall_seed_sd` of NaN would read as "this margin is not
-    inside the noise" in exactly the comparison the number exists to arbitrate —
-    the same shape as the NaN that once promoted a degenerate run.
+    inequality, so a NaN `recall_seed_sd` would read as "this margin is not inside
+    the noise" in exactly the comparison the number exists to arbitrate.
     """
     per_fold = [list(r.get(key) or []) for r in rows]
     for fold, members in enumerate(per_fold):
@@ -152,17 +139,15 @@ def _component_sds(rows: list[dict], key: str) -> tuple[float | None, float | No
 def _variance_decomposition(rows: list[dict]) -> dict[str, float | None]:
     """Split the run's spread into seed variance and fold difficulty.
 
-    The `±` this project has been quoting is the spread of fold means within one
-    run, and it has been read as the run's own repeatability. They are different
-    quantities: it mixes how hard each fold is with how much a single training
-    draw wanders, and only the second says anything about whether a rerun would
-    land in the same place. `seed` is None until a fold trains more than one
-    model, because with one draw per fold there is nothing to measure it from.
+    The `±` this project quotes is the spread of fold means within one run, and it
+    has been read as the run's own repeatability. They are different quantities: it
+    mixes how hard each fold is with how far a single training draw wanders, and only
+    the second says whether a rerun would land in the same place. `seed` is None
+    until a fold trains more than one model, because one draw measures nothing.
 
     Reported for every entry in `VARIANCE_COMPONENTS`, so recall @1% FPR — the
-    criterion that has done all the rejecting — carries the error bar AUC has
-    had since 2026-08-08. Purely additive: the promotion gate reads named keys
-    and the AUC pair keeps its unprefixed names.
+    criterion that has done all the rejecting — carries an error bar. Purely
+    additive: the gate reads named keys and the AUC pair keeps its unprefixed names.
     """
     decomposition: dict[str, float | None] = {}
     for key, prefix in VARIANCE_COMPONENTS:
@@ -480,19 +465,17 @@ def _apply_baseline_intervention(
 ) -> tuple[pd.DataFrame, np.ndarray | None, dict[str, Any] | None]:
     """Stage 8's arm, applied to the run's index before any fold is cut.
 
-    Returns the index to train on, per-example weights or None, and a report to
-    carry into `run_config`.
+    Returns the index to train on, per-example weights or None, and a report for
+    `run_config`. Both arms act before the split deliberately: applied per fold they
+    would reweight against each fold's own baseline distribution, so the five folds
+    would train on five different interventions and the run-level number would
+    describe none of them.
 
-    **Both arms act before the split, and that is deliberate.** Applied per fold
-    they would resample or reweight against each fold's own baseline
-    distribution, so the five folds would train on five different
-    interventions and the run-level number would describe none of them.
-
-    The stratified arm returns a *smaller index*. Rows it drops never reach a
-    split, so they are absent from training, validation **and test** — which is
-    the honest reading: a model trained on a resampled population has not been
-    evaluated on the rows that population excluded, and quietly testing on them
-    would report a number for a population the model never saw.
+    The stratified arm returns a *smaller* index. Rows it drops never reach a split,
+    so they are absent from training, validation and test alike — a model trained on
+    a resampled population has not been evaluated on the rows that population
+    excluded, and quietly testing on them would report a number for a population the
+    model never saw.
     """
     arm = config.baseline_intervention
     if arm is None:
@@ -610,16 +593,11 @@ def run_cv(
 
     index, sample_weights, intervention = _apply_baseline_intervention(index, config)
     y = index["label"].to_numpy().astype(int)
-    # `group_tic` when the shard set carries it, `tic_id` otherwise.
-    #
-    # Stage 8's synthetic negatives are built *from* a real star's light curve,
-    # so a scrambled row and the row it came from are the same star seen twice.
-    # Grouping on `tic_id` alone would let them fall in different folds, and the
-    # model would then be tested on a star whose own light curve — noise, gaps,
-    # systematics and all — it had already trained on. That is the leakage the
-    # grouped split exists to prevent, arriving through a door the split cannot
-    # see, because the synthetic row carries a `tic_id` of its own so the split
-    # and weight tables stay one-to-one.
+    # `group_tic` when the shard set carries it, `tic_id` otherwise. A synthetic
+    # negative and the row it was built from are the same star seen twice, and
+    # each carries its own `tic_id`, so grouping on `tic_id` alone would split
+    # them across folds — the leakage the grouped split exists to prevent,
+    # arriving through a door the split cannot see.
     group_column = "group_tic" if "group_tic" in index.columns else "tic_id"
     groups = index[group_column].to_numpy()
     if group_column == "group_tic":

@@ -1,23 +1,16 @@
-"""Dual-view 1D CNN — branch-3 architecture.
+"""Dual-view 1D CNN — branch-3 architecture, the served model.
 
-Builds on Shallue & Vanderburg 2018 (AstroNet) with three additions:
+Shallue & Vanderburg 2018 (AstroNet) with three additions: Squeeze-and-
+Excitation channel attention after each conv block and before MaxPool (Hu 2018,
+placed per Xie 2025 Fig. 1); Multi-Head Attention with residual and LayerNorm at
+the end of each conv tower, applied bilaterally to global and local (Islam 2026
+§III.D); and a residual late-fusion head whose linear shortcut keeps the fusion
+path from stagnating before the encoders converge.
 
-  1. Squeeze-and-Excitation channel attention after each conv block, before
-     MaxPool (Hu et al. 2018; placement per Xie et al. 2025, Fig. 1).
-  2. Multi-Head Attention with residual+LayerNorm at the end of each conv
-     tower, applied to the temporal feature map before GlobalAveragePool
-     (ExoNet, Islam 2026, §III.D — applied bilaterally to global and local).
-  3. Residual late-fusion head: 2-layer MLP with a linear shortcut from the
-     concatenated stream embeddings to the head output dim, preventing
-     gradient stagnation in the fusion path before the encoders converge
-     (ExoNet, Islam 2026, §III.D).
-
-Conv towers retain ReLU. The fully-connected head uses LeakyReLU(α=0.1)
-matching Xie et al. 2025 §2.2 literally — they reserve LeakyReLU for the
-residual head, not the conv tower.
-
-Dropout in the FC head stays training=True so MC Dropout uncertainty
-estimation (`models/uncertainty.py`) keeps working at inference.
+Conv towers retain ReLU; the fully-connected head uses LeakyReLU(0.1), matching
+Xie 2025 §2.2 literally — they reserve it for the residual head, not the tower.
+Dropout in the head stays `training=True` so MC-Dropout uncertainty
+(`models/uncertainty.py`) keeps working at inference.
 """
 
 from __future__ import annotations
@@ -182,12 +175,8 @@ def build_cnn_dualview(
 ) -> Model:
     """Construct the dual-view CNN as a Keras Functional `Model`.
 
-    Parameters
-    ----------
-    model_cfg : the `model` Hydra group (`conf/model/cnn_dualview*.yaml`).
-    global_input_length, local_input_length : sequence lengths from preprocessing.
-    aux_input_dim : dimension of the optional auxiliary stellar-feature vector.
-                    Pass None / 0 to disable the wide path.
+    `model_cfg` is the `model` Hydra group; the input lengths come from
+    preprocessing. Pass `aux_input_dim` None or 0 to disable the wide path.
     """
     use_aux = bool(getattr(model_cfg, "use_aux_features", False)) and bool(aux_input_dim)
 
