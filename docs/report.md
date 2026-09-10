@@ -157,8 +157,14 @@ False Positive table** [@bryson2015], which rested on Follow-up Observation
 Program working-group vetting against follow-up data; that table is no longer
 served by the archive over TAP or its retired legacy API, so
 `data/catalog.py::_query_certified_fp` reconstructs the criterion from the DR25
-KOI table instead. About 79% of the bare cumulative false positives pass it; the
-rest are dropped as disputed or unvetted.
+KOI table instead. About 79% of the bare cumulative false positives pass it —
+3,813 of 4,839. The 1,026 that do not are dropped almost entirely on DR25
+membership rather than on the score: 893 are absent from the DR25 table and 129
+are dispositioned CANDIDATE there, against **four** that are DR25 false
+positives failing the 0.5 threshold. The threshold is close to inert, because
+`koi_score` is near-degenerate on the class it filters — 89% of DR25 false
+positives score below 0.001. Measured 2026-09-10; see the
+[comparability audit](experiments/benchmark-comparability-2026-09-10.md) §2.
 
 So a negative here means *the Robovetter rejected it consistently under
 perturbation* — stronger than "not yet confirmed", weaker than "certified by the
