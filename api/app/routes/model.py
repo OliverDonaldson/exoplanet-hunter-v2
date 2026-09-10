@@ -28,6 +28,7 @@ from app.schemas import (
     ModelSummaryResponse,
     NoiseFloor,
     RocPoint,
+    TrainingHistoryResponse,
 )
 
 router = APIRouter()
@@ -349,3 +350,35 @@ def model_summary() -> ModelSummaryResponse:
         n_scored=n_scored,
         n_high_confidence=n_high_confidence,
     )
+
+
+@router.get("/model/training-history", response_model=TrainingHistoryResponse)
+def training_history() -> TrainingHistoryResponse:
+    """The served run's per-epoch curves, exported from MLflow ahead of time.
+
+    Not read from MLflow at request time: the store is 33 MB of local
+    development state and never enters the serving image, which is why the
+    console said for months that the history was not persisted. It is —
+    `pipeline/scripts/export_training_history.py` writes the four series into a
+    small file git carries. See issue #25.
+
+    A run with no exported file is a 404 naming the command that writes one,
+    not an empty body: the console distinguishes "this run has no history" from
+    "the endpoint returned nothing" and must be able to.
+    """
+    models_dir = Path(os.environ.get("MODEL_DIR", _ROOT / "models"))
+    registry_path = models_dir / "registry.json"
+    if not registry_path.exists():
+        raise HTTPException(503, detail="No promoted model in the registry yet.")
+    run_id = str(json.loads(registry_path.read_text())["run_id"])
+
+    path = models_dir / "history" / f"{run_id}.json"
+    if not path.exists():
+        raise HTTPException(
+            404,
+            detail=(
+                f"No training history exported for run {run_id[:8]}. Run "
+                "`python pipeline/scripts/export_training_history.py`."
+            ),
+        )
+    return TrainingHistoryResponse(**json.loads(path.read_text()))

@@ -805,6 +805,127 @@ function metricBlock(label, value, err, accent) {
     </div>`;
 }
 
+/* ── training history ─────────────────────────────────────
+   The Model page said for months that per-epoch metrics "are not persisted by
+   the training job yet". They were: MLflow's autologger wrote them into the
+   run's five child runs all along. What was missing was a path from the local
+   MLflow store — 33 MB, and never in the serving image — to the browser, which
+   is what /model/training-history is. Issue #25.
+
+   Fold 0 of the served run logged its 31 summary metrics and no epoch series,
+   so the panel plots four curves for a five-fold run and says which fold is
+   absent. A chart that quietly showed four would be the same defect in a
+   quieter form. */
+
+/* Viridis, the report figure's scale, shifted brighter (0.35-0.95 rather than
+   0.15-0.85) because #050608 swallows the dark end. Indexed by fold, so a fold
+   is the same colour here and in docs/figures/training_curves.png. */
+const FOLD_COLOURS = ['#2f6c8e', '#21918c', '#2fb47c', '#7ad151', '#dfe318'];
+
+function historyFolds() {
+  const h = SERVED.trainingHistory;
+  return h && Array.isArray(h.folds) ? h.folds.filter(foldHistory => foldHistory.epochs > 0) : [];
+}
+
+function trainingHistoryCaption() {
+  const h = SERVED.trainingHistory;
+  if (!h) return 'Per-epoch loss and ROC-AUC';
+  const missing = h.folds.filter(foldHistory => !foldHistory.epochs).map(foldHistory => foldHistory.fold);
+  const monitor = `early stopping on ${esc(h.monitor)} (${esc(h.monitor_mode)}, patience ${h.patience}), best weights restored`;
+  return missing.length
+    ? `Per-epoch loss and ROC-AUC · ${h.n_folds_with_history} of ${h.n_folds} folds · fold ${missing.join(', ')} logged none · ${monitor}`
+    : `Per-epoch loss and ROC-AUC · ${h.n_folds_with_history} folds · ${monitor}`;
+}
+
+/** One row per epoch, every fold's series on it. Folds ran 69 to 83 epochs, so
+    the short ones leave holes; renderChart breaks the line there rather than
+    joining across. */
+function historyRows(folds, keys) {
+  const n = Math.max(...folds.map(foldHistory => foldHistory.epochs));
+  return Array.from({ length: n }, (_, e) => {
+    const row = { epoch: e };
+    folds.forEach(foldHistory => keys.forEach(k => { if (e < foldHistory.epochs) row[`${k}${foldHistory.fold}`] = foldHistory[k][e]; }));
+    return row;
+  });
+}
+
+function historySeries(folds, trainKey, valKey) {
+  return folds.flatMap(foldHistory => [
+    { key: `${trainKey}${foldHistory.fold}`, stroke: FOLD_COLOURS[foldHistory.fold], width: 1, opacity: 0.3,
+      name: `fold ${foldHistory.fold} train`, hideTooltip: true },
+    { key: `${valKey}${foldHistory.fold}`, stroke: FOLD_COLOURS[foldHistory.fold], width: 1.6, name: `fold ${foldHistory.fold}` },
+  ]);
+}
+
+function paintTrainingHistory() {
+  const host = document.getElementById('training-history');
+  if (!host) return;
+  const folds = historyFolds();
+  if (!folds.length) {
+    host.innerHTML = pendingPanel(SERVED.trainingHistory
+      ? 'The served run logged no per-epoch history for any fold.'
+      : esc(SERVED.trainingHistoryError || '/model/training-history did not answer.'));
+    return;
+  }
+
+  host.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:1rem">
+      ${folds.map(foldHistory => `<div style="display:flex;align-items:center;gap:0.4rem">
+        <span style="width:14px;height:2px;background:${FOLD_COLOURS[foldHistory.fold]};display:inline-block"></span>
+        <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:#8A8FA8">fold ${foldHistory.fold}</span>
+      </div>`).join('')}
+      <span style="font-family:'JetBrains Mono';font-size:0.62rem;color:rgba(138,143,168,0.7)">faint = training · solid = validation</span>
+    </div>
+    <div class="charts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
+      <div><div class="stat-label" style="margin-bottom:0.75rem;font-size:0.6rem">Loss</div><div class="chart-wrap" id="chart-history-loss"></div></div>
+      <div><div class="stat-label" style="margin-bottom:0.75rem;font-size:0.6rem">ROC-AUC</div><div class="chart-wrap" id="chart-history-auc"></div></div>
+    </div>
+    <div data-fit-table="history" style="overflow-x:auto;margin-top:1.5rem">
+      <table style="width:100%;border-collapse:collapse;min-width:520px">
+        <thead><tr>
+          ${['Fold', 'Epochs run', 'Stopped at', 'Weights from', 'Val ROC-AUC there'].map(h =>
+            `<th style="padding:0.5rem 0.75rem;text-align:left;font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;border-bottom:1px solid rgba(255,255,255,0.08);white-space:nowrap">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>
+          ${folds.map(foldHistory => {
+            const best = has(foldHistory.restored_epoch) && Array.isArray(foldHistory.val_auc) ? foldHistory.val_auc[foldHistory.restored_epoch] : null;
+            return `<tr class="data-row" style="cursor:default">
+              <td style="padding:0.7rem 0.75rem"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:${FOLD_COLOURS[foldHistory.fold]}">fold ${foldHistory.fold}</span></td>
+              <td style="padding:0.7rem 0.75rem"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${foldHistory.epochs}</span></td>
+              <td style="padding:0.7rem 0.75rem"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#8A8FA8;font-variant-numeric:tabular-nums">${has(foldHistory.stopped_epoch) ? foldHistory.stopped_epoch : '—'}</span></td>
+              <td style="padding:0.7rem 0.75rem"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2;font-variant-numeric:tabular-nums">${has(foldHistory.restored_epoch) ? foldHistory.restored_epoch : '—'}</span></td>
+              <td style="padding:0.7rem 0.75rem"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(best) ? best.toFixed(4) : '—'}</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="font-family:'Inter';font-size:0.75rem;line-height:1.6;color:rgba(240,238,232,0.5);margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.06)">
+      Each fold trains until ${esc(SERVED.trainingHistory.monitor)} has not improved for ${SERVED.trainingHistory.patience} epochs, then the best epoch's weights are restored — so "weights from" is the epoch that shipped, not the last one run. It is the ${esc(SERVED.trainingHistory.monitor)} ${esc(SERVED.trainingHistory.monitor_mode === 'max' ? 'maximum' : 'minimum')}, not the validation-loss minimum, and on this run the two are up to 25 epochs apart.
+    </div>`;
+
+  const shared = {
+    height: 240, xKey: 'epoch', fontSize: 9,
+    margin: { top: 5, right: 10, bottom: 40, left: 52 },
+    xLabel: 'Epoch', xFormat: v => String(Math.round(v)),
+    tooltipLabel: v => `epoch ${Math.round(v)}`,
+    tooltipFormat: v => v.toFixed(4), tooltipValueColor: '#F0EEE8',
+  };
+  renderChart(document.getElementById('chart-history-loss'), Object.assign({}, shared, {
+    data: historyRows(folds, ['loss', 'val_loss']),
+    yLabel: 'Binary cross-entropy', yFormat: v => v.toFixed(2),
+    series: historySeries(folds, 'loss', 'val_loss'),
+  }));
+  renderChart(document.getElementById('chart-history-auc'), Object.assign({}, shared, {
+    data: historyRows(folds, ['auc', 'val_auc']),
+    yLabel: 'ROC-AUC', yFormat: v => v.toFixed(3),
+    series: historySeries(folds, 'auc', 'val_auc'),
+  }));
+  // route() fits tables once, after the page mounts; this one is rewritten
+  // again on every mission switch and would keep its natural width on a phone.
+  scheduleFit();
+}
+
 function ModelPerformance() {
   let mission = GATING.mission;
 
@@ -897,14 +1018,9 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
       <div style="margin-top:2.5rem" class="panel">
         <div style="padding:1.5rem 1.5rem 0">
           <div class="stat-label" style="margin-bottom:0.5rem">Training History</div>
-          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1.25rem">Per-epoch loss and accuracy</div>
+          <div style="font-family:'JetBrains Mono';font-size:0.65rem;color:#8A8FA8;margin-bottom:1.25rem">${trainingHistoryCaption()}</div>
         </div>
-        <div style="padding:0 1.5rem 1.5rem">
-          <div class="soon">
-            <div class="h">Not yet available <span class="tag-chip tag-soon" style="margin-left:0.4rem">coming</span></div>
-            <div class="d">Per-epoch loss and accuracy are not persisted by the training job yet, so there is nothing to plot. Queued behind the running block; this panel will fill in once the metrics land in the run artefacts.</div>
-          </div>
-        </div>
+        <div style="padding:0 1.5rem 1.5rem" id="training-history"></div>
       </div>
 
       <div style="margin-top:2.5rem" class="panel">
@@ -1037,6 +1153,11 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
     });
 
     document.querySelectorAll('#mission-seg button').forEach(b => b.classList.toggle('on', b.dataset.m === mission));
+    // Repainted with the mission charts even though it does not depend on the
+    // mission: paintDetail calls clearCharts(), which disconnects every resize
+    // observer on the page, so a history chart drawn once would stop reflowing
+    // the first time a visitor switched mission.
+    paintTrainingHistory();
   };
 
   document.querySelectorAll('#mission-seg button').forEach(b => b.addEventListener('click', () => {

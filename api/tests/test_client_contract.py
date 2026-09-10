@@ -22,9 +22,15 @@ import re
 from pathlib import Path
 
 import pytest
-from app.schemas import CandidateRow, ScoreResponse
+from app.schemas import CandidateRow, ScoreResponse, TrainingFoldHistory
 
-_CLIENT = Path(__file__).resolve().parents[2] / "frontend" / "design-console" / "src" / "app.api.js"
+_SRC = Path(__file__).resolve().parents[2] / "frontend" / "design-console" / "src"
+_CLIENT = _SRC / "app.api.js"
+#: The Model page reads /model/training-history field by field. It lives in
+#: the page file rather than the client, so it is extracted separately —
+#: `foldHistory` is spelled out for exactly this reason, since a one-letter
+#: loop variable would make the accessor regex match half the file.
+_PAGES = _SRC / "app.pages.js"
 
 #: Below this, the extraction has broken rather than the client having got
 #: smaller. It read 31 catalogue fields when this was written; the floor is set
@@ -33,8 +39,8 @@ _CLIENT = Path(__file__).resolve().parents[2] / "frontend" / "design-console" / 
 _MIN_ROW_FIELDS = 20
 
 
-def _accessed(prefix: str) -> set[str]:
-    source = _CLIENT.read_text()
+def _accessed(prefix: str, path: Path = _CLIENT) -> set[str]:
+    source = path.read_text()
     return set(re.findall(rf"\b{prefix}\.([a-z][a-z0-9_]*)\b", source))
 
 
@@ -97,3 +103,26 @@ def test_score_response_carries_what_the_vetting_page_needs():
     }
     missing = sorted(required - set(ScoreResponse.model_fields))
     assert not missing, f"ScoreResponse no longer carries {missing}"
+
+
+@pytest.mark.skipif(not _PAGES.exists(), reason="console source not in this checkout")
+def test_the_model_page_reads_only_declared_history_fields():
+    """The Training History panel maps a fold record field by field.
+
+    This panel replaced a tile that told visitors the data did not exist. A
+    field renamed here would put it straight back to rendering nothing, which
+    is the one failure mode worth a contract test on this route in particular.
+    """
+    accessed = _accessed("foldHistory", _PAGES)
+    assert accessed, (
+        "no foldHistory.<field> accesses found in app.pages.js; the extraction has "
+        "broken, and a contract test that reads nothing passes for the wrong reason"
+    )
+    declared = set(TrainingFoldHistory.model_fields)
+    missing = sorted(accessed - declared)
+    assert not missing, (
+        f"the Model page reads {missing} off a training-history fold and "
+        "TrainingFoldHistory does not declare them"
+    )
+    # The two the panel cannot render without: the curve and the epoch it marks.
+    assert {"val_auc", "restored_epoch"} <= accessed
