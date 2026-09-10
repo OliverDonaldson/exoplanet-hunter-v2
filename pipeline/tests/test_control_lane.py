@@ -39,7 +39,7 @@ def test_the_overlap_splits_the_current_population_three_ways():
     assert overlap.current == 3
 
 
-def test_coverage_is_the_fraction_of_today_the_comparison_reaches():
+def test_coverage_is_the_fraction_today_reached():
     """The shared set is pinned to what the champion trained on while the
     catalogue grows, so this falls over time. It is reported every run rather
     than discovered once a margin is being read against a quarter of the data."""
@@ -48,7 +48,7 @@ def test_coverage_is_the_fraction_of_today_the_comparison_reaches():
     assert population_overlap(set(), set()).covered == 0.0
 
 
-def test_rows_the_champion_never_saw_are_counted_as_added_not_shared():
+def test_rows_champion_never_saw_count_as_added():
     """They are excluded from the gating comparison on purpose: scoring them
     would average every fold and hand the champion an ensemble the candidate
     does not get, on exactly the rows a refresh adds."""
@@ -67,7 +67,7 @@ def test_a_healthy_slice_passes():
     assert_gateable(summary())
 
 
-def test_a_slice_under_the_floor_refuses_rather_than_deciding_on_the_remainder():
+def test_slice_under_the_floor_refuses_not_deciding_on_remainder():
     with pytest.raises(ValueError, match="rather than narrowing"):
         assert_gateable(summary(n=MIN_GATE_ROWS - 1))
 
@@ -77,7 +77,7 @@ def test_the_refusal_names_the_size_it_found():
         assert_gateable(summary(n=MIN_GATE_ROWS - 1))
 
 
-def test_a_summary_with_no_gate_slice_cannot_stand_in_for_the_champion():
+def test_summary_with_no_gate_slice_cannot_stand_in_for_champion():
     with pytest.raises(ValueError, match="no TESS slice"):
         assert_gateable({"per_mission": {"Kepler": {"n": 5000}}})
 
@@ -101,7 +101,7 @@ def test_floating_point_noise_is_not_drift():
     assert reproduces(summary(roc_auc=0.91 + 1e-9), summary(roc_auc=0.91)) == []
 
 
-def test_nothing_in_common_is_refused_rather_than_passing_vacuously():
+def test_nothing_in_common_is_refused_not_passing_vacuously():
     """Zero comparable metrics would otherwise return an empty list, which reads
     as "reproduces exactly" — a check that passes because it ran on nothing."""
     with pytest.raises(ValueError, match="cannot run"):
@@ -155,7 +155,7 @@ def test_a_row_only_one_path_scored_is_named():
     assert "missing from the lane" in problems[0]
 
 
-def test_a_row_scored_by_a_different_fold_is_a_disagreement_even_at_the_same_score():
+def test_different_fold_disagrees_even_at_same_score():
     """Same number, different measurement. An out-of-fold score from a fold that
     trained on the row is not the quantity the gate thinks it is reading."""
     problems = rows_reproduce(scored(folds=(0, 1, 3)), scored())
@@ -163,7 +163,7 @@ def test_a_row_scored_by_a_different_fold_is_a_disagreement_even_at_the_same_sco
     assert "disagree on fold" in problems[0]
 
 
-def test_a_row_measured_against_a_different_label_is_a_disagreement():
+def test_row_measured_against_a_different_label_is_disagreement():
     """Both paths read ground truth from the same frozen index, so a label that
     differs means they are not reading the same index."""
     problems = rows_reproduce(scored(labels=(1, 1, 1)), scored())
@@ -181,13 +181,13 @@ def test_no_shared_rows_is_refused_rather_than_passing_vacuously():
 # --------------------------------------------------------------------------
 
 
-def test_the_model_effect_compares_the_two_models_on_one_population():
+def test_model_effect_compares_the_two_models_on_one_population():
     model, data = deltas(summary(roc_auc=0.93), summary(roc_auc=0.91))
     assert model["roc_auc"] == pytest.approx(0.02)
     assert data is None
 
 
-def test_the_data_effect_compares_one_model_against_two_populations():
+def test_data_effect_compares_one_model_against_two_populations():
     model, data = deltas(
         summary(roc_auc=0.93), summary(roc_auc=0.91), previous=summary(roc_auc=0.88)
     )

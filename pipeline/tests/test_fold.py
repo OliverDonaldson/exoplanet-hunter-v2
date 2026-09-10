@@ -74,7 +74,7 @@ def test_empty_input_yields_an_all_nan_profile():
     assert profile.centers.size == 4
 
 
-def test_points_outside_the_window_are_dropped_not_clipped_into_edge_bins():
+def test_points_outside_window_dropped_not_clipped():
     phase = np.array([-0.9, -0.05, 0.05, 0.9])
     flux = np.array([5.0, 1.0, 1.0, 5.0])
     profile = bin_profile(phase, flux, 2, phase_min=-0.1, phase_max=0.1)

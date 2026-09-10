@@ -49,7 +49,7 @@ def test_the_fold_recovers_an_injected_depth():
     assert folded_depth(time, flux, PERIOD, T0, DURATION) == pytest.approx(DEPTH, abs=2e-3)
 
 
-def test_a_fold_with_no_cadence_in_transit_raises_rather_than_returning_zero():
+def test_fold_with_no_in_transit_cadence_raises():
     """Zero depth and no measurement are different statements. Returning 0.0
     here would read as 'the transit is gone' — the exact false pass.
 
@@ -77,7 +77,7 @@ def test_inversion_turns_a_transit_into_a_brightening():
     assert folded_depth(time, inverted, PERIOD, T0, DURATION) < -0.5 * DEPTH
 
 
-def test_inversion_preserves_the_noise_it_was_supposed_to_preserve():
+def test_inversion_preserves_the_stars_own_noise():
     """A generated curve would be easy. The point is that the star's own scatter
     and systematics survive, so the negative is hard in the same way real ones are."""
     _, flux = curve()
@@ -92,7 +92,7 @@ def test_inverting_an_all_nan_curve_raises():
 # ------------------------------------------------------------------ scrambling --
 
 
-def test_scrambling_destroys_the_transit_at_its_original_ephemeris():
+def test_scrambling_destroys_transit_at_its_ephemeris():
     time, flux = curve()
     scrambled = scramble_flux(time, flux, n_segments=8, seed=1)
     assert abs(folded_depth(time, scrambled, PERIOD, T0, DURATION)) < 0.25 * DEPTH
@@ -106,7 +106,7 @@ def test_scrambling_keeps_every_cadence_it_was_given():
     assert np.allclose(np.sort(scrambled), np.sort(flux))
 
 
-def test_a_single_segment_scramble_raises_because_it_is_the_identity():
+def test_single_segment_scramble_raises_because_it_the_identity():
     """The worst case in the module: it returns the curve untouched and the
     caller labels it negative."""
     time, flux = curve()
@@ -148,7 +148,7 @@ def test_a_destroyed_transit_passes_and_reports_what_survived():
     assert abs(sigma) <= MAX_SURVIVING_SIGMA
 
 
-def test_a_surviving_transit_raises_and_names_it_a_mislabelled_positive():
+def test_surviving_transit_named_a_mislabelled_positive():
     """The construction is skipped entirely — the 'negative' is the original
     curve. Nothing downstream would ever notice."""
     time, flux = curve()
@@ -178,7 +178,7 @@ def test_a_scramble_that_preserved_phase_is_caught():
         assert_transit_destroyed(time, flux, rotated, period, 0.5, 0.2)
 
 
-def test_an_undetectable_original_raises_because_the_check_cannot_pass_or_fail():
+def test_undetectable_original_raises_check_cannot_decide():
     """Nothing to destroy means the guard is vacuous. Saying so beats returning
     a number that reads as a clean pass."""
     rng = np.random.default_rng(0)
@@ -188,7 +188,7 @@ def test_an_undetectable_original_raises_because_the_check_cannot_pass_or_fail()
         assert_transit_destroyed(time, noise, noise, PERIOD, T0, DURATION)
 
 
-def test_the_guard_reads_significance_not_a_fraction_of_the_original_depth():
+def test_guard_reads_significance_not_a_depth_fraction():
     """The regression the first real run exposed.
 
     A catalogue transit is often only a few sigma, so `after / before` divides
@@ -217,7 +217,7 @@ def test_the_guard_reads_significance_not_a_fraction_of_the_original_depth():
     assert abs(after) <= MAX_SURVIVING_SIGMA
 
 
-def test_significance_is_signed_so_a_brightening_is_distinguishable():
+def test_signed_significance_distinguishes_a_brightening():
     """Inversion produces a negative significance, which is proof it is not a
     transit rather than evidence of one."""
     time, flux = curve()
@@ -225,7 +225,7 @@ def test_significance_is_signed_so_a_brightening_is_distinguishable():
     assert transit_significance(time, invert_flux(flux), PERIOD, T0, DURATION) < 0
 
 
-def test_significance_refuses_a_fold_with_too_few_cadences_to_measure():
+def test_significance_refuses_a_fold_with_too_few_cadences():
     time = np.linspace(2.0, 2.5, 200)
     with pytest.raises(ValueError, match="a significance needs at least two"):
         transit_significance(time, np.ones_like(time), PERIOD, T0, DURATION)
@@ -286,7 +286,7 @@ def test_the_draw_reports_the_distribution_it_hit():
     assert draw.n_requested == 40
 
 
-def test_a_stratum_the_pool_cannot_fill_raises_instead_of_backfilling():
+def test_stratum_the_pool_cannot_fill_raises_not_backfilling():
     """Backfilling from the short-baseline bulk returns a clean number about a
     distribution that was never built."""
     with pytest.raises(ValueError, match="Backfilling"):

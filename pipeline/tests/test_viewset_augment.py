@@ -226,7 +226,7 @@ class TestAnnotationChannels:
         out = augment_viewset({"difference_view": view}, cfg)["difference_view"].numpy()
         assert not np.array_equal(out[..., :2], view.numpy()[..., :2])
 
-    def test_a_view_with_one_annotation_channel_is_unaffected_by_the_split(self):
+    def test_view_with_one_annotation_channel_is_unaffected_by_split(self):
         # Every other view keeps the old behaviour: data is everything but the
         # last channel, and the last channel is presence.
         view = tf.constant(np.ones(VIEW_SHAPES["gap_view"], dtype=np.float32))

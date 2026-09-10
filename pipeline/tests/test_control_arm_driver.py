@@ -47,7 +47,7 @@ def test_an_aligned_stream_passes():
     driver.assert_stream_aligned(np.array([11, 22, 33]), index)
 
 
-def test_a_permuted_stream_raises_even_though_every_tic_id_is_present():
+def test_permuted_stream_raises_though_tic_ids_present():
     """The exact defect the guard was built for.
 
     The earlier implementation matched scores onto rows by `tic_id`. Under a
@@ -61,7 +61,7 @@ def test_a_permuted_stream_raises_even_though_every_tic_id_is_present():
         driver.assert_stream_aligned(np.array([33, 11, 22]), index)
 
 
-def test_a_host_repeated_per_period_is_still_ordered_not_just_counted():
+def test_host_repeated_per_period_is_ordered_not_counted():
     """Three rows per host is the real shape — 580 hosts x 3 periods.
 
     The multiset is identical under this permutation, so anything comparing
@@ -152,7 +152,7 @@ def test_every_member_is_returned_so_none_is_silently_dropped(tmp_path):
     ]
 
 
-def test_a_single_member_run_still_resolves_by_its_historical_name(tmp_path):
+def test_single_member_run_still_resolves_by_its_historical_name(tmp_path):
     members = driver.dualview_members(_fold_0(tmp_path, "cnn_dualview.keras") / "fold_0")
     assert [p.name for p in members] == ["cnn_dualview.keras"]
 
@@ -203,11 +203,11 @@ def test_a_legacy_nine_dim_run_still_reads_as_nine(tmp_path):
     assert driver.dualview_aux_dim(_bundle(tmp_path, _FakePipeline(9))) == 9
 
 
-def test_a_bundle_with_no_pipeline_falls_back_to_the_legacy_width(tmp_path):
+def test_bundle_with_no_pipeline_falls_back_to_legacy_width(tmp_path):
     assert driver.dualview_aux_dim(_bundle(tmp_path, None)) == 9
 
 
-def test_a_pipeline_that_declares_no_width_raises_rather_than_guessing(tmp_path):
+def test_pipeline_declares_no_width_raises_not_guessing(tmp_path):
     """Guessing here is what produced the original failure. An undeclared width
     is unknowable, and a wrong guess costs a full build before it surfaces."""
     with pytest.raises(ValueError, match="n_features_in_"):
@@ -219,7 +219,7 @@ def test_a_pipeline_that_declares_no_width_raises_rather_than_guessing(tmp_path)
 # --------------------------------------------------------------------------
 
 
-def test_every_declared_scalar_is_present_so_the_vector_is_never_short():
+def test_declared_scalars_present_so_vector_never_short():
     """Written through the schema, not a literal list.
 
     `write_viewset_shards` raises on an absent declared column, but only if this

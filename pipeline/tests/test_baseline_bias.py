@@ -88,7 +88,7 @@ def test_the_clip_count_is_reported_rather_than_absorbed():
     assert result.n_clipped >= 0
 
 
-def test_weighting_that_did_nothing_raises_instead_of_training_on_ones():
+def test_weighting_did_nothing_raises_not_training_on_ones():
     """The expensive failure: a run happens, an arm is recorded, and the weights
     were flat the whole time. Forced by asking for a residual of zero, which no
     finite weighting attains."""
@@ -102,7 +102,7 @@ def test_weighting_refuses_a_single_class_population():
         propensity_weights(frame)
 
 
-def test_weighting_refuses_to_silently_drop_rows_with_no_baseline():
+def test_weighting_refuses_to_drop_rows_with_no_baseline():
     """Dropping them here changes the population the weights describe, and
     nothing downstream carries the count."""
     frame = confounded()
@@ -130,7 +130,7 @@ def test_weighting_is_reproducible():
     assert np.array_equal(a, b)
 
 
-def test_the_weighted_statistic_matches_the_unweighted_one_at_equal_weights():
+def test_weighted_matches_unweighted_at_equal_weights():
     """Pins `_weighted_spearman` against the module the roadmap's +0.3874 came
     from. If they disagree at weight 1, every reported 'after' is a different
     statistic from the 'before' it is compared with."""
@@ -242,7 +242,7 @@ def test_the_kept_ratio_is_equal_across_every_stratum():
     assert max(ratios) - min(ratios) < 0.35
 
 
-def test_a_stratum_missing_a_label_refuses_rather_than_balancing_at_zero():
+def test_stratum_missing_a_label_refuses_not_balancing_at_zero():
     """The scarcest stratum sets the global ratio, so one with no negatives sets
     it to zero and would discard every negative in the catalogue while reporting
     a beautifully decorrelated population."""

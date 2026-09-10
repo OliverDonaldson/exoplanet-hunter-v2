@@ -132,7 +132,7 @@ def test_masks_change_the_prediction(model):
     assert not np.allclose(with_data, model(batch, training=False).numpy())
 
 
-def test_a_scalar_only_branch_contributes_nothing_when_its_report_is_absent():
+def test_scalar_only_branch_contributes_nothing_if_absent():
     """`detection` and `ghost` are fed entirely from the DV report, which is
     absent on every Kepler and K2 row. Ungated they emit relu(bias) — a learned
     constant — into fusion for 56% of the training set."""
@@ -151,7 +151,7 @@ def test_a_scalar_only_branch_contributes_nothing_when_its_report_is_absent():
         assert np.abs(values.numpy()).max() == 0.0, f"{name} leaked a bias on an absent report"
 
 
-def test_a_declared_branch_scalar_missing_from_the_shard_set_raises():
+def test_declared_branch_scalar_missing_from_shard_set_raises():
     """Skipping it silently leaves the branch with no scalars and a plausible AUC."""
     with pytest.raises(ValueError, match="declared on a branch but absent"):
         build_cnn_branches(
@@ -161,7 +161,7 @@ def test_a_declared_branch_scalar_missing_from_the_shard_set_raises():
         )
 
 
-def test_a_missing_gate_mask_raises_rather_than_ungating_the_branch():
+def test_missing_gate_mask_raises_not_ungating_the_branch():
     with pytest.raises(ValueError, match="does not carry"):
         build_cnn_branches(SimpleNamespace(), scalar_columns=SCALARS, mask_columns=["has_ruwe"])
 
@@ -272,7 +272,7 @@ def test_each_transit_is_encoded_by_the_same_weights(model):
     np.testing.assert_allclose(encoded[:, 0], encoded[:, 2], rtol=1e-6, atol=1e-6)
 
 
-def test_the_tower_reads_phase_and_the_pool_ignores_transit_order(model):
+def test_tower_reads_phase_and_pool_ignores_transit_order(model):
     """The two halves of finding #23, stated as properties.
 
     Reordering *transits* must not change the pooled statistics — they are
@@ -322,7 +322,7 @@ def test_the_pooled_mean_is_the_mean_over_measured_slots_only(model):
     np.testing.assert_allclose(pooled[:, width : 2 * width], encoded[:, :3].max(axis=1), atol=1e-5)
 
 
-def test_the_spread_separates_identical_transits_from_varying_ones(model):
+def test_spread_separates_identical_transits_from_varying_ones(model):
     """The statistic the branch exists for: an eclipsing binary and a
     background blend vary transit to transit, a planet does not. A mean alone
     returns the folded view again, which is what this branch is meant to add to."""
@@ -441,7 +441,7 @@ def test_every_named_branch_is_actually_built(model):
 
 
 @pytest.mark.parametrize("family", sorted(BRANCH_FAMILIES))
-def test_dropping_a_family_removes_its_branches_and_keeps_the_input_signature(family):
+def test_dropping_family_keeps_the_input_signature(family):
     """The shard stream always yields every view in `VIEW_SHAPES`, so an ablation that also
     changed the input contract would not be a controlled comparison — the
     dropped branch's `Input` stays, unused."""
@@ -464,7 +464,7 @@ def test_dropping_a_family_removes_its_branches_and_keeps_the_input_signature(fa
     assert np.all(np.isfinite(out.numpy()))
 
 
-def test_an_unrecognised_branch_raises_rather_than_dropping_nothing():
+def test_unrecognised_branch_raises_not_dropping_nothing():
     """An ablation that quietly ablated nothing reports a delta of zero, which
     reads as "this branch does not matter" — the opposite of what happened."""
     with pytest.raises(ValueError, match="unknown branch or family"):
@@ -579,7 +579,7 @@ def diff_batch(n: int = 4, *, sectors: int = 0, seed: int = 0, quality: float = 
     return batch
 
 
-def test_a_target_with_no_difference_image_gives_finite_predictions(model):
+def test_no_difference_image_gives_finite_predictions(model):
     """58.9% of the set is in exactly this state — every Kepler and K2 row plus
     6.8% of TESS. A masked softmax written the textbook way returns NaN when
     every slot is masked, and a NaN reaching the gate multiplies to NaN rather

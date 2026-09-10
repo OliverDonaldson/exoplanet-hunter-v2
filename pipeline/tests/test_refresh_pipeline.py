@@ -163,7 +163,7 @@ def test_the_verdict_is_written_somewhere_that_outlives_the_flow(gate, tmp_path)
     assert out.is_file()
 
 
-def test_a_stale_log_from_a_previous_gating_is_not_read_as_this_run_s_verdict(gate, tmp_path):
+def test_stale_log_is_not_read_as_this_run_s_verdict(gate, tmp_path):
     """The durable path persists between runs, unlike the tempdir it replaced.
     A leftover file would satisfy the existence check that is the flow's only
     way to tell a decision from a gate that died before reaching one."""
@@ -188,19 +188,19 @@ def test_only_promote_reads_as_a_promotion(gate):
 # --------------------------------------------------------------------------
 
 
-def test_a_gate_that_crashed_before_deciding_raises_rather_than_reporting_a_rejection(gate):
+def test_crashed_gate_raises_not_reports_a_rejection(gate):
     """An uncaught exception exits 1, which is also REJECT's code. Reading the
     code alone reported every crash as a candidate that lost on quality."""
     with pytest.raises(RuntimeError, match="without reaching a verdict"):
         gate("REJECT", exit_code=1, write=False)
 
 
-def test_the_crash_says_in_words_that_it_is_not_a_quality_rejection(gate):
+def test_crash_says_in_words_it_not_a_quality_rejection(gate):
     with pytest.raises(RuntimeError, match="NOT a quality rejection"):
         gate("REJECT", exit_code=3, write=False)
 
 
-def test_a_decision_that_failed_to_apply_is_not_reported_as_the_decision(gate):
+def test_decision_failed_to_apply_is_not_reported_as_decision(gate):
     """The gate decided PROMOTE and then died updating the registry. Reporting
     PROMOTE would claim a model is served that is not."""
     with pytest.raises(RuntimeError, match="failed to apply"):
@@ -260,7 +260,7 @@ def test_the_gate_is_always_given_the_lane_s_measurement(gate, tmp_path):
     assert passed.endswith("control-lane/cv_summary.json")
 
 
-def test_the_lane_s_own_summary_is_never_selected_as_the_candidate(gate, tmp_path):
+def test_lane_s_own_summary_is_never_selected_as_candidate(gate, tmp_path):
     """The lane writes into models/cv/ like every run does. Picked up by the
     newest-summary glob it would be gated against itself — a guaranteed dead heat
     reported as a decision. Written newest here precisely because mtime ordering
@@ -272,7 +272,7 @@ def test_the_lane_s_own_summary_is_never_selected_as_the_candidate(gate, tmp_pat
     assert recorded["cmd"][2] == "models/cv/candidate/cv_summary.json"
 
 
-def test_nothing_gateable_at_all_is_a_failure_rather_than_a_verdict(tmp_path, monkeypatch):
+def test_nothing_gateable_at_all_is_failure_not_a_verdict(tmp_path, monkeypatch):
     """If the only summary present is the lane's, there is no candidate. Raising
     beats gating the control against itself and calling the tie a result."""
     monkeypatch.setattr(flow, "REPO_ROOT", tmp_path)
@@ -299,7 +299,7 @@ def test_a_lane_that_produced_a_summary_hands_back_its_path(lane):
     assert lane(0) is not None
 
 
-def test_a_refusal_is_reported_as_no_reference_rather_than_a_crash(lane):
+def test_refusal_is_reported_as_no_reference_not_a_crash(lane):
     """Too thin to measure is a verdict. It shares UNRESOLVED's exit code because
     it is UNRESOLVED, reached one step before the gate."""
     assert lane(2) is None
@@ -317,7 +317,7 @@ def test_a_crashed_lane_says_it_is_not_a_quality_rejection(lane):
         lane(3, write=False)
 
 
-def test_exit_zero_with_no_summary_is_a_failure_not_last_week_s_control(lane):
+def test_exit_zero_with_no_summary_is_a_failure(lane):
     """The dangerous case: succeed, write nothing, and let every later step read
     whatever an earlier run left at that path and call it this week's control."""
     with pytest.raises(RuntimeError, match="wrote no summary"):

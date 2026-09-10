@@ -54,7 +54,7 @@ def test_the_bucket_empties_and_then_refuses():
     assert retry_after == pytest.approx(20.0)
 
 
-def test_it_refills_continuously_rather_than_on_a_window_boundary():
+def test_it_refills_continuously_not_on_a_window_boundary():
     """A fixed window lets a caller spend twice the allowance across the edge."""
     clock = _Clock()
     limiter = RateLimiter(capacity=2, window_seconds=60.0, clock=clock)
@@ -82,7 +82,7 @@ def test_clients_do_not_share_a_bucket():
     assert limiter.check("b")[0], "a second client must not inherit the first's spend"
 
 
-def test_idle_buckets_are_evicted_so_the_map_cannot_grow_without_bound():
+def test_idle_buckets_evicted_so_map_cannot_grow():
     clock = _Clock()
     limiter = RateLimiter(capacity=5, window_seconds=60.0, clock=clock)
     for i in range(50):
@@ -95,7 +95,7 @@ def test_idle_buckets_are_evicted_so_the_map_cannot_grow_without_bound():
     assert len(limiter._buckets) == 1, "idle buckets are a memory-exhaustion vector"
 
 
-def test_a_degenerate_configuration_raises_rather_than_disabling_the_limiter():
+def test_degenerate_config_raises_not_disables_limiter():
     with pytest.raises(ValueError, match="capacity"):
         RateLimiter(capacity=0)
     with pytest.raises(ValueError, match="window_seconds"):
@@ -109,14 +109,14 @@ def test_an_untrusted_forwarded_header_is_ignored(monkeypatch):
     assert client_identity(request) == "10.0.0.1"
 
 
-def test_the_configured_header_is_trusted_and_only_its_first_entry(monkeypatch):
+def test_configured_header_is_trusted_and_only_its_first_entry(monkeypatch):
     monkeypatch.setenv("TRUSTED_CLIENT_IP_HEADER", "X-Forwarded-For")
     request = _FakeRequest(host="10.0.0.1", headers={"X-Forwarded-For": "9.9.9.9, 10.0.0.1"})
     # Everything after the proxy's own append is caller-controlled.
     assert client_identity(request) == "9.9.9.9"
 
 
-def test_an_unidentifiable_caller_shares_one_bucket_rather_than_bypassing(monkeypatch):
+def test_unidentifiable_caller_shares_one_bucket_not_bypassing(monkeypatch):
     monkeypatch.delenv("TRUSTED_CLIENT_IP_HEADER", raising=False)
     assert client_identity(_FakeRequest(host=None)) == "unknown"
 

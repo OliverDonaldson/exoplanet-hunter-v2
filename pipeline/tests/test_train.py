@@ -175,7 +175,7 @@ def test_the_variance_block_does_not_disturb_the_fold_means(aggregate):
     assert summary["test_roc_auc"]["std"] == pytest.approx(np.std([0.92, 0.82]))
 
 
-def test_a_run_with_no_pooled_predictions_raises_rather_than_writing_a_thin_summary(tmp_path):
+def test_no_pooled_predictions_raises_not_a_thin_summary(tmp_path):
     """Without them the summary carries no mission block and no recall floor,
     and the gate refuses it on provenance — a refusal a reader cannot tell apart
     from the candidate having lost. The trainer writes this file immediately
@@ -207,7 +207,7 @@ def test_the_summary_carries_the_slice_the_gate_decides_on(aggregate):
     assert {"Kepler", "K2", "all"} <= set(payload["per_mission"])
 
 
-def test_the_summary_carries_a_recall_floor_the_gate_can_size_its_tolerance_from(aggregate):
+def test_summary_carries_a_floor_the_gate_can_size_from(aggregate):
     """Without this the gate falls back to a constant nobody measured against
     this run, on the one criterion that has rejected every arm."""
     variance = aggregate([[0.90, 0.92, 0.94], [0.80, 0.82, 0.84]])["summary"]["variance"]
@@ -217,7 +217,7 @@ def test_the_summary_carries_a_recall_floor_the_gate_can_size_its_tolerance_from
     assert variance["pooled_gate_n"] == MISSIONS.count("TESS")
 
 
-def test_one_member_reports_no_recall_floor_rather_than_a_zero_one(aggregate):
+def test_one_member_reports_no_recall_floor_not_a_zero_one(aggregate):
     """A single member has nothing to disagree with. Zero would read as "this run
     is noiseless" in the comparison the number exists to arbitrate."""
     variance = aggregate([[0.91], [0.89]])["summary"]["variance"]
@@ -225,7 +225,7 @@ def test_one_member_reports_no_recall_floor_rather_than_a_zero_one(aggregate):
     assert variance["pooled_gate_recall_n_draws"] == 0
 
 
-def test_the_gate_reaches_its_criteria_on_this_summary_instead_of_refusing(aggregate):
+def test_gate_reaches_its_criteria_on_this_summary_not_refusing(aggregate):
     """The end of the path: a summary this trainer wrote, read by the real gate.
     Compared against itself it is a tie and does not promote — what is pinned is
     that it gets as far as the recall criterion rather than being refused on
@@ -241,7 +241,7 @@ def test_the_gate_reaches_its_criteria_on_this_summary_instead_of_refusing(aggre
     assert any("gated on TESS" in r for r in decision.reasons)
 
 
-def test_the_mission_is_joined_from_the_catalogue_when_predictions_omit_it(aggregate):
+def test_mission_joined_from_catalogue_when_omitted(aggregate):
     """The trainer's own prediction set carries no mission column, so the join is
     the live path — not the shortcut of a fixture that writes one."""
     payload = aggregate([[0.90, 0.92, 0.94], [0.80, 0.82, 0.84]], mission=False)

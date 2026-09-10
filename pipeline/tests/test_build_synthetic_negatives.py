@@ -54,7 +54,7 @@ def test_the_message_names_the_flag_that_fixes_it():
         builder._assert_no_dv_shortcut(frame(0.0), frame(0.93))
 
 
-def test_a_frame_without_the_mask_column_raises_rather_than_skipping_the_check():
+def test_frame_without_mask_column_raises_not_skips():
     """Silently skipping is how a guard stops being one."""
     with pytest.raises(KeyError, match="dv_usable"):
         builder._assert_no_dv_shortcut(pd.DataFrame({"label": [0, 0]}), frame(0.93))

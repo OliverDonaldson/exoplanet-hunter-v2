@@ -574,7 +574,7 @@ def test_a_tess_regression_rejects_however_good_the_aggregate_is():
     assert any("does not beat" in r for r in decision.reasons)
 
 
-def test_a_per_mission_block_without_tess_refuses_rather_than_pooling():
+def test_per_mission_block_without_tess_refuses_not_pooling():
     """The gate mission missing from a block that exists is not the same as a
     summary predating the block, and returning None for both is how the pooled
     fallback gets entered while reporting the summary is merely old."""
@@ -669,7 +669,7 @@ def test_recall_within_tolerance_still_promotes():
     assert decision.promoted
 
 
-def test_a_nan_metric_rejects_instead_of_sailing_through_every_guard():
+def test_nan_metric_rejects_not_sailing_through_every_guard():
     """Every guard is an inequality and NaN loses all of them, so a degenerate
     run — a single-class fold, an empty slice, a blown-up loss — would promote
     itself with `ROC-AUC nan vs champion 0.9581`."""
@@ -695,7 +695,7 @@ def test_a_nan_in_any_gating_metric_rejects(metric):
     assert any("not measurable" in r for r in decision.reasons)
 
 
-def test_a_pooled_comparison_over_unmatched_rows_refuses_rather_than_guessing():
+def test_pooled_comparison_over_unmatched_rows_refuses():
     """The live champion `ca906040` carries no per_mission block, so the TESS
     gate silently degraded to a pooled comparison — its 4,818 rows with zero K2
     against a current run's 5,426 including 527. That reads as a model
@@ -707,7 +707,7 @@ def test_a_pooled_comparison_over_unmatched_rows_refuses_rather_than_guessing():
     assert any("re-baseline the champion" in r for r in decision.reasons)
 
 
-def test_the_unmatched_population_refusal_can_be_overridden_deliberately():
+def test_unmatched_population_refusal_is_overridable():
     decision = evaluate_promotion(
         summary(0.93, 0.10, ece=0.03),
         summary(0.92, 0.10, ece=0.03),
@@ -735,7 +735,7 @@ def test_folds_of_different_sizes_pair_but_are_flagged_inexact():
     assert paired_folds(folds(0.94, 0.95), folds(0.90, 0.91)).exact
 
 
-def test_a_candidate_that_wins_on_average_but_loses_most_folds_is_alarmed():
+def test_winning_on_average_but_losing_folds_is_alarmed():
     """Winning the mean while losing fold by fold is what winning on training
     noise looks like — one lucky fold carries it."""
     candidate = gated(0.92, 0.10) | folds(0.99, 0.88, 0.88, 0.88, 0.88)
@@ -760,14 +760,14 @@ def test_folds_from_a_different_split_are_not_paired():
     assert paired_folds(folds(0.9, 0.9, seed=1), folds(0.8, 0.8, seed=2)) is None
 
 
-def test_no_p_value_is_reported_where_it_could_never_reach_significance():
+def test_no_p_value_where_it_cannot_reach_significance():
     """Five pairs floor the two-sided Wilcoxon at p=0.0625; printing it invites
     reading "not significant" as evidence of no effect."""
     assert paired_folds(folds(*[0.99] * 5), folds(*[0.80] * 5)).p_value is None
     assert paired_folds(folds(*[0.99] * 6), folds(*[0.80] * 6)).p_value is not None
 
 
-def test_a_mission_only_one_run_scored_alarms_but_does_not_block_the_tess_gate():
+def test_one_sided_mission_alarms_but_does_not_block():
     """Gating on TESS compares a mission both runs scored, so K2 appearing on
     one side only is worth saying and not worth blocking on."""
     candidate = gated(0.92, 0.10) | slices(TESS={"roc_auc": 0.92, "brier": 0.10}, K2={})
@@ -881,7 +881,7 @@ def test_champion_summary_resolves_registry_path_from_any_cwd(tmp_path, monkeypa
     assert champion["summary"]["test_roc_auc"]["mean"] == 0.93
 
 
-def test_two_identical_runs_have_zero_effect_not_an_undefined_one():
+def test_two_identical_runs_have_zero_effect():
     """`inf * sign(0)` is nan, which loses every downstream inequality and reads
     as "could not tell" for the one comparison that is certain."""
     identical = folds(0.9, 0.9, 0.9)
@@ -890,7 +890,7 @@ def test_two_identical_runs_have_zero_effect_not_an_undefined_one():
     assert paired.effect_size == 0.0
 
 
-def test_a_uniform_shift_across_every_fold_is_infinitely_consistent():
+def test_uniform_shift_every_fold_is_fully_consistent():
     paired = paired_folds(folds(0.92, 0.92, 0.92), folds(0.90, 0.90, 0.90))
     assert paired is not None
     assert paired.effect_size == math.inf
@@ -943,13 +943,13 @@ def test_the_floor_is_two_se_of_the_difference():
     )
 
 
-def test_a_summary_with_no_variance_block_reports_no_floor_rather_than_guessing():
+def test_no_variance_block_reports_no_floor():
     floor = decision_floor(summary(0.90, 0.10))
     assert floor.auc is None and floor.recall is None
     assert "no variance block" in floor.source
 
 
-def test_a_recall_drop_inside_the_measured_floor_no_longer_rejects():
+def test_recall_drop_inside_the_measured_floor_no_longer_rejects():
     """A drop smaller than the run's own measured floor is not a difference, so
     it cannot be a quality rejection. It is not a promotion either — inside the
     floor the gate cannot resolve the sign — and refusing to reject is the whole
@@ -962,7 +962,7 @@ def test_a_recall_drop_inside_the_measured_floor_no_longer_rejects():
     assert evaluate_promotion(candidate, champion).verdict is not Verdict.REJECT
 
 
-def test_that_same_drop_still_rejects_under_an_explicit_tolerance():
+def test_same_drop_still_rejects_under_an_explicit_tolerance():
     """The caller can still impose a tolerance of its own, and when it does the
     measured floor gets out of the way entirely. Identical inputs to the test
     above, opposite outcome, and the tolerance is the only thing that differs."""
@@ -996,13 +996,13 @@ def test_the_recall_reason_states_the_margin_against_its_floor():
     assert any("x the " in r and " floor" in r for r in decision.reasons)
 
 
-def test_a_legacy_summary_says_its_tolerance_is_a_constant_not_a_measurement():
+def test_legacy_tolerance_says_it_is_a_constant():
     candidate = summary(0.90, 0.10) | slices(TESS={"roc_auc": 0.92, "recall_at_1pct_fpr": 0.275})
     decision = evaluate_promotion(candidate, gated(0.91, 0.10))
     assert any("legacy constant" in r for r in decision.reasons)
 
 
-def test_an_auc_tie_inside_the_floor_is_recorded_as_level_not_as_a_defeat():
+def test_auc_tie_inside_the_floor_records_as_level():
     """The champion still keeps serving — a tie is not a reason to churn a
     deployed model. What the wording protects is the record: every other
     criterion grants the candidate a tolerance band, so without this the
@@ -1141,7 +1141,7 @@ def test_the_floor_grows_when_the_champion_has_its_own_noise():
     assert with_champion == pytest.approx(candidate_only * 2**0.5, rel=1e-9)
 
 
-def test_an_champion_without_a_variance_block_borrows_a_named_prior():
+def test_champion_without_a_variance_block_borrows_a_named_prior():
     """A prior standing in for a measurement has to say so — substituting one
     silently is this project's recurring defect class."""
     from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD, decision_floor
@@ -1151,7 +1151,7 @@ def test_an_champion_without_a_variance_block_borrows_a_named_prior():
     assert str(POOLED_RECALL_SEED_SD) in floor.source
 
 
-def test_a_noisier_candidate_no_longer_quietly_earns_a_wider_pass():
+def test_noisier_candidate_no_longer_quietly_earns_a_wider_pass():
     """It still earns a wider band — correctly, its mean is less well known —
     but the band lands it in UNRESOLVED rather than PROMOTE."""
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
@@ -1370,7 +1370,7 @@ def test_the_registry_is_untouched_by_writing_a_log(tmp_path):
     assert registry.read_text() == before
 
 
-def test_verdict_out_naming_the_log_does_not_strip_its_provenance(tmp_path):
+def test_verdict_out_naming_the_log_doesnt_strip_its_provenance(tmp_path):
     """The refresh flow points --verdict-out at the log's own path. A second
     write there would overwrite the log with the bare decision, quietly undoing
     the whole point of the file on exactly the weekly run that matters."""
@@ -1464,7 +1464,7 @@ def test_strict_does_not_rescue_a_rejection():
     assert evaluate_promotion(loser, champion, strict=True).verdict is Verdict.REJECT
 
 
-def test_the_k2_alarm_carries_a_standing_decision_and_does_not_block():
+def test_k2_alarm_carries_a_standing_decision_and_doesnt_block():
     """It fires on every candidate: the served model was baselined before K2
     entered training and no candidate can give it a K2 slice. An alarm that
     always fires would block every promotion for ever under strict."""
@@ -1474,7 +1474,7 @@ def test_the_k2_alarm_carries_a_standing_decision_and_does_not_block():
     assert unacknowledged_alarms([k2]) == []
 
 
-def test_acknowledgement_matches_a_substring_not_the_whole_message():
+def test_acknowledgement_matches_a_substring():
     """The surrounding sentence carries run-specific detail. Keyed on whole
     messages the list would stop matching the first time one was reworded —
     silently, and in the direction that blocks every promotion."""

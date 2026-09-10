@@ -43,7 +43,7 @@ def scored(**overrides) -> pd.DataFrame:
     return pd.DataFrame({**rows, **overrides})
 
 
-def test_slices_are_out_of_fold_only_and_zero_shot_is_reported_apart():
+def test_slices_out_of_fold_only_zero_shot_apart():
     result = summarise_scored(scored(), source="test")
     assert set(result["per_mission"]) == {"TESS", "Kepler", "all"}
     assert result["per_mission"]["all"]["n"] == 6
@@ -51,7 +51,7 @@ def test_slices_are_out_of_fold_only_and_zero_shot_is_reported_apart():
     assert result["zero_shot"]["K2"]["n"] == 2
 
 
-def test_a_zero_shot_block_of_pure_negatives_cannot_reach_the_gate():
+def test_zero_shot_block_of_pure_negatives_cannot_reach_the_gate():
     """The live case, measured 2026-08-08: the re-baselined champion carries
     243 zero-shot Kepler rows with no positives at all. Pooling them into the
     out-of-fold Kepler slice measures a population no model was asked about."""
@@ -136,7 +136,7 @@ def ensembled(n_tess: int = 60, n_members: int = 3) -> pd.DataFrame:
     return frame
 
 
-def test_a_summary_rebuilt_from_member_scores_carries_the_recall_floor():
+def test_summary_from_member_scores_carries_the_floor():
     """The point of rebuilding a summary without retraining: the gate sizes its
     recall tolerance from the run's own reseeding spread, and the per-member
     scores that measure it are already in the prediction set."""
@@ -146,13 +146,13 @@ def test_a_summary_rebuilt_from_member_scores_carries_the_recall_floor():
     assert variance["pooled_gate_recall_seed_sd"] > 0.0
 
 
-def test_the_floor_it_reports_is_one_the_gate_can_size_a_tolerance_from():
+def test_reported_floor_can_size_a_gate_tolerance():
     from exoplanet_hunter.validation import decision_floor
 
     assert decision_floor(summarise_scored(ensembled(), source="test")).recall is not None
 
 
-def test_a_single_model_run_reports_the_block_and_measures_nothing_in_it():
+def test_single_model_run_reports_an_empty_block():
     """The block is emitted either way. One that appeared only when the
     measurement succeeded would make a missing key and a null read the same to a
     person and differently to a program — and a run with no member columns must
@@ -168,7 +168,7 @@ def test_a_single_model_run_reports_the_block_and_measures_nothing_in_it():
     assert "no variance block" in floor.source
 
 
-def test_no_folds_block_so_pairing_reports_nothing_rather_than_something_wrong():
+def test_no_folds_block_so_pairing_reports_none():
     """The champion's folds are a different partition from any candidate's, so
     pairing on fold index would compare fold k of one split against fold k of
     another. `paired_folds` returns None on a missing block."""
@@ -300,7 +300,7 @@ def test_a_run_with_no_folds_raises(tmp_path, scoring_fixture):
         score_run(empty, shard_dir, labels=labels, protocol=Protocol.ZERO_SHOT)
 
 
-def test_out_of_fold_scores_each_row_with_the_fold_that_held_it_out(scoring_fixture):
+def test_out_of_fold_scores_each_row_with_fold_held_it_out(scoring_fixture):
     """The protocol's whole content. Each fold's model emits its own constant,
     so the returned score names the fold that produced it."""
     shard_dir, run_dir, labels, views = scoring_fixture
@@ -318,7 +318,7 @@ def test_out_of_fold_scores_each_row_with_the_fold_that_held_it_out(scoring_fixt
         assert row.score == pytest.approx(expected[row.fold], abs=1e-4)
 
 
-def test_a_row_whose_fold_has_no_checkpoint_raises_rather_than_scoring(scoring_fixture):
+def test_row_whose_fold_has_no_checkpoint_raises_not_scoring(scoring_fixture):
     """`fold_of` comes from predictions.parquet and `folds` from globbing the
     directory; nothing ties them together. Uninitialised memory returned as a
     calibrated probability is the failure this replaced."""
@@ -363,7 +363,7 @@ def test_zero_shot_drops_the_rows_the_run_trained_on(scoring_fixture):
     assert len(result.predictions) == len(views.tic_ids) - len(trained_on)
 
 
-def test_read_views_refuses_a_stream_that_does_not_match_the_index(scoring_fixture):
+def test_read_views_refuses_a_stream_doesnt_match_the_index(scoring_fixture):
     """Scores are joined back positionally, so a reordered stream would attach
     every probability to the wrong star."""
     shard_dir, _, _, _ = scoring_fixture

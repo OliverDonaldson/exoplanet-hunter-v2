@@ -31,7 +31,7 @@ def _separable(n: int = 200, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
     return labels, np.clip(scores, 0.0, 1.0)
 
 
-def test_the_threshold_and_the_recall_at_1pct_fpr_describe_the_same_cut():
+def test_threshold_and_recall_at_1pct_fpr_describe_the_same_cut():
     """Pins this module's cut against the gate's own statistic in comparison.py."""
     labels, scores = _separable()
     cut = threshold_at_fpr(labels, scores, SHORTLIST_FPR)
@@ -42,7 +42,7 @@ def test_the_threshold_and_the_recall_at_1pct_fpr_describe_the_same_cut():
     assert achieved_tpr == pytest.approx(recall_at_fpr(labels, scores, SHORTLIST_FPR), abs=1e-9)
 
 
-def test_a_threshold_needs_both_classes_rather_than_returning_something():
+def test_threshold_needs_both_classes_not_returning_something():
     labels, scores = _separable()
     with pytest.raises(ValueError, match="both classes"):
         threshold_at_fpr(np.ones_like(labels), scores, SHORTLIST_FPR)
@@ -66,7 +66,7 @@ def test_the_f1_cut_beats_its_neighbours_on_f1():
     assert best >= max(f1_at(cut - 0.05), f1_at(cut + 0.05))
 
 
-def test_the_two_operating_points_differ_and_the_shortlist_one_is_stricter():
+def test_shortlist_operating_point_is_the_stricter():
     """If they collapsed to one number, reporting both would be theatre."""
     labels, scores = _separable()
     frame = pd.DataFrame({"mission": "TESS", "label": labels, "score": scores})
@@ -75,7 +75,7 @@ def test_the_two_operating_points_differ_and_the_shortlist_one_is_stricter():
     assert points.n == len(frame) and points.n_positive == int(labels.sum())
 
 
-def test_the_operating_point_is_derived_from_the_gating_mission_alone():
+def test_operating_point_is_derived_from_gating_mission_alone():
     """A Kepler-weighted threshold is set by a population with no serving stake."""
     labels, tess = _separable(seed=1)
     kepler = np.where(labels == 1, 0.99, 0.01)  # trivially separable, unlike TESS
@@ -107,7 +107,7 @@ def _host_pool(n_per_cell: int = 6) -> pd.DataFrame:
     return frame
 
 
-def test_matching_draws_equal_numbers_of_each_label_in_every_stratum():
+def test_matching_draws_equal_labels_per_stratum():
     matched = baseline_matched_hosts(_host_pool(), per_label_per_stratum=2, n_strata=4)
     counts = matched.hosts.pivot_table(
         index="stratum", columns="label", values="tic_id", aggfunc="size", fill_value=0
@@ -116,7 +116,7 @@ def test_matching_draws_equal_numbers_of_each_label_in_every_stratum():
     assert matched.n == 2 * counts.sum().sum() / 2
 
 
-def test_a_stratum_without_both_labels_is_dropped_and_counted_not_backfilled():
+def test_stratum_missing_a_label_is_dropped_and_counted():
     """Backfilling returns a clean number about an easier population."""
     pool = _host_pool()
     # Make the longest-baseline stratum planet-only, which is how the real bias
@@ -140,7 +140,7 @@ def test_matching_refuses_to_invent_a_baseline_it_was_not_given():
         baseline_matched_hosts(pool, per_label_per_stratum=2)
 
 
-def test_matching_derives_baseline_days_from_the_ephemeris_when_not_supplied():
+def test_matching_derives_baseline_days_from_ephemeris():
     pool = _host_pool().drop(columns=["baseline_days"])
     # Alternating rather than in row order: `_host_pool` is label-blocked, so a
     # monotone assignment gives every planet host a short baseline and every FP
@@ -172,7 +172,7 @@ def test_matching_is_reproducible_from_its_seed():
     assert sorted(a.hosts["tic_id"]) != sorted(c.hosts["tic_id"])
 
 
-def test_fold_routing_maps_each_host_to_the_fold_that_held_it_out():
+def test_fold_routing_maps_each_host_to_fold_held_it_out():
     predictions = pd.DataFrame({"tic_id": [10, 11, 12], "fold": [0, 3, 1], "label": [1, 0, 1]})
     assert fold_assignment(predictions) == {10: 0, 11: 3, 12: 1}
 
@@ -186,7 +186,7 @@ def test_a_host_in_two_folds_raises_rather_than_picking_one():
         fold_assignment(predictions.drop(columns=["fold"]))
 
 
-def test_the_pass_rate_splits_by_label_because_the_headline_conflates_two():
+def test_pass_rate_splits_by_label_not_conflated():
     scores = np.array([0.9, 0.8, 0.2, 0.1, 0.95, 0.05])
     labels = np.array([1, 1, 1, 0, 0, 0])
     rate = control_arm_rate(scores, labels, threshold=0.5, threshold_name="shortlist")
@@ -198,7 +198,7 @@ def test_the_pass_rate_splits_by_label_because_the_headline_conflates_two():
     assert rate.as_dict()["threshold_name"] == "shortlist"
 
 
-def test_a_non_finite_score_raises_instead_of_being_averaged_into_a_rate():
+def test_non_finite_score_raises_not_being_averaged_into_a_rate():
     scores = np.array([0.9, np.nan, 0.2])
     with pytest.raises(ValueError, match="non-finite"):
         control_arm_rate(scores, np.array([1, 0, 1]), threshold=0.5, threshold_name="shortlist")

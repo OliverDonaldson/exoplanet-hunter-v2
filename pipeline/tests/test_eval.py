@@ -144,7 +144,7 @@ def test_a_single_class_slice_is_nan_not_a_crash():
 # --------------------------------------------------------------- recall@FPR --
 
 
-def test_recall_at_fpr_respects_the_budget_without_splitting_tied_scores():
+def test_recall_at_fpr_respects_budget_with_tied_scores():
     """Ten tied negatives outrank every positive, so the only operating points
     are FPR 0 and FPR 0.10. A count-based cut would admit one of the ten and
     report a recall no threshold achieves."""
@@ -197,7 +197,7 @@ def test_slice_metrics_agree_with_reference_implementations():
 # ------------------------------------------------------------- paired frames --
 
 
-def test_paired_frame_normalises_score_names_whatever_they_arrived_as():
+def test_paired_frame_normalises_any_score_names():
     """`gap_table` reads score_left/score_right, so the rename is the contract —
     a caller passing `prob` must not silently produce an empty table."""
     left = frame([1, 2, 3], ["TESS"] * 3, column="prob")
@@ -317,7 +317,7 @@ def test_the_span_by_count_cross_separates_the_two_variables():
     assert table.loc["100-+", "gap"] > 0.3
 
 
-def test_rows_without_a_usable_ephemeris_drop_out_rather_than_binning_at_zero():
+def test_rows_without_ephemeris_drop_not_bin_at_zero():
     ids = np.arange(200)
     labels, scores = separable(200, np.random.default_rng(5), 2.0)
     cov = covariates(ids, ["Kepler"] * 200, np.full(200, 200), period=10.0, duration=0.1)
