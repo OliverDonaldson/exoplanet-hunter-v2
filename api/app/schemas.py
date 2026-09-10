@@ -371,6 +371,51 @@ class ModelSummaryResponse(BaseModel):
     n_high_confidence: int = 0
 
 
+class TrainingFoldHistory(BaseModel):
+    """One fold's per-epoch series, or the record that it logged none.
+
+    `epochs` is 0 for a fold with no history and every series is then absent,
+    which is not hypothetical: the served run's fold 0 logged its 31 summary
+    metrics and no epoch series. A client that dropped it would draw four
+    curves for a five-fold run and say nothing about the fifth.
+
+    `restored_epoch` is the epoch EarlyStopping put back, which is the
+    `val_auc` maximum rather than the `val_loss` minimum — the two differ by up
+    to 25 epochs here, so a chart that marks the loss minimum marks the wrong
+    point.
+    """
+
+    fold: int
+    epochs: int
+    note: str | None = None
+    loss: list[float] | None = None
+    val_loss: list[float] | None = None
+    auc: list[float] | None = None
+    val_auc: list[float] | None = None
+    learning_rate: list[float] | None = None
+    restored_epoch: int | None = None
+    stopped_epoch: int | None = None
+
+
+class TrainingHistoryResponse(BaseModel):
+    """`GET /model/training-history` — the served run's per-epoch curves.
+
+    Read from `models/history/<run_id>.json`, not from MLflow: the store is
+    33 MB of local development state and is excluded from the serving image.
+    `monitor`, `monitor_mode` and `patience` are the run's own recorded
+    early-stopping settings, so a client can say what `restored_epoch` is the
+    best of and why training ran as far past it as it did.
+    """
+
+    run_id: str
+    monitor: str
+    monitor_mode: str
+    patience: int
+    n_folds: int
+    n_folds_with_history: int
+    folds: list[TrainingFoldHistory]
+
+
 class RunRecord(BaseModel):
     """One CV run on disk.
 

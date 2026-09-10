@@ -281,6 +281,10 @@ function loadRuns() {
   return apiFetch('/runs?limit=8');
 }
 
+function loadTrainingHistory() {
+  return apiFetch('/model/training-history');
+}
+
 /* ── hydration ────────────────────────────────────────────
    Mutates SERVED and CANDIDATES in place before the first route() so every
    page stays synchronous. Returns the notes the UI should show about what
@@ -299,11 +303,12 @@ async function hydrate() {
     return { mode, notes: [`No API at ${API.base}${API.probeError ? ` (${API.probeError})` : ''}. Showing the prototype data set.`] };
   }
 
-  const [model, reliability, catalogue, runs] = await Promise.allSettled([
+  const [model, reliability, catalogue, runs, history] = await Promise.allSettled([
     loadModel(),
     loadReliability(),
     loadCandidates(),
     loadRuns(),
+    loadTrainingHistory(),
   ]);
 
   if (model.status === 'fulfilled') {
@@ -356,6 +361,20 @@ async function hydrate() {
     SERVED.reliability = reliability.value;
   } else {
     notes.push('Reliability curve unavailable.');
+  }
+
+  // Null and an empty history are different answers and the panel renders them
+  // differently: null is "the endpoint did not answer", a fold with epochs: 0
+  // is "this fold logged none", and the served run genuinely has one of those.
+  if (history.status === 'fulfilled') {
+    SERVED.trainingHistory = history.value;
+    SERVED.trainingHistoryError = null;
+  } else {
+    // The route's own 404 detail names the command that writes the export, so
+    // it is carried to the panel rather than replaced with a generic line.
+    SERVED.trainingHistory = null;
+    SERVED.trainingHistoryError = (history.reason && history.reason.message) || null;
+    notes.push(`Training history unavailable${SERVED.trainingHistoryError ? `: ${SERVED.trainingHistoryError}` : ''}.`);
   }
 
   // The prototype's run table must not survive into a live session, so RUNS is
