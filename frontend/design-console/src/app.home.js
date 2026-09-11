@@ -73,7 +73,7 @@ const PIPELINE = [
   { step:'01', title:'Catalog Refresh',  desc:'Automated ingestion from NASA ExoFOP, MAST, and the Kepler archive. Refreshed weekly, behind seven validation gates.' },
   { step:'02', title:'Validation Gates', desc:'Multi-stage quality filters: centroid shift, secondary eclipse, odd-even depth, ghost diagnostic.' },
   { step:'03', title:'GPU Training',     desc:'On-demand 11-branch CNN training on phase-folded light curves. Platt scaling for calibration.' },
-  { step:'04', title:'Live Scoring',     desc:'Calibrated probability with per-fold agreement and MC-dropout spread. A cold score fetches photometry from MAST: 20-60 s.' },
+  { step:'04', title:'Live Scoring',     desc:'Calibrated probability with per-fold agreement and MC-dropout spread. A cold score fetches photometry from MAST: usually 30-60 s, sometimes three minutes.' },
 ];
 
 const H1 = 'font-family:\'Anurati\', sans-serif;font-size:clamp(3.5rem, 7vw, 6rem);line-height:1.0;letter-spacing:-0.03em;margin-bottom:0';

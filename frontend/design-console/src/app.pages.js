@@ -117,7 +117,7 @@ function Vetting(candidateId) {
     c.scoring = true;
     /* Guarded on the route, not on the whole hash. The tab now rides in a query
        string on that hash, and switching tabs during the wait is exactly what a
-       20-60 s score invites — comparing the whole thing would have made the
+       30-60 s score invites, and comparing the whole hash would have made the
        result arrive to a hash that no longer matched and never paint at all,
        leaving P(planet) at `···` until the page was left and re-entered. */
     const wanted = location.hash.split('?')[0];
@@ -154,8 +154,9 @@ function Vetting(candidateId) {
   //
   // `?tab=` outranks that default, which is what makes a link to one stage of
   // one candidate's vetting hold. It also survives the re-entry above: a cold
-  // /score takes 20-60 s, switching tabs while it runs is the obvious thing to
-  // do, and the repaint that lands the score used to throw you back here.
+  // /score takes 30-60 s, sometimes minutes, so switching tabs while it runs
+  // is the obvious thing to do, and the repaint that lands the score used to
+  // throw you back here.
   // An unrecognised tab falls through to the default rather than to a blank
   // panel, on the same rule as an unrecognised route.
   const tabFromURL = routeQuery().get('tab');
@@ -1237,10 +1238,10 @@ const paintUpload = () => { if (uploadRender) uploadRender(); };
 /* `holds` marks the stage the run actually waits in. /score is one blocking
      request that reports nothing about its own progress, so the client knows
      exactly two things: when it was sent, and when it answered. The MAST fetch
-     is what that gap is — 20-60 s cold against about three seconds for
-     everything after it — so the run stops on that stage and counts real
-     seconds there, instead of running the bar to 100% on 'Platt calibration'
-     and waiting behind a finished animation. */
+     is what that gap is: four cold scores on 2026-09-11 ran 37, 42, 53 and
+     186 s, against about three seconds for everything after it. So the run
+     stops on that stage and counts real seconds there, instead of running the
+     bar to 100% on 'Platt calibration' and waiting behind a finished one. */
 const STAGES = [
   { label:'Resolving target in the TIC',      short:'Resolve',    to:8,   ms:600 },
   { label:'Downloading photometry from MAST', short:'Download',   to:56,  ms:3400, holds:true },
@@ -1289,7 +1290,7 @@ function Upload() {
         <div class="fmt-grid" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:1rem">
           ${[
             { h:'GET /score/{tic_id}', t:'live', d:'Resolves the target, fetches SPOC or PDC photometry from MAST, builds the eleven views and returns a calibrated score with per-fold detail.' },
-            { h:'Rate limit', t:'', d:'One scoring request per 60 seconds per client. The MAST fetch dominates the latency; expect 20–60 s on a cold cache.' },
+            { h:'Rate limit', t:'', d:'One scoring request per 60 seconds per client. The MAST fetch dominates the latency: usually 30–60 s on a cold cache, and measured as high as three minutes on a target that already had its ephemeris.' },
             { h:'Returned', t:'', d:'probability, prob_std, per_fold[5], branch contributions, and whichever Data Validation fields exist for the target.' },
           ].map(f => `
             <div style="padding:1.25rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.01)">
@@ -1314,7 +1315,7 @@ function Upload() {
         <input type="text" id="up-tic" placeholder="e.g. TIC 43288669 or KIC 8120608" value="${esc(state.ticId)}"
           style="width:100%;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);color:#F0EEE8;font-family:'JetBrains Mono';font-size:0.9rem;padding:1rem 1.25rem;outline:none;box-sizing:border-box">
         <div style="font-family:'Inter';font-size:0.75rem;color:#8A8FA8;margin-top:0.5rem">
-          Photometry is fetched from MAST on demand, so a first scoring run on an uncached target typically takes 20–60 seconds.
+          Photometry is fetched from MAST on demand, so a first scoring run on an uncached target usually takes 30–60 seconds, and occasionally up to three minutes.
         </div>
       </div>`;
     document.getElementById('up-tic').addEventListener('input', e => { state.ticId = e.target.value; paintAction(); });
