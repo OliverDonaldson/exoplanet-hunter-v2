@@ -22,7 +22,9 @@ import re
 from pathlib import Path
 
 import pytest
+from app.main import app
 from app.schemas import CandidateRow, ScoreResponse, TrainingFoldHistory
+from fastapi.testclient import TestClient
 
 _SRC = Path(__file__).resolve().parents[2] / "frontend" / "design-console" / "src"
 _CLIENT = _SRC / "app.api.js"
@@ -126,3 +128,69 @@ def test_the_model_page_reads_only_declared_history_fields():
     )
     # The two the panel cannot render without: the curve and the epoch it marks.
     assert {"val_auc", "restored_epoch"} <= accessed
+
+
+#: Every page that renders a figure from SERVED, CANDIDATES or GATING. When the
+#: probe falls back to the stand-in set these show prototype numbers, and each
+#: one has to say so — the Model page's TESS recall reads 0.6120 against the
+#: served 0.3113, and the Catalogue carries a K2 card the served run cannot
+#: have. Issue #75.
+_FIGURE_PAGES = {
+    "app.pages.js": ("About", "ModelPerformance", "Vetting"),
+    "app.home.js": ("Home", "Catalogue"),
+}
+
+
+@pytest.mark.skipif(not _SRC.exists(), reason="console source not in this checkout")
+def test_every_page_that_shows_a_figure_labels_prototype_data():
+    """A page rendering the stand-in set unlabelled is a wrong number, not a gap.
+
+    The console gives /healthz about 16 s before falling back, and a Fly machine
+    returning from a full stop is allowed 180 s. The window in between is what a
+    first visitor lands in, so the label is the only thing standing between them
+    and a measurement that was never made.
+    """
+    helper = (_SRC / "app.data.js").read_text()
+    assert "const prototypeNote =" in helper, (
+        "prototypeNote has been renamed or removed from app.data.js; the pages "
+        "below call it and this test would otherwise pass by finding nothing"
+    )
+    assert "API.mode === 'live' ? ''" in helper, (
+        "prototypeNote no longer gates on API.mode, so it renders in a live "
+        "session or never renders at all"
+    )
+
+    for filename, pages in _FIGURE_PAGES.items():
+        source = (_SRC / filename).read_text()
+        for page in pages:
+            body = re.search(rf"\nfunction {page}\(.*?\n(?=\nfunction |\Z)", source, re.S)
+            assert body, f"{page}() not found in {filename}; this test is reading nothing"
+            assert "prototypeNote(" in body.group(), (
+                f"{page}() renders figures without calling prototypeNote(); a "
+                "visitor arriving during a cold start reads the stand-in set as "
+                "the served run"
+            )
+
+
+def test_a_rejected_tic_detail_is_a_list_the_client_flattens():
+    """FastAPI's 422 `detail` is a list, and `new Error(list)` is "[object Object]".
+
+    That string is what the Upload page printed for a malformed TIC, so this
+    pins both halves: the wire shape that makes flattening necessary, and the
+    client still having the flattener. Issue #73.
+    """
+    body = TestClient(app).get("/score/notanumber").json()
+    assert isinstance(body["detail"], list), (
+        "422 detail is no longer a list; if FastAPI changed this, detailText still "
+        "handles it, but the comment explaining why it exists is now wrong"
+    )
+    assert body["detail"][0]["msg"], "the 422 entry carries no msg to render"
+
+    client_src = _CLIENT.read_text()
+    assert "const detailText =" in client_src, (
+        "detailText has gone from app.api.js; a list detail will render as "
+        "'[object Object]' on the Upload page again"
+    )
+    assert "new Error(detailText(" in client_src, (
+        "apiFetch no longer routes the error body through detailText"
+    )

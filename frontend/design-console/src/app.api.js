@@ -43,6 +43,16 @@ const API = {
   API.base = (fromQuery || fromGlobal || fromMeta || '/api').replace(/\/$/, '');
 })();
 
+/* FastAPI returns 422 `detail` as a list of {loc, msg, type} objects and 500s as
+   a bare string. `new Error(list)` renders "[object Object]", which is what the
+   Upload page printed for a malformed TIC. Flattened to one line here so every
+   caller gets a sentence. See issue #73. */
+const detailText = d => {
+  if (Array.isArray(d)) return d.map(e => (e && e.msg) || String(e)).join('; ');
+  if (d && typeof d === 'object') return d.msg || JSON.stringify(d);
+  return d;
+};
+
 /** fetch with a deadline — a hung request must not leave the console spinning. */
 async function apiFetch(path, { timeoutMs = API.timeoutMs, signal } = {}) {
   const ctrl = new AbortController();
@@ -56,7 +66,7 @@ async function apiFetch(path, { timeoutMs = API.timeoutMs, signal } = {}) {
     const res = await fetch(`${API.base}${path}`, { signal: ctrl.signal, cache: 'no-store' });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `${res.status} ${res.statusText}`);
+      throw new Error(detailText(body.detail) || `${res.status} ${res.statusText}`);
     }
     return await res.json();
   } finally {

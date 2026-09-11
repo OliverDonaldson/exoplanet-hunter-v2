@@ -141,6 +141,9 @@ function Home() {
             Serving <span style="color:#4DFFD2">${SERVED.runId}</span> · promoted ${SERVED.promotedAt}
           </div>
         </div>
+
+        ${prototypeNote('every figure in this row')}
+
         <div class="six-up" style="display:grid;grid-template-columns:repeat(6, 1fr);gap:2rem">
           ${missionStats().map(s => `
             <div style="border-top:1px solid ${s.accent ? 'rgba(77,255,210,0.3)' : 'rgba(255,255,255,0.1)'};padding-top:1.25rem">
@@ -343,6 +346,8 @@ function Catalogue() {
           Export CSV
         </button>
       </div>
+
+      ${prototypeNote('every row in this table')}
 
       <div style="display:flex;gap:1rem;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap">
         <div style="position:relative;flex:1;min-width:200px;max-width:320px">
