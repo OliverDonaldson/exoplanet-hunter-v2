@@ -194,6 +194,8 @@ function Vetting(candidateId) {
         <span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#4DFFD2">${c.id}</span>
       </div>
 
+      ${prototypeNote('every figure on this candidate')}
+
       <div class="vet-head" style="display:grid;grid-template-columns:1fr auto;gap:2rem;align-items:start;margin-bottom:2.5rem">
         <div>
           <div class="section-label" style="margin-bottom:0.75rem">Vetting Console</div>
@@ -941,6 +943,8 @@ function ModelPerformance() {
           Serving <span style="font-family:'JetBrains Mono';color:#4DFFD2">${SERVED.runId}</span> since ${SERVED.promotedAt} · ${SERVED.arch}
         </p>
       </div>
+
+      ${prototypeNote('every metric on this page')}
 
       <div class="mission-grid" style="margin-bottom:1rem">
         ${SERVED.missions.map(m => `
@@ -1982,12 +1986,7 @@ function About() {
         </div>
       </div>
 
-      ${API.mode === 'live' ? '' : `
-      <div class="note" style="margin-bottom:1rem;border-color:rgba(245,166,35,0.45)">
-        <span class="ico">▲</span>
-        <span class="txt"><b style="color:#F5A623;font-weight:500">The API did not answer, so every figure below is prototype data.</b>
-        This page quotes the served run whenever the service is reachable. What is rendering now is the console's stand-in set, which exists so the page works offline and is not a measurement of anything.</span>
-      </div>`}
+      ${prototypeNote('every figure below')}
 
       <div class="note" style="margin-bottom:2.5rem">
         <span class="ico">▸</span>

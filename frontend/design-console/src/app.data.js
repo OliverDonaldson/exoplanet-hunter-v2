@@ -26,6 +26,25 @@ const signed = (v, d = 2) => {
 const pendingPanel = msg =>
   `<div style="padding:3rem;text-align:center;font-family:'JetBrains Mono';font-size:0.75rem;color:#8A8FA8">${msg}</div>`;
 
+/* One rendering for "these figures are the stand-in set, not a measurement".
+
+   probeApi() gives /healthz about 16 s (8 s, retried once) before it falls back
+   to prototype data. A Fly machine that came back from a full stop rather than a
+   suspend answers in up to its 180 s grace period, because the entrypoint pulls
+   ~150 MB from R2 first. In that window the console renders TESS recall 0.6120
+   against the served 0.3113 and a K2 card the served run cannot have, so every
+   page that shows a figure has to say which set it is showing. Raising the probe
+   budget is the wrong lever: 180 s on a blank page is worse than a labelled
+   prototype. See issue #75.
+
+   `what` names the page's own figures so the sentence stays specific. */
+const prototypeNote = what => API.mode === 'live' ? '' : `
+      <div class="note" style="margin-bottom:1.5rem;border-color:rgba(245,166,35,0.45)">
+        <span class="ico">▲</span>
+        <span class="txt"><b style="color:#F5A623;font-weight:500">The API did not answer, so ${what} is prototype data.</b>
+        This page quotes the served run whenever the service is reachable. What is rendering now is the console's stand-in set, which exists so the page works offline and is not a measurement of anything. The service sleeps when idle and can take up to three minutes to wake — reloading once it is up shows the served figures.</span>
+      </div>`;
+
 /* deterministic per-candidate randomness — evidence must not reshuffle on every render */
 function rngFor(seed) {
   let h = 2166136261;
