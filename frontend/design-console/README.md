@@ -331,7 +331,8 @@ whatever wants to put state there next.
 
 ## Web Interface Guidelines
 
-`AGENTS.md` at the repo root is Vercel's Web Interface Guidelines. Nine gaps
+[`docs/web-interface-guidelines.md`](../../docs/web-interface-guidelines.md) is
+Vercel's Web Interface Guidelines. Nine gaps
 against it were closed:
 
 - **Deep links work again.** Every load used to be rewritten to `#/`. Only a bare

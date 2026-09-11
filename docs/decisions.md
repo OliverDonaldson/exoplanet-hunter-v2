@@ -31,6 +31,15 @@ is moved verbatim from `roadmap.md` §6 and frozen.
 | 2026-09-05 | W7 is accepted as unexplained **and recorded as resolved by the branch closure**: the +0.1446 is a branch-model deficit, the champion scores 0.9852 on that cell, and Kepler is 0% of the served population. Readiness exception A closes | [#33](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/33) |
 | 2026-09-05 | Seed 45 is skipped and not revisited: no recorded conclusion depends on a fourth draw, and n=3 to n=4 does not retire the thin-floor limitation — roughly ten draws would, which is research, and the research is frozen | [#34](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/34) |
 | 2026-09-05 | Discovery is kept as a stated deferral; Upload's two non-live modes are removed with their `why` copy folded into the endpoint grid; the Branch Evidence tab stops claiming "in progress" | [#35](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/35) |
+| 2026-09-11 | **The launch runs on the free tier.** `min_machines_running` stays 0 and the API stays `shared-cpu-1x`: suspend resumes in seconds, and #75's label makes the full-stop case honest rather than invisible. A card goes on the Render workspace so a bandwidth overrun bills at $0.15/GB instead of suspending the site mid-launch, and a few TICs are scored before posting so the `_score_lock` queue serves cache hits. `fly scale vm performance-1x` stays available as a one-line mid-launch escalation | [#75](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/75) |
+
+> **2026-09-11 — four of the 2026-09-05 decisions above were recorded but not
+> executed.** PR #54 changed one file, `docs/decisions.md`, and said so: "this
+> PR is the record, not the implementation." Issues #26–#35 were closed on the
+> decision existing. #31 landed in PR #81; #26, #27 and #29 landed here. #28,
+> #30, #32, #33, #34 and #35 needed no further work or had already landed. The
+> rows above are unchanged — they record what was decided, and they were right.
+
 
 ### The branch line, closed 2026-09-05
 
