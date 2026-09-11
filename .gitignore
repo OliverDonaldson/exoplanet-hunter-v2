@@ -86,11 +86,6 @@ data/processed/viewset_tfrecords_stage9/
 # being gated as a promotion candidate. Results are recorded in roadmap 4.2.
 models/stage9/
 
-# ai-slop-detector local state. The analysis cache is keyed without the Python
-# environment, so it is a local artefact, never shared. .slopconfig.yaml IS
-# tracked — CI and local runs must score the same code the same way.
-.slop-detector/
-
 # Stage scratch. `.phase1-scratch/` holds the Phase 1 drivers, their logs and a
 # 221 MB lightkurve download cache — the representative curves the momentum-dump
 # fetch reads and throws away. The table it produces

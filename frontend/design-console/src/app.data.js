@@ -941,7 +941,7 @@ function defaultVettingId() {
 }
 
 /* The tab reads "Exoplanet Hunter" on every route, by choice. The guidelines in
-   AGENTS.md ask for a title that tracks the current view, and this deliberately
+   The web interface guidelines ask for a title that tracks the current view, and this deliberately
    does not: the console is one product and the tab is its name, not a readout
    of which of its seven pages happens to be open.
 
