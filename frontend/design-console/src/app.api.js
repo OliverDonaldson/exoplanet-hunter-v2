@@ -250,7 +250,7 @@ async function loadScore(ticId, opts = {}, { signal } = {}) {
   if (has(opts.t0Btjd)) p.set('t0_btjd', String(opts.t0Btjd));
   if (has(opts.durationHours)) p.set('duration_hours', String(opts.durationHours));
   // Always. It is in the /score cache key, so fetching it on demand is a full
-  // cache miss and a second 20-60 s round trip; measured cost inline is a
+  // cache miss and a second 30-60 s round trip; measured cost inline is a
   // bounded BLS, ~0.15-0.3 s and ~16 kB.
   p.set('include_periodogram', 'true');
   const qs = p.size ? `?${p}` : '';
