@@ -51,11 +51,26 @@ def period_grid(
     return 1.0 / np.linspace(f_min, f_max, n)
 
 
+#: A single TESS sector is ~27 d, so baseline/2 would *narrow* the search
+#: there. 15 d was the old fixed cap; short baselines keep it unchanged.
+MIN_PERIOD_CEILING = 15.0
+
+
+def ceiling_for(baseline: float) -> float:
+    """The longest period this baseline can support: two transits, so half of it.
+
+    The fixed 15 d cap this replaces excluded 20.0% of the labelled catalogue
+    and bought almost nothing — the grid is uniform in frequency and capped in
+    count, so widening it costs no periods and 3% of spacing (#20).
+    """
+    return max(MIN_PERIOD_CEILING, baseline / 2.0)
+
+
 def bls_period_search(
     lc: lk.LightCurve,
     *,
     period_min: float = 0.5,
-    period_max: float = 15.0,
+    period_max: float | None = None,
     duration_grid: tuple[float, ...] = (0.05, 0.10, 0.15, 0.20),
     max_periods: int = 5_000,
 ) -> PeriodSearchResult:
@@ -69,10 +84,11 @@ def bls_period_search(
     bls = BoxLeastSquares(time, flux)
 
     baseline = float(time.max() - time.min()) if time.size else 0.0
+    ceiling = ceiling_for(baseline) if period_max is None else period_max
     periods = period_grid(
         baseline,
         period_min=period_min,
-        period_max=period_max,
+        period_max=ceiling,
         min_duration=min(duration_grid),
         max_periods=max_periods,
     )
@@ -93,7 +109,7 @@ def bls_periodogram(
     lc: lk.LightCurve,
     *,
     period_min: float = 0.5,
-    period_max: float = 15.0,
+    period_max: float | None = None,
     duration_grid: tuple[float, ...] = (0.05, 0.10, 0.15, 0.20),
     max_periods: int = 5_000,
     max_points: int = 400,
@@ -111,10 +127,11 @@ def bls_periodogram(
     time, flux = time[mask], flux[mask]
 
     baseline = float(time.max() - time.min()) if time.size else 0.0
+    ceiling = ceiling_for(baseline) if period_max is None else period_max
     periods = period_grid(
         baseline,
         period_min=period_min,
-        period_max=period_max,
+        period_max=ceiling,
         min_duration=min(duration_grid),
         max_periods=max_periods,
     )

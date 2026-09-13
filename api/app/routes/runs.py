@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.routes.model import _mission_lookup, _recall_at_fpr, _roc_auc
 from app.schemas import RunRecord, RunsResponse
@@ -32,6 +33,34 @@ _ROOT = Path(__file__).resolve().parents[3]
 #: and importing the validation package costs a pandera import on a route that
 #: is otherwise pure JSON and parquet.
 _PROMOTION_LOG = "promotion_log.json"
+
+#: Every request re-read every run's summary and predictions — 23 files and
+#: 17 MB today, growing with each experiment left on disk — before `limit` was
+#: applied, so the limit bounded the response and not the work (#21).
+_cache_lock = threading.Lock()
+_cache: tuple[tuple[object, ...], str, list[RunRecord]] | None = None
+
+#: Upper bound on `limit`. The console asks for 8 and the history table shows a
+#: dozen; anything past the number of runs on disk returns the same list.
+_MAX_LIMIT = 50
+
+
+def _fingerprint(registry_path: Path, cv_root: Path) -> tuple[object, ...]:
+    """Everything the answer depends on, by stat alone — no file is opened.
+
+    Mtimes rather than a listing, so a run rewritten in place by a refresh
+    invalidates the cache too.
+    """
+    # cv_root is in the key: tests point MODEL_DIR at tmp_path, and two
+    # fixtures could otherwise collide on identical mtimes.
+    parts: list[object] = [str(cv_root), registry_path.stat().st_mtime_ns]
+    for run_dir in sorted(cv_root.iterdir()):
+        row: list[object] = [run_dir.name]
+        for leaf in ("cv_summary.json", "predictions.parquet", _PROMOTION_LOG):
+            path = run_dir / leaf
+            row.append(path.stat().st_mtime_ns if path.is_file() else None)
+        parts.append(tuple(row))
+    return tuple(parts)
 
 
 def _promotion(run_dir: Path) -> tuple[str | None, str | None]:
@@ -80,7 +109,8 @@ def _metric(summary: dict, key: str) -> tuple[float | None, float | None]:
 
 
 @router.get("/runs", response_model=RunsResponse)
-def runs(limit: int = 12) -> RunsResponse:
+def runs(limit: int = Query(12, ge=1, le=_MAX_LIMIT)) -> RunsResponse:
+    global _cache
     models_dir = Path(os.environ.get("MODEL_DIR", _ROOT / "models"))
     registry_path = models_dir / "registry.json"
     if not registry_path.exists():
@@ -93,6 +123,13 @@ def runs(limit: int = 12) -> RunsResponse:
     cv_root = models_dir / "cv"
     if not cv_root.is_dir():
         return RunsResponse(active_run_id=active, runs=[])
+
+    # `limit` slices a cached list, so one entry serves every limit.
+    key = _fingerprint(registry_path, cv_root)
+    with _cache_lock:
+        hit = _cache
+    if hit is not None and hit[0] == key and hit[1] == active:
+        return RunsResponse(active_run_id=active, runs=hit[2][:limit])
 
     lookup = _mission_lookup(models_dir)
 
@@ -156,4 +193,6 @@ def runs(limit: int = 12) -> RunsResponse:
     records = [r for r in records if r.status == "active"] + sorted(
         [r for r in records if r.status != "active"], key=lambda r: r.short_id
     )
+    with _cache_lock:
+        _cache = (key, active, records)
     return RunsResponse(active_run_id=active, runs=records[:limit])
