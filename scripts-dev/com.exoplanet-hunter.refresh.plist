@@ -1,8 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Weekly catalogue refresh (Saturday 09:00). Install:
+<!-- Weekly catalogue refresh. Install (unload first — the schedule changed):
        cp scripts-dev/com.exoplanet-hunter.refresh.plist ~/Library/LaunchAgents/
-       launchctl load ~/Library/LaunchAgents/com.exoplanet-hunter.refresh.plist
-     Optional: set NOTIFY_WEBHOOK_URL below for a Discord/Slack ping. -->
+       launchctl unload ~/Library/LaunchAgents/com.exoplanet-hunter.refresh.plist
+       launchctl load   ~/Library/LaunchAgents/com.exoplanet-hunter.refresh.plist
+
+     Three triggers, not one, because launchd DROPS a StartCalendarInterval
+     outright when the Mac is off at the appointed minute — it does not run it
+     late. That is exactly what happened on Saturday 2026-09-12: the Mac booted
+     Sunday 13:34, the 09:00 slot was never attempted, and nothing said so.
+     A second calendar slot would have been dropped for the same reason, so the
+     one that actually covers a machine that was off is RunAtLoad, which fires
+     when the agent loads at login.
+
+     All three carry --if-stale 6.5, which exits 0 without doing anything when a
+     refresh has already completed inside 6.5 days. So:
+       * Saturday 09:00 anchors the weekly cadence and does the work.
+       * The daily 09:30 slot covers a Mac that was merely asleep.
+       * RunAtLoad covers a Mac that was off, on the next login.
+     Under normal operation every trigger but Saturday's is a no-op that costs
+     one interpreter start and one JSON read. 6.5 rather than 6 so that Friday's
+     daily slot, 6.02 days after Saturday's run, does not fire a day early.
+
+     Optional: set NOTIFY_WEBHOOK_URL below for a Discord/Slack ping. Without it
+     the run is heard only through outputs/refresh-status.json, which `make
+     ready` reads and reports as "weekly refresh current". -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -12,17 +33,27 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd /Users/ollie/Project/v2 &amp;&amp; /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python orchestration/flows/refresh_pipeline.py --data-config full >> outputs/refresh-cron.log 2>&amp;1</string>
+    <string>cd /Users/ollie/Project/v2 &amp;&amp; /opt/anaconda3/envs/exoplanet-hunter-v2/bin/python orchestration/flows/refresh_pipeline.py --data-config full --if-stale 6.5 >> outputs/refresh-cron.log 2>&amp;1</string>
   </array>
+  <key>RunAtLoad</key>
+  <true/>
   <key>StartCalendarInterval</key>
-  <dict>
-    <key>Weekday</key>
-    <integer>6</integer>
-    <key>Hour</key>
-    <integer>9</integer>
-    <key>Minute</key>
-    <integer>0</integer>
-  </dict>
+  <array>
+    <dict>
+      <key>Weekday</key>
+      <integer>6</integer>
+      <key>Hour</key>
+      <integer>9</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>9</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+  </array>
   <!--
   <key>EnvironmentVariables</key>
   <dict>

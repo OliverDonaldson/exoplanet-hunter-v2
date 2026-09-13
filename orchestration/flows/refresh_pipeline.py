@@ -30,6 +30,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -81,6 +82,57 @@ def _notify(message: str) -> None:
         requests.post(url, json={"content": message, "text": message}, timeout=10)
     except Exception as exc:
         get_run_logger().warning("notify failed: %s", exc)
+
+
+#: Where an unattended run leaves its outcome. launchd skips the calendar
+#: interval whenever the Mac is off at 09:00, so a missed run writes nothing at
+#: all — which is why `check_showcase_ready.py` reads this file's *age* as well
+#: as its state. A missed week and a failed week are both stale.
+REFRESH_STATUS = REPO_ROOT / "outputs" / "refresh-status.json"
+
+
+def _write_status(state: str, detail: str) -> None:
+    """Record the outcome of this run where `make ready` can find it.
+
+    Atomic tmp-replace: a reader that catches a half-written file cannot tell it
+    from a corrupt one, and would report a broken refresh that is merely mid-write.
+    """
+    REFRESH_STATUS.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "state": state,
+        "detail": detail,
+        "finished_at": datetime.now(UTC).isoformat(),
+    }
+    tmp = REFRESH_STATUS.with_suffix(REFRESH_STATUS.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2))
+    tmp.replace(REFRESH_STATUS)
+
+
+def _completed_within(days: float) -> bool:
+    """Has a refresh completed inside the last `days`?
+
+    Backs `--if-stale`. Only COMPLETED counts: a run that failed left the week
+    without a result, and a catch-up trigger that treated it as done would make
+    the failure permanent until someone noticed.
+    """
+    if not REFRESH_STATUS.exists():
+        return False
+    payload = json.loads(REFRESH_STATUS.read_text())
+    if payload.get("state") != "COMPLETED":
+        return False
+    stamp = datetime.fromisoformat(payload["finished_at"])
+    return datetime.now(UTC) - stamp < timedelta(days=days)
+
+
+def _record_outcome(flow_: object, flow_run: object, state: object) -> None:
+    """Prefect state hook: every terminal state lands in REFRESH_STATUS.
+
+    A hook rather than a try/except around the flow body, because the body must
+    keep raising — this records the outcome, it does not handle it.
+    """
+    name = getattr(state, "name", None) or getattr(state, "type", "UNKNOWN")
+    message = getattr(state, "message", None) or ""
+    _write_status(str(name).upper(), message)
 
 
 def _fail(message: str) -> NoReturn:
@@ -144,6 +196,23 @@ def refresh_label_catalogue(data_config: str) -> Path:
         shutil.copy(labels, previous)
     _run([PYTHON, "pipeline/scripts/refresh_labels.py", f"data={data_config}"])
     return previous
+
+
+@task(retries=2, retry_delay_seconds=120)
+def fetch_dv_reports() -> None:
+    """Query MAST for any labelled TESS target the DV manifest has never seen.
+
+    The dv-archive gate requires every labelled TESS target to be *in* the
+    manifest, because "never queried" and "no DV products" are the same absence
+    in a presence mask. Nothing in this flow closed that gap, so every refresh
+    that added a TESS row failed the gate and the week ended there: 2026-09-05
+    failed on 12 absent targets, passed only because a human ran this script by
+    hand, then failed again 80 minutes later on the next two rows the TAP query
+    returned. Retrying is safe — the fetcher is resumable and deliberately does
+    not cache transient failures, so a target it could not reach stays absent
+    and the gate still catches it.
+    """
+    _run([PYTHON, "pipeline/scripts/fetch_dv.py"])
 
 
 @task
@@ -455,7 +524,13 @@ def publish() -> None:
 # ------------------------------------------------------------------- flow --
 
 
-@flow(name="exoplanet-hunter-refresh", log_prints=True)
+@flow(
+    name="exoplanet-hunter-refresh",
+    log_prints=True,
+    on_completion=[_record_outcome],
+    on_failure=[_record_outcome],
+    on_crashed=[_record_outcome],
+)
 def refresh_pipeline(
     min_new_labelled: int = 25,
     force_train: bool = False,
@@ -465,6 +540,9 @@ def refresh_pipeline(
     download_exofop_exports()
     ingest_candidate_catalogue()
     previous = refresh_label_catalogue(data_config)
+    # Before the gates, not after: the labels this step just rewrote are what
+    # dv-archive checks the manifest against.
+    fetch_dv_reports()
     validation_gates(previous)
 
     if not train_enabled:
@@ -529,7 +607,20 @@ if __name__ == "__main__":
         help="Hydra data group for the build; 'full' is the production dataset "
         "(data=default is the old capped build and would replace the shards)",
     )
+    parser.add_argument(
+        "--if-stale",
+        type=float,
+        default=None,
+        metavar="DAYS",
+        help="Exit 0 without running if a refresh completed inside DAYS. launchd "
+        "drops a StartCalendarInterval outright when the Mac is off at the "
+        "appointed minute, so the Saturday slot alone loses the entire week; a "
+        "daily trigger under this flag catches the week up on the next boot.",
+    )
     args = parser.parse_args()
+    if args.if_stale is not None and _completed_within(args.if_stale):
+        print(f"a refresh completed inside {args.if_stale} d — nothing to catch up")
+        raise SystemExit(0)
     refresh_pipeline(
         min_new_labelled=args.min_new_labelled,
         force_train=args.force_train,
