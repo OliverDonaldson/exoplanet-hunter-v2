@@ -17,6 +17,7 @@ import logging
 import os
 import subprocess
 import time
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -341,3 +342,120 @@ def test_the_flow_gates_strictly(gate):
     to give one, so advisory alarms would be promoted straight past."""
     _, recorded = gate("PROMOTE")
     assert "--strict" in recorded["cmd"]
+
+
+# --------------------------------------------------------------------------
+# The DV fetch, and why it sits where it sits.
+# --------------------------------------------------------------------------
+
+
+def test_dv_reports_are_fetched_before_the_gates(monkeypatch):
+    """The defect this closes: `refresh_label_catalogue` adds TESS rows, then
+    dv-archive fails because nothing ever queried them. 2026-09-05 died here
+    twice. Order is the fix, so order is what is asserted."""
+    calls: list[str] = []
+
+    def fake_run(cmd: list[str]) -> None:
+        calls.append(Path(cmd[-1]).name if cmd[-1].endswith(".py") else cmd[-1])
+
+    monkeypatch.setattr(flow, "_run", fake_run)
+    monkeypatch.setattr(flow, "get_run_logger", lambda: logging.getLogger("test"))
+    flow.fetch_dv_reports.fn()
+    flow.validation_gates.fn(Path("/nonexistent/labels.previous.parquet"))
+    assert calls == ["fetch_dv.py", "--strict"]
+
+
+def test_a_failed_dv_fetch_raises_rather_than_skipping(monkeypatch):
+    """A fetch that fails silently would leave the gate to report absent targets
+    as though the catalogue were at fault. Guards raise."""
+
+    def boom(cmd: list[str]) -> None:
+        raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(flow, "_run", boom)
+    with pytest.raises(subprocess.CalledProcessError):
+        flow.fetch_dv_reports.fn()
+
+
+# --------------------------------------------------------------------------
+# The status file: a missed week and a failed week look the same from outside.
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def status(tmp_path: Path, monkeypatch):
+    path = tmp_path / "outputs" / "refresh-status.json"
+    monkeypatch.setattr(flow, "REFRESH_STATUS", path)
+    return path
+
+
+def test_a_completed_run_records_completed(status):
+    flow._record_outcome(None, None, _State("Completed", ""))
+    assert json.loads(status.read_text())["state"] == "COMPLETED"
+
+
+def test_a_failed_run_records_the_failure_not_silence(status):
+    """The whole point. Before this, a run that died in validation_gates left
+    nothing behind but a log nobody opens."""
+    flow._record_outcome(None, None, _State("Failed", "dv-archive FAIL"))
+    payload = json.loads(status.read_text())
+    assert payload["state"] == "FAILED"
+    assert "dv-archive" in payload["detail"]
+
+
+def test_the_status_carries_a_timestamp_that_parses(status):
+    """`check_showcase_ready` reads the age, not just the state: launchd skipping
+    the interval writes no state at all, and only the age catches that."""
+    from datetime import datetime
+
+    flow._record_outcome(None, None, _State("Completed", ""))
+    stamp = datetime.fromisoformat(json.loads(status.read_text())["finished_at"])
+    assert stamp.tzinfo is not None
+
+
+def test_the_status_write_leaves_no_tmp_file(status):
+    flow._record_outcome(None, None, _State("Completed", ""))
+    assert list(status.parent.iterdir()) == [status]
+
+
+class _State:
+    """The two attributes `_record_outcome` reads off a Prefect state."""
+
+    def __init__(self, name: str, message: str) -> None:
+        self.name = name
+        self.message = message
+
+
+# --------------------------------------------------------------------------
+# The catch-up trigger. launchd drops a missed calendar interval outright.
+# --------------------------------------------------------------------------
+
+
+def _stamp(status: Path, state: str, age_days: float) -> None:
+    from datetime import datetime, timedelta
+
+    when = datetime.now(UTC) - timedelta(days=age_days)
+    status.parent.mkdir(parents=True, exist_ok=True)
+    status.write_text(json.dumps({"state": state, "detail": "", "finished_at": when.isoformat()}))
+
+
+def test_a_recent_completed_run_is_not_caught_up(status):
+    _stamp(status, "COMPLETED", 1.0)
+    assert flow._completed_within(6.0)
+
+
+def test_an_old_run_is_caught_up(status):
+    _stamp(status, "COMPLETED", 9.0)
+    assert not flow._completed_within(6.0)
+
+
+def test_a_failed_run_never_counts_as_done(status):
+    """Otherwise one failure inside the window makes the failure permanent:
+    the catch-up would stand down on the evidence of the thing that broke."""
+    _stamp(status, "FAILED", 0.1)
+    assert not flow._completed_within(6.0)
+
+
+def test_no_status_means_catch_up(status):
+    """The state a never-run agent leaves behind."""
+    assert not flow._completed_within(6.0)

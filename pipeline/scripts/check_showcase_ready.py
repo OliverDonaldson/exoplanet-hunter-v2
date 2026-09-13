@@ -25,6 +25,7 @@ import tokenize
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -279,6 +280,51 @@ def check_console_builds() -> Result:
     return Result("console builds", False, tail[:90])
 
 
+#: The refresh runs Saturdays 09:00 from launchd. Eight days is one cycle plus a
+#: day of slack, so a single skipped week surfaces here rather than on the About
+#: page, which claims the refresh in the present tense to every visitor.
+REFRESH_MAX_AGE_DAYS = 8
+REFRESH_STATUS = ROOT / "outputs" / "refresh-status.json"
+#: Only the host that actually runs the agent can answer this. On any other
+#: clone there is no refresh to be stale, and a red check there would be noise.
+REFRESH_AGENT = Path.home() / "Library" / "LaunchAgents" / "com.exoplanet-hunter.refresh.plist"
+
+
+def check_refresh_healthy() -> Result:
+    """Has the weekly refresh actually completed recently, on the host that runs it?
+
+    Both failure modes are the same absence from here: a run that died in a gate
+    writes FAILED, and a run launchd skipped because the Mac was off writes
+    nothing at all and simply ages. Missing status is therefore a failure on a
+    host with the agent installed, never a pass.
+    """
+    name = "weekly refresh current"
+    if not REFRESH_AGENT.exists():
+        return Result(name, True, "n/a — no refresh agent installed on this host")
+    if not REFRESH_STATUS.exists():
+        return Result(name, False, "the agent is installed but no run has ever recorded a status")
+    try:
+        payload = json.loads(REFRESH_STATUS.read_text())
+    except json.JSONDecodeError as exc:
+        return Result(name, False, f"refresh-status.json is not readable JSON: {exc}")
+    state = payload.get("state")
+    finished = payload.get("finished_at")
+    if not state or not finished:
+        return Result(name, False, f"refresh-status.json has no state/finished_at: {payload}")
+    stamp = datetime.fromisoformat(finished)
+    age = datetime.now(UTC) - stamp
+    days = age / timedelta(days=1)
+    if state != "COMPLETED":
+        return Result(
+            name, False, f"last run {state} {days:.1f} d ago: {payload.get('detail', '')[:50]}"
+        )
+    if age > timedelta(days=REFRESH_MAX_AGE_DAYS):
+        return Result(
+            name, False, f"last completed {days:.1f} d ago, over the {REFRESH_MAX_AGE_DAYS} d limit"
+        )
+    return Result(name, True, f"completed {days:.1f} d ago")
+
+
 def check_git_clean() -> Result:
     code, out = run(["git", "status", "--porcelain"])
     dirty = [ln for ln in out.splitlines() if ln.strip()]
@@ -402,6 +448,7 @@ def main() -> int:
         check_module_docstrings,
         check_test_names,
         check_git_clean,
+        check_refresh_healthy,
         check_lint,
         check_types,
     ]
