@@ -226,6 +226,20 @@ is what a search has to report.
   (launchd). It runs whatever branch is checked out, so the tree stays on a
   branch whose pipeline code is tested. Its publish step rewrites DVC pointers;
   commit them afterwards as a separate `data:` commit.
+- **Is the refresh actually running?** `make ready` answers it, under "weekly
+  refresh current". Every terminal state is written to
+  `outputs/refresh-status.json` by a flow state hook, and the check reads both
+  the state and its age, because the two failure modes look different: a run
+  that dies in a gate records `FAILED`, and a run launchd never attempted
+  records nothing at all and simply ages past the eight-day limit. On a host
+  with no launchd agent installed the check reports `n/a` rather than going red.
+- The agent carries **three triggers**, all with `--if-stale 6.5`: Saturday
+  09:00 does the work, a daily 09:30 slot covers a Mac that was asleep, and
+  `RunAtLoad` covers a Mac that was off — launchd drops a missed
+  `StartCalendarInterval` outright rather than running it late, which is how
+  2026-09-12 passed unattempted and unremarked. Reinstalling the agent after a
+  change to `scripts-dev/com.exoplanet-hunter.refresh.plist` needs an explicit
+  `launchctl unload` first; the header of that file carries the commands.
 - Long runs are launched under `screen` with `caffeinate` from drivers in the
   ignored `.phase1-scratch/`, on mains power only, one process per CV run.
   Progress files: `gpu-progress.txt`, `cpu-progress.txt`.

@@ -46,6 +46,7 @@ a number on the live site the API never served.
 | comment share under 25% · no module docstring over 15 lines · test names under 60 characters | PLAN.md step 8's exit criteria, measured every run rather than recorded once. The pass landed seven lines under the comment-share bar; one thorough docstring erases that. |
 | every delivery step landed | Reads the status table in [PLAN.md](PLAN.md). No step still "not started" or "in progress". |
 | working tree is clean | Whatever is shown must be what is committed. |
+| **weekly refresh current** | The About page tells every visitor, in the present tense, that a weekly refresh runs. It had not completed since 2026-09-05 and nothing said so: the flow never fetched DV reports for newly-labelled TESS targets, so its own `dv-archive` gate failed every week that added one, and launchd drops a missed Saturday interval outright rather than running it late. Reads `outputs/refresh-status.json` for both state and age, so a failed run and a run that never happened are both caught. Reports `n/a` on a host with no launchd agent installed, because a stranger's clone has no refresh to be stale. |
 | ruff clean | The lint gate CI runs. |
 | mypy at or under baseline | mypy is not yet a CI gate here (issue #55, config skew), so the standard is the recorded count in `.mypy-baseline` — lower it, never raise it. |
 | fast suite green | `pipeline/tests` without network or slow markers, plus `api/tests`, which includes the console-contract test. Skipped by `--quick`. |
