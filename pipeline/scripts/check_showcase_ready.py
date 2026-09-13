@@ -71,12 +71,40 @@ class Result:
     detail: str
 
 
+#: The two ways a command fails without ever reaching a verdict. Distinct from
+#: each other and from any real exit code, because collapsing them into one
+#: "failed" is what let a timed-out test suite print another suite's pass line.
+TIMED_OUT = -100
+NOT_FOUND = -101
+
+
 def run(cmd: list[str], cwd: Path = ROOT, timeout: int = 900) -> tuple[int, str]:
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        return 127, str(exc)
+    except subprocess.TimeoutExpired as exc:
+        # Whatever the command managed to say before the deadline is the only
+        # evidence there is about where it got to.
+        partial = "".join(part for part in (exc.stdout, exc.stderr) if isinstance(part, str))
+        return TIMED_OUT, f"timed out after {exc.timeout:.0f}s\n{partial}"
+    except FileNotFoundError as exc:
+        return NOT_FOUND, str(exc)
     return p.returncode, (p.stdout + p.stderr)
+
+
+def _no_verdict(name: str, *codes_and_outputs: tuple[int, str]) -> Result | None:
+    """A command that never reached a verdict did not return a failing one.
+
+    Reporting a timeout as "the tests failed", or a missing binary as "the lint
+    is dirty", asserts a measurement that was never made — the same category
+    error the third promotion verdict exists to avoid. Returns a Result to
+    report instead, or None when every command actually ran.
+    """
+    for code, out in codes_and_outputs:
+        if code == TIMED_OUT:
+            return Result(name, False, f"did not finish — {out.strip().splitlines()[0]}")
+        if code == NOT_FOUND:
+            return Result(name, False, f"could not run — {out.strip().splitlines()[0]}")
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -271,6 +299,8 @@ def check_console_builds() -> Result:
     if not (frontend / "node_modules").exists():
         return Result("console builds", False, "no node_modules — run `npm install` in frontend/")
     code, out = run(["python3", "design-console/build.py"], cwd=frontend, timeout=300)
+    if stalled := _no_verdict("console builds", (code, out)):
+        return stalled
     built = frontend / "design-console" / "dist" / "index.html"
     size = built.stat().st_size if built.exists() else 0
     ok = code == 0 and size > 0
@@ -327,6 +357,8 @@ def check_refresh_healthy() -> Result:
 
 def check_git_clean() -> Result:
     code, out = run(["git", "status", "--porcelain"])
+    if stalled := _no_verdict("working tree is clean", (code, out)):
+        return stalled
     dirty = [ln for ln in out.splitlines() if ln.strip()]
     return Result(
         "working tree is clean",
@@ -337,6 +369,8 @@ def check_git_clean() -> Result:
 
 def check_lint() -> Result:
     code, out = run(["ruff", "check", "pipeline", "api"])
+    if stalled := _no_verdict("ruff clean", (code, out)):
+        return stalled
     return Result(
         "ruff clean", code == 0, out.strip().splitlines()[-1][:90] if code else "no findings"
     )
@@ -349,6 +383,8 @@ MYPY_BASELINE = ROOT / ".mypy-baseline"
 
 def check_types() -> Result:
     code, out = run(["mypy", "pipeline/src"])
+    if stalled := _no_verdict("mypy at or under baseline", (code, out)):
+        return stalled
     found = re.search(r"Found (\d+) error", out)
     errors = int(found.group(1)) if found else (0 if code == 0 else -1)
     if errors < 0:
@@ -361,14 +397,27 @@ def check_types() -> Result:
     return Result("mypy at or under baseline", ok, f"{errors} errors, {trend} baseline {baseline}")
 
 
+#: The pipeline fast suite was measured at 594 s on 2026-09-13, so the 900 s
+#: default left it a 1.5x margin on a quiet machine and less than that on a busy
+#: one. A suite that trips the deadline is reported as unfinished rather than
+#: failed, but the deadline should not be the usual outcome either.
+TEST_TIMEOUT = 1800
+
+
 def check_tests() -> Result:
-    code, out = run(["pytest", "pipeline/tests", "-m", "not network and not slow", "-q"])
-    api_code, api_out = run(["pytest", "api/tests", "-q"])
+    name = "fast suite green"
+    code, out = run(
+        ["pytest", "pipeline/tests", "-m", "not network and not slow", "-q"], timeout=TEST_TIMEOUT
+    )
+    api_code, api_out = run(["pytest", "api/tests", "-q"], timeout=TEST_TIMEOUT)
+    # Before reading any summary line. A timed-out suite writes no summary of its
+    # own, so the filter below would otherwise report the *other* suite's pass
+    # line as the detail for a check that just failed (issue #79).
+    if stalled := _no_verdict(name, (code, out), (api_code, api_out)):
+        return stalled
     tail = [ln for ln in (out + api_out).strip().splitlines() if "passed" in ln or "failed" in ln]
     ok = code == 0 and api_code == 0
-    return Result(
-        "fast suite green", ok, " | ".join(t.strip()[:44] for t in tail[-2:]) or "no summary line"
-    )
+    return Result(name, ok, " | ".join(t.strip()[:44] for t in tail[-2:]) or "no summary line")
 
 
 def _get(url: str, timeout: int = 25, retry_slow: bool = False) -> tuple[int, str]:
