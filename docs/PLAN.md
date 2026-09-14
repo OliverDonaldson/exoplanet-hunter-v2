@@ -200,19 +200,31 @@ nothing here trains a competitive model until item 6.
 
 | # | item | exit criterion | cost |
 |---|---|---|---:|
-| P2.1 | **Power analysis, written up as an experiment file.** What effect size is detectable at what n and member count, for each candidate metric. Decide the promotion metric. | An experiment file naming the metric the gate will use and the minimum detectable effect at the current n | ≈4 h |
+| ~~P2.1~~ **DONE 2026-09-14** | **Power analysis, written up as an experiment file.** | [p2-1-power-analysis-2026-09-14.md](experiments/p2-1-power-analysis-2026-09-14.md). The gate reads **ROC-AUC**, MDE **0.0131** on TESS at 5 members/fold, with pAUC FPR≤0.1 as a one-sided veto and recall @1% FPR demoted from gating. Two findings reorder what follows: seed sd exceeds sampling sd for every metric, and no metric detects a change confined to the follow-up region | done |
 | P2.2 | **The gate reads a confidence interval.** Paired bootstrap on the contrast, not a seed floor alone. | `promotion_gate.py` emits a CI on the contrast; the three verdicts are decided against it; existing recorded verdicts re-checked and any that change are noted, not rewritten | ≈6 h |
 | P2.3 | **Score the random forest.** `handcrafted.py::extract_features`, 14 features, the same folds and the same protocol. | [report.md](report.md) §4 row 1 carries a number instead of a dash | ≈2 h |
 | P2.4 | **Scale injection-recovery.** 40 hosts to a few hundred, with the null-injection floor reported beside every completeness figure. | A completeness curve with se < 0.02 per S/N bin, and the S/N = 0 floor printed on the same axes | ≈3 h + compute |
 | P2.5 | **Preprocessing and leakage audit against the new instrument.** | Every preprocessing step verified on cases with a known answer; a leakage probe that would fail if host grouping broke | ≈6 h |
 | P2.6 | **One full clean run.** All 13 aux dims, the current shard set, at least 5 members per fold, both architectures, one protocol, one report. | Both architectures compared on P2.1's metric with a margin read against P2.2's interval; the answer means something either way | ≈2 h + 12–20 h compute |
 
-**The metric recommendation, for P2.1 to accept or reject.** Partial AUC over
-FPR in [0, 0.1] — every row in the follow-up-relevant region rather than one
-crossing point — plus injection completeness above the null floor. Recall @1%
-FPR stays reported, demoted from gating. ROC-AUC's bootstrap sd on the same rows
-is 0.0059, seven times more stable than recall @1% FPR's 0.0410; the point is not
-to gate on AUC but to stop gating on the least stable statistic available.
+**The metric recommendation — answered 2026-09-14, half accepted.** The proposal
+was partial AUC over FPR in [0, 0.1] plus injection completeness, with recall @1%
+FPR demoted from gating. Demoting recall @1% FPR is **accepted**: its MDE at 5
+members is 0.1222, larger than the whole span of the record it was deciding.
+pAUC as the *gating* metric is **rejected on measurement**: ROC-AUC detects the
+same degradation at 1.9x pAUC's z, and on a degradation confined to the
+follow-up region — the case pAUC was chosen for — the two are within noise and
+both insignificant. The gate reads ROC-AUC with pAUC as a one-sided veto, so the
+relevance guard survives without the power penalty. The reasoning that "the
+point is not to gate on AUC" was right about the risk and wrong about the
+remedy; a veto addresses it and a weaker primary metric does not.
+
+**And P2.4 is promoted in priority.** No metric detects a change confined to the
+top 5–20% of the ranking (best z = 1.36 against 1.96), so the region the console
+exists to order is the region the labelled evidence cannot see. Only
+injection-recovery sets its own n there. P2.4 now decides whether the follow-up
+region is measurable at all, and P2.2 must carry the seed term in its interval,
+not the paired bootstrap alone.
 
 **Two re-scopings that fall out of this.** The weekly refresh is drift detection
 and calibration monitoring, not a promotion path — it has never been able to
