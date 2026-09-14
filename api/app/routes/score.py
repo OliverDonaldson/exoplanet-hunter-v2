@@ -14,6 +14,7 @@ process lifetime. 503 until a model has been promoted to the registry;
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import threading
@@ -199,13 +200,16 @@ def score_target(
         prob_std=outcome.prob_std,
         per_fold=[FoldPrediction(fold=i, prob=p) for i, p in enumerate(outcome.per_fold)],
         decision_threshold=outcome.threshold,
+        # NaN, not just None: `NaN > 3.0` is False, so an unmeasured centroid
+        # was served as `suspicious: false` and the console printed it as a
+        # pass. Omitting the block puts it on the panel's unmeasured path (#19).
         centroid=(
             CentroidDiagnostics(
                 centroid_snr=outcome.centroid_snr,
                 beb_threshold_sigma=BEB_THRESHOLD_SIGMA,
                 suspicious=outcome.centroid_snr > BEB_THRESHOLD_SIGMA,
             )
-            if outcome.centroid_snr is not None
+            if outcome.centroid_snr is not None and math.isfinite(outcome.centroid_snr)
             else None
         ),
         odd_even=(

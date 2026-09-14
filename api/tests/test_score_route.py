@@ -5,6 +5,8 @@ network-marked integration test in the pipeline suite; here the scorer is
 stubbed so the tests pin the HTTP semantics without heavy dependencies.
 """
 
+import dataclasses
+
 import pytest
 from app.main import app
 from app.routes import score as score_module
@@ -222,3 +224,52 @@ def test_score_cache_is_bounded_and_thread_safe(monkeypatch):
     assert errors == []
     assert len(score_module._cache) <= score_module._CACHE_MAX
     score_module._cache.clear()
+
+
+# --------------------------------------------------------------------------
+# An unmeasured centroid is not a clean one (#19).
+# --------------------------------------------------------------------------
+
+
+def _scorer_with_centroid(snr):
+    outcome = stub_outcome(261136679)
+    patched = dataclasses.replace(outcome, centroid_snr=snr)
+
+    class S:
+        def score(self, tic_id, **kwargs):
+            return dataclasses.replace(patched, tic_id=tic_id)
+
+    return S()
+
+
+def test_a_measured_centroid_is_still_reported(monkeypatch):
+    monkeypatch.setattr(score_module, "get_scorer", lambda: _scorer_with_centroid(4.2))
+    body = client.get("/score/261136679").json()
+    assert body["centroid"]["centroid_snr"] == 4.2
+    assert body["centroid"]["suspicious"] is True
+
+
+def test_a_nan_centroid_is_not_served_as_not_suspicious(monkeypatch):
+    """`NaN > 3.0` is False, so an unmeasured centroid was published as a clean
+    BEB check. extract_centroid_features returns NaN whenever MOM_CENTR1/2 are
+    absent, the transit masks are too small, or the out-of-transit scatter
+    collapses — 767 of 4,685 bulk-scored candidates carry it."""
+    monkeypatch.setattr(score_module, "get_scorer", lambda: _scorer_with_centroid(float("nan")))
+    body = client.get("/score/261136679").json()
+    assert body["centroid"] is None
+
+
+def test_an_infinite_centroid_is_not_served_either(monkeypatch):
+    monkeypatch.setattr(score_module, "get_scorer", lambda: _scorer_with_centroid(float("inf")))
+    assert client.get("/score/261136679").json()["centroid"] is None
+
+
+def test_a_nan_centroid_does_not_break_the_response(monkeypatch):
+    """The 2026-08-28 audit predicted a 500 here. It does not reproduce on
+    pydantic 2.13 / fastapi 0.139, which serialise NaN to null before the
+    encoder's allow_nan=False can raise — so the defect was a silent wrong
+    answer rather than an error. Pinned because a future default could change
+    it back into one."""
+    monkeypatch.setattr(score_module, "get_scorer", lambda: _scorer_with_centroid(float("nan")))
+    resp = client.get("/score/261136679")
+    assert resp.status_code == 200

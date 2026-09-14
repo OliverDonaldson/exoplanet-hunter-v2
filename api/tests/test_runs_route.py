@@ -101,3 +101,82 @@ def test_log_with_no_reasons_reports_none_not_empty(tmp_path, monkeypatch):
     row = _rows(tmp_path, monkeypatch)["terse"]
     assert row["verdict"] == "PROMOTE"
     assert row["reason"] is None
+
+
+# --------------------------------------------------------------------------
+# The scan is cached and `limit` is bounded (#21).
+# --------------------------------------------------------------------------
+
+
+def test_a_repeat_request_does_not_reread_the_run_directories(tmp_path, monkeypatch):
+    """The route opened every cv_summary.json and predictions.parquet on every
+    request — 23 files and 17 MB today — and applied `limit` only afterwards,
+    so the limit bounded the response and not the work."""
+    _registry(tmp_path, "a" * 32)
+    _run_dir(tmp_path, "a" * 32)
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    from app.routes import runs as runs_module
+
+    runs_module._cache = None
+    assert client.get("/runs").status_code == 200
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("re-read the run directories on a cache hit")
+
+    monkeypatch.setattr(runs_module, "_mission_lookup", forbidden)
+    assert client.get("/runs").status_code == 200
+
+
+def test_a_rewritten_summary_invalidates_the_cache(tmp_path, monkeypatch):
+    """A refresh rewrites these files in place, and a cache that outlived that
+    would serve last week's numbers under this week's registry."""
+    import os
+
+    _registry(tmp_path, "a" * 32)
+    run = _run_dir(tmp_path, "a" * 32, auc=0.91)
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    from app.routes import runs as runs_module
+
+    runs_module._cache = None
+    assert client.get("/runs").json()["runs"][0]["auc"] == 0.91
+
+    (run / "cv_summary.json").write_text(
+        json.dumps({"summary": {"test_roc_auc": {"mean": 0.95, "std": 0.005}}})
+    )
+    os.utime(run / "cv_summary.json", (0, 0))
+    assert client.get("/runs").json()["runs"][0]["auc"] == 0.95
+
+
+def test_a_new_run_appearing_invalidates_the_cache(tmp_path, monkeypatch):
+    _registry(tmp_path, "a" * 32)
+    _run_dir(tmp_path, "a" * 32)
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    from app.routes import runs as runs_module
+
+    runs_module._cache = None
+    assert len(client.get("/runs").json()["runs"]) == 1
+    _run_dir(tmp_path, "b" * 32)
+    assert len(client.get("/runs").json()["runs"]) == 2
+
+
+def test_limit_is_bounded(tmp_path, monkeypatch):
+    """Unbounded before: `?limit=100000` was accepted."""
+    _registry(tmp_path, "a" * 32)
+    _run_dir(tmp_path, "a" * 32)
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    assert client.get("/runs?limit=100000").status_code == 422
+    assert client.get("/runs?limit=0").status_code == 422
+    assert client.get("/runs?limit=50").status_code == 200
+
+
+def test_limit_still_slices_the_cached_list(tmp_path, monkeypatch):
+    """One cache entry has to serve every limit, or the cache is per-limit."""
+    _registry(tmp_path, "a" * 32)
+    for name in ("a" * 32, "b" * 32, "c" * 32):
+        _run_dir(tmp_path, name)
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    from app.routes import runs as runs_module
+
+    runs_module._cache = None
+    assert len(client.get("/runs?limit=3").json()["runs"]) == 3
+    assert len(client.get("/runs?limit=1").json()["runs"]) == 1
