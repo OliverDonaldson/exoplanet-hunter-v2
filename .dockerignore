@@ -13,11 +13,20 @@ data/processed/*
 !data/processed/*.dvc
 data/tables/catalogue/
 data/csv/exofop/
+# The API reads exactly three things under models/: cv, history and
+# registry.json. Everything else is an experimental arm — phase1, phase1a and
+# stage9 were 248 MB of the 1.6 GB context, and the Dockerfile COPYs models/
+# wholesale, so they were in the image too. Deny by default and name what is
+# served, so the next arm directory does not leak the way these three did.
+models/*
+!models/cv
+!models/history
+!models/registry.json
 # Docker strips the trailing slash, so this also swallows the *.dvc pointer
 # files the entrypoint pulls with — re-include them explicitly.
 models/cv/*/
 !models/cv/*.dvc
-mlruns/
+**/mlruns/
 # Same trailing-slash trick as models/cv: exclude the bulk, re-include the
 # pointer. results/candidates_scored.parquet is the catalogue's P(planet)
 # column and the API reads it at request time.
@@ -25,6 +34,7 @@ results/*
 !results/*.dvc
 outputs/
 multirun/
+.phase1-scratch/
 node_modules/
 frontend/design-console/dist/
 frontend/node_modules/
