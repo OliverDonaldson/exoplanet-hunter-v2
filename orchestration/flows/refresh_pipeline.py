@@ -1,4 +1,4 @@
-"""The V2 DAG: refresh → validate → [changed materially?] → train → promote → publish.
+"""The V2 DAG: refresh → validate → [changed materially?] → train → gate → publish.
 
 Run standalone (no Prefect server needed — the local API spins up per run):
 
@@ -152,9 +152,17 @@ def _gate_headline(verdict: str) -> str:
     UNRESOLVED has to say in words that it is not a rejection. The loop cannot
     promote on it, but reporting it as a quality failure asserts a measurement
     the run did not make — which is the whole reason the third verdict exists.
+
+    PROMOTE no longer reads as "PROMOTED", because since 2026-09-15 nothing is.
+    A headline naming an outcome the run did not produce is the same defect as
+    reporting UNRESOLVED as a rejection, pointed the other way.
     """
     return {
-        "PROMOTE": "PROMOTED",
+        "PROMOTE": (
+            "CLEARED THE BAR — and nothing was promoted, because the weekly loop no "
+            "longer promotes. The candidate is on disk with its verdict; promoting it "
+            "is a decision for Ollie"
+        ),
         "REJECT": "rejected on quality",
         "UNRESOLVED": (
             "UNRESOLVED — the margin is inside its own noise floor, so this is NOT a "
@@ -400,12 +408,16 @@ def control_lane() -> Path | None:
 
 @task
 def promotion_gate(champion_summary: Path) -> PromotionDecision:
-    """Gate the newest CV run; promote (update registry) if it wins.
+    """Gate the newest CV run and report the verdict. Promotes nothing.
 
     Returns the gate's own verdict with its reasons and alarms, not a bool. A
     bool has two states for a rule with three, and collapsing UNRESOLVED into
     either neighbour is what made every non-promotion read as a quality
     rejection in the one message anybody sees.
+
+    The registry is never written from here. `promotion_log.json` is still
+    written per run, so `/runs` keeps serving each candidate's verdict and
+    reasons — the week still produces a judgement, it just no longer applies one.
     """
     from exoplanet_hunter.validation import (
         PROMOTION_LOG_NAME,
@@ -449,7 +461,12 @@ def promotion_gate(champion_summary: Path) -> PromotionDecision:
         PYTHON,
         "pipeline/scripts/promotion_gate.py",
         str(newest.relative_to(REPO_ROOT)),
-        "--promote",
+        # No --promote. The weekly loop is calibration and drift detection, not a
+        # promotion path (PLAN.md §5, executed 2026-09-15). It still gates, still
+        # writes promotion_log.json and still reports — it just never writes the
+        # registry. --strict stays: it decides how alarms reach the verdict, and
+        # an unattended run still cannot give an alarm the written explanation
+        # promotion would owe.
         "--strict",
         "--champion-summary",
         str(champion_summary.relative_to(REPO_ROOT)),
@@ -485,13 +502,14 @@ def promotion_gate(champion_summary: Path) -> PromotionDecision:
 
     expected = VERDICT_EXIT_CODES[decision.verdict]
     if result.returncode != expected:
-        # The gate decided, then something after the decision failed — applying
-        # a promotion to the registry is the only step there. Reporting the
-        # verdict alone here would claim an outcome that was never applied.
+        # The gate decided and then exited on a code that does not match its own
+        # verdict. Nothing is applied from here any more, so this no longer risks
+        # a half-written registry — but a gate disagreeing with itself is a gate
+        # whose verdict cannot be trusted, and reporting it would launder that.
         _fail(
             f"the promotion gate decided {decision.verdict.value} but exited "
-            f"{result.returncode} rather than {expected} — the decision was reached and "
-            "then failed to apply. The registry may not reflect it"
+            f"{result.returncode} rather than {expected} — the verdict and the exit "
+            "code disagree, so neither can be relied on"
         )
 
     get_run_logger().info("promotion gate: %s", decision)

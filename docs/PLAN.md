@@ -228,7 +228,11 @@ not the paired bootstrap alone.
 
 **Two re-scopings that fall out of this.** The weekly refresh is drift detection
 and calibration monitoring, not a promotion path — it has never been able to
-promote and should say so. And the eventual discovery goal is served by the same
+promote and should say so. **Executed 2026-09-15**: `--promote` is gone from the
+flow, the PROMOTE headline no longer reads "PROMOTED", and the test that asserted
+the opposite is inverted. Written 2026-09-07 and unexecuted until then, which
+mattered more after P2.1: for one day the loop would have promoted on recall @1%
+FPR, the metric P2.1 had just demoted. And the eventual discovery goal is served by the same
 work: injection-recovery is completeness as a function of depth and period, which
 is what a search has to report.
 
@@ -255,5 +259,11 @@ is what a search has to report.
 - Long runs are launched under `screen` with `caffeinate` from drivers in the
   ignored `.phase1-scratch/`, on mains power only, one process per CV run.
   Progress files: `gpu-progress.txt`, `cpu-progress.txt`.
+- **The weekly refresh promotes nothing.** It gates, writes each candidate's
+  `promotion_log.json` so `/runs` can serve the verdict, and reports — the
+  registry is never written from the flow. Promotion is a decision Ollie makes
+  with the evidence in front of him. A PROMOTE verdict reads as "CLEARED THE
+  BAR — and nothing was promoted", because a headline naming an outcome the run
+  did not produce is the same defect as reporting UNRESOLVED as a rejection.
 - Experimental arms are written outside `models/cv/` so the weekly gate cannot
   select them as candidates.
