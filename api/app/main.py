@@ -89,6 +89,7 @@ def healthz() -> HealthResponse:
     import time
     from pathlib import Path
 
+    from app.ratelimit import keyed_by
     from app.routes.score import ensemble_ready
 
     uptime = time.monotonic() - _STARTED_MONOTONIC
@@ -102,6 +103,7 @@ def healthz() -> HealthResponse:
             model_version=f"cnn_dualview-cv-{run_id[:8]}",
             ensemble_ready=ensemble_ready(),
             uptime_s=round(uptime, 1),
+            rate_limit_keyed_by=keyed_by(),
         )
     return HealthResponse(
         status="degraded",
@@ -109,4 +111,5 @@ def healthz() -> HealthResponse:
         model_version=None,
         ensemble_ready=False,
         uptime_s=round(uptime, 1),
+        rate_limit_keyed_by=keyed_by(),
     )

@@ -51,6 +51,7 @@ a number on the live site the API never served.
 | mypy at or under baseline | mypy is not yet a CI gate here (issue #55, config skew), so the standard is the recorded count in `.mypy-baseline` — lower it, never raise it. |
 | fast suite green | `pipeline/tests` without network or slow markers, plus `api/tests`, which includes the console-contract test. Skipped by `--quick`. |
 | deployed API answers | `--live` only. A linked project that 404s is worse than no link. |
+| **rate limit is per client** | `--live` only. Reads `rate_limit_keyed_by` off `/healthz`. `"socket"` means the limiter is keying on the peer address, which behind Fly's proxy is one shared bucket for every visitor — the console advertises a per-client limit, so that is a claim the deployment is not keeping ([#84](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/84)). Read rather than measured on purpose: the only way to observe a shared bucket directly is to exhaust it, which denies a real visitor their score for a minute. |
 | deployed console answers | `--live` only. Same reason. |
 
 ## What it deliberately does not check
