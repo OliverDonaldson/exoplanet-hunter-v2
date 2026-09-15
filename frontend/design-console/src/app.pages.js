@@ -1118,7 +1118,7 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
             ${metricBlock('F1', f1, m.f1Err, false)}
           </div>
           <div style="font-family:'Inter';font-size:0.75rem;line-height:1.6;color:rgba(240,238,232,0.5);margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.06)">
-            Intervals are the ±1σ spread over the five folds. Recall @ 1% FPR is the promotion criterion: it is what "would this candidate reach the shortlist" actually means, and it is the number that rejected all five architecture arms.
+            Intervals are the ±1σ spread over the five folds. Recall @ 1% FPR is reported here and no longer gates: it is cut at the ten highest-scoring negatives, and a power analysis on 14 September 2026 put its smallest detectable change at 0.122 — wider than the differences it was being used to decide. It is still what "would this candidate reach the shortlist" means, and it is still the number that rejected all five architecture arms. The gate now reads ROC-AUC, where the same analysis measured 0.013, with partial AUC below 10% FPR able to veto a candidate that improves the bulk ordering at the shortlist's expense.
           </div>
         </div>
       </div>`;
@@ -1795,8 +1795,12 @@ function aboutSections() {
       shipped. Uncertainty is Monte-Carlo dropout at inference.</p>
       <p><b>Nothing ships without clearing a gate.</b> A candidate run is scored
       on the same folds as the champion and has to beat it on the decision metric
-      by more than that metric's seed-to-seed noise floor, without degrading
-      calibration or shortlist recall. ${run} is what answers this
+      — ROC-AUC since 14 September 2026 — by more than that metric's own noise,
+      without degrading calibration or shortlist recall. The weekly refresh runs
+      that gate every week and never applies it: it is there to watch for drift
+      and to keep the champion's calibration measured on current data, and
+      promoting anything is a decision a person makes with the evidence in front
+      of them. ${run} is what answers this
       console${SERVED.promotedAt ? `, promoted ${esc(SERVED.promotedAt)}` : ''}.
       The gate has returned no to every candidate since.</p>`],
 
