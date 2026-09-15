@@ -140,3 +140,57 @@ def test_it_can_be_turned_off_explicitly(monkeypatch):
     monkeypatch.setattr(rl, "_limiter", None)
     for _ in range(100):
         rl.rate_limit(_FakeRequest(host="1.2.3.4"))
+
+
+# --------------------------------------------------------------------------
+# The deployment, not just the code (#84).
+# --------------------------------------------------------------------------
+
+
+def test_fly_toml_names_a_trusted_client_header():
+    """The gap #84 shipped was never test coverage — `client_identity`'s two
+    branches were both covered. It was that nothing asserted the *deployment*
+    sets the variable, so the limiter keyed every visitor to Fly's proxy and
+    the console advertised a per-client limit that was never enforced."""
+    import tomllib
+    from pathlib import Path
+
+    fly = Path(__file__).resolve().parents[2] / "fly.toml"
+    env = tomllib.loads(fly.read_text()).get("env", {})
+    assert env.get("TRUSTED_CLIENT_IP_HEADER") == "Fly-Client-IP", (
+        "fly.toml [env] must name the header Fly's edge sets, or every visitor "
+        "shares one rate-limit bucket in production"
+    )
+
+
+def test_keyed_by_reports_the_header_when_one_is_trusted(monkeypatch):
+    from app import ratelimit
+
+    monkeypatch.setenv("TRUSTED_CLIENT_IP_HEADER", "Fly-Client-IP")
+    assert ratelimit.keyed_by() == "Fly-Client-IP"
+
+
+def test_keyed_by_says_socket_when_none_is(monkeypatch):
+    """ "socket" is the word that matters: behind a proxy it means one bucket for
+    everybody, and it has to be visible from outside rather than inferred."""
+    from app import ratelimit
+
+    monkeypatch.delenv("TRUSTED_CLIENT_IP_HEADER", raising=False)
+    assert ratelimit.keyed_by() == "socket"
+
+
+def test_keyed_by_is_none_when_the_limiter_is_off(monkeypatch):
+    from app import ratelimit
+
+    monkeypatch.setattr(ratelimit, "_limiter", None)
+    assert ratelimit.keyed_by() is None
+
+
+def test_healthz_reports_the_keying(monkeypatch):
+    """Reported on a route that costs nothing. The only other way to observe a
+    shared bucket is to trip it, which denies a real visitor their score."""
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("TRUSTED_CLIENT_IP_HEADER", "Fly-Client-IP")
+    assert TestClient(app).get("/healthz").json()["rate_limit_keyed_by"] == "Fly-Client-IP"

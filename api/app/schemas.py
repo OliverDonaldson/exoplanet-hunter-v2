@@ -171,6 +171,12 @@ class HealthResponse(BaseModel):
     model_version: str | None
     ensemble_ready: bool = False
     uptime_s: float = 0.0
+    #: What the rate limiter keys a bucket on: the trusted header's name, or
+    #: "socket" when it falls back to the peer address. Behind a proxy "socket"
+    #: means one shared bucket for every visitor, and #84 shipped that way
+    #: precisely because nothing reported it. Optional so an older deployment
+    #: still validates against this schema.
+    rate_limit_keyed_by: str | None = None
 
 
 class ReliabilityBin(BaseModel):

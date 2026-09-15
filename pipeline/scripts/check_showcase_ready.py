@@ -7,7 +7,7 @@ every check below runs something and reads the result.
     python pipeline/scripts/check_showcase_ready.py [--live] [--quick]
 
 Exit 0 and "LOOKS GOOD" when every required check passes; exit 1 otherwise.
-`--live` adds the two checks that need the deployed API and console; `--quick`
+`--live` adds the checks that need the deployed API and console; `--quick`
 skips the test suite, which is the slow one.
 """
 
@@ -451,6 +451,31 @@ def check_api_live() -> Result:
     return Result("deployed API answers", not missing, detail)
 
 
+def check_rate_limit_is_per_client() -> Result:
+    """--live only. Is the deployed limiter keying on a real client address?
+
+    Read off /healthz rather than measured by tripping the limiter: the only way
+    to observe a shared bucket directly is to exhaust it, which denies a real
+    visitor their score for a minute. #84 ran through the launch because the code
+    supported per-client keying and nothing checked the deployment used it.
+    """
+    name = "rate limit is per client"
+    status, body = _get(f"{API_URL}/healthz")
+    if status != 200:
+        return Result(name, False, f"/healthz -> {status or body[:40]}")
+    try:
+        keyed = json.loads(body).get("rate_limit_keyed_by")
+    except json.JSONDecodeError as exc:
+        return Result(name, False, f"/healthz is not readable JSON: {exc}")
+    if keyed is None:
+        return Result(name, False, "deployment predates the field, or the limiter is off")
+    if keyed == "socket":
+        return Result(
+            name, False, "keyed on the peer address — behind a proxy that is one shared bucket"
+        )
+    return Result(name, True, f"keyed on {keyed}")
+
+
 def check_console_live() -> Result:
     status, body = _get(CONSOLE_URL)
     ok = status == 200 and "<" in body
@@ -504,7 +529,12 @@ def main() -> int:
     if not args.quick:
         checks.append(check_tests)
     if args.live:
-        checks += [check_api_live, check_console_live, check_link_preview]
+        checks += [
+            check_api_live,
+            check_rate_limit_is_per_client,
+            check_console_live,
+            check_link_preview,
+        ]
 
     print(f"\n  Showcase readiness — {ROOT}\n")
     results = []

@@ -142,6 +142,20 @@ def client_identity(request: Request) -> str:
     return "unknown"
 
 
+def keyed_by() -> str | None:
+    """What `client_identity` will key on, for /healthz to report.
+
+    None when the limiter is off. "socket" is the answer that matters: behind a
+    proxy it means every visitor shares one bucket, which is how #84 ran through
+    the launch unnoticed — the code supported per-client keying and nothing said
+    the deployment was not using it.
+    """
+    if _limiter is None:
+        return None
+    header = os.environ.get("TRUSTED_CLIENT_IP_HEADER", "").strip()
+    return header or "socket"
+
+
 def _limiter_from_env() -> RateLimiter | None:
     """`None` when disabled. Set `RATE_LIMIT_PER_MINUTE=0` to turn it off."""
     raw = os.environ.get("RATE_LIMIT_PER_MINUTE")
