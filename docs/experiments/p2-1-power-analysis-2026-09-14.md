@@ -156,3 +156,65 @@ exist.
   its agreement with any particular improvement.
 - pAUC is McClish-standardised. The ranking by stability does not depend on that
   choice, but the absolute values do.
+
+---
+
+## Note appended 2026-09-17 — the seed sd was one arm's, on 2 df, and the MDE carried one seed term
+
+This entry is not edited. The two corrections below change §1's MDE column and
+§3's headline figure; everything else in this file stands, including the metric
+ranking, the demotion of recall @1% FPR, and §4's finding about the follow-up
+region. Measured by `power_analysis.py --n-boot 2000`, which now runs the census
+described here. Nothing was trained. Issue [#93](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/93).
+
+**1. The seed sd came from one arm's three members.** `seed_spread` read
+`arm C` only, so §1's 0.0093 is a 2-df estimate. §5 said so; what it could not
+say is how unstable that is. Fifteen multi-member runs were already on disk. Per-run
+ROC-AUC seed sd across them spans **0.0032 to 0.0193, a 6x range**, which is what
+2 df looks like. Pooled on the TESS gating slice:
+
+| architecture | pooled seed sd, ROC-AUC | runs | df |
+|---|---:|---:|---:|
+| `cnn_branches` | **0.0108** | 13 | 26 |
+| `cnn_dualview` | **0.0062** | 2 | 4 |
+| all pooled | 0.0103 | 15 | 30 |
+
+Arms C'' and D'' are `cnn_branches`. Their sd was being read as the project's
+MDE for every comparison, including P2.6's, which compares both architectures —
+the category error `docs/index.md` rule 7 forbids. Decision
+[#34](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/34) judged
+that "roughly ten draws would" retire the thin-floor limitation and that the
+research was frozen; thirteen extra draws did not need any.
+
+**2. The MDE carried one seed term where a contrast needs two.** §1 computed
+`hypot(boot, sd_seed / sqrt(M))`, the sd of one arm's mean.
+`promotion.py::decision_floor` has read
+`sqrt(sd_cand^2/n_cand + sd_inc^2/n_inc)` since 4.1b, and 4.1b argues for it
+explicitly. The gate and this analysis disagreed about the same quantity.
+
+Corrected, at 5 members per fold, TESS ROC-AUC, 80% power:
+
+| comparison | M=3 | M=5 | M=10 |
+|---|---:|---:|---:|
+| branch vs branch | 0.0255 | **0.0201** | 0.0148 |
+| dual-view vs dual-view | 0.0155 | **0.0126** | 0.0098 |
+| *as published above* | 0.0162 | *0.0131* | 0.0101 |
+
+**So 0.0131 is about right for a dual-view challenger and too lenient by 1.5x
+for a branch one.** `power_analysis.py` now prints both columns, `MDE P2.1` and
+`MDE 2-arm`, so the published figure stays locatable beside the correct one.
+
+**3. Pairing on member index does not help, and that is worth recording.** If
+the two arms' seed draws were shared, the contrast would need no second term.
+Measured: the member-paired contrast sd is **0.0175**, against
+`sqrt(2) x 0.0093 = 0.0130` predicted under independence, and the member main
+effect common to both arms is ~0. The draws are independent or worse, so both
+terms stand. This rules out the obvious fix before compute is spent on it.
+
+**4. What §3's decision looks like under the correction.** The gate still reads
+ROC-AUC with pAUC as a one-sided veto; nothing about the metric choice changes.
+But the veto's own bar moves: dual-view pAUC seed sd is 0.0171, so at 5 members
+it can only fire on a regression beyond **+-0.036**. A veto with that trigger is
+close to inert on a metric whose range of interest is smaller than its threshold.
+pAUC stays reported; it should not be relied on as the relevance guard. Recorded
+as [#105](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/105).

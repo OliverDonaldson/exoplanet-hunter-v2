@@ -36,6 +36,14 @@ ROOT = Path(__file__).resolve().parents[2]
 Z_80_POWER = 2.802
 #: Members per fold the clean run is planned at (#78 part B).
 PLANNED_MEMBERS = 5
+#: The canonical mission map. Dual-view predictions files carry no `mission`
+#: column, so the gating slice has to be joined on rather than read off.
+MISSION_TABLE = ROOT / "data/tables/labels/labels.parquet"
+#: Read from a run's member checkpoint names: `cv_summary.json` carries no model
+#: name for runs that predate `run_config`.
+ARCHITECTURES = ("cnn_dualview", "cnn_branches")
+#: Where multi-member runs live. `models/stage9/` holds single-member arms.
+CENSUS_ROOTS = (ROOT / "models/cv", ROOT / "models/phase1")
 
 Metric = Callable[[np.ndarray, np.ndarray], float]
 
@@ -107,7 +115,130 @@ def seed_spread(y: np.ndarray, members: np.ndarray, fn: Metric) -> float:
     return float(np.std([fn(y, members[:, j]) for j in range(members.shape[1])], ddof=1))
 
 
-def stability(df: pd.DataFrame, label: str, n_boot: int, seed: int) -> None:
+def architecture_of(run_dir: Path) -> str:
+    """The architecture a run trained, from its fold-0 member checkpoint names.
+
+    Raises rather than guessing. A seed sd pooled across architectures is the
+    category error `docs/index.md` rule 7 forbids, and the branch and dual-view
+    sds differ by 1.7x (2026-09-17 census), so a wrong label is a wrong MDE.
+    """
+    fold0 = run_dir / "fold_0"
+    found = {a for a in ARCHITECTURES if any(fold0.glob(f"model_*_{a}.keras"))}
+    if len(found) != 1:
+        raise ValueError(
+            f"{run_dir}: expected exactly one architecture in {fold0}, found {sorted(found)}"
+        )
+    return found.pop()
+
+
+def mission_map() -> pd.DataFrame:
+    """tic_id -> mission, from the labels table rather than a sibling arm."""
+    if not MISSION_TABLE.exists():
+        raise FileNotFoundError(f"no mission map at {MISSION_TABLE}; run the label build first")
+    return pd.read_parquet(MISSION_TABLE)[["tic_id", "mission"]].drop_duplicates()
+
+
+def seed_census(missions: pd.DataFrame, slice_mission: str = "TESS") -> pd.DataFrame:
+    """Per-run seed sd on one mission slice, for every multi-member run on disk.
+
+    P2.1 read one arm's three members and got a 2-df estimate whose per-arm
+    values span 6x. This walks every run that wrote `member_score_*` columns.
+    """
+    rows = []
+    for root in CENSUS_ROOTS:
+        for path in sorted(root.glob("*/predictions.parquet")):
+            frame = pd.read_parquet(path)
+            members = [c for c in frame.columns if c.startswith("member_score_")]
+            if len(members) < 2:
+                continue
+            if "mission" not in frame.columns:
+                frame = frame.merge(missions, on="tic_id", how="inner")
+            y_col = "y_true" if "y_true" in frame.columns else "label"
+            sl = frame[frame["mission"] == slice_mission]
+            if len(sl) < 500 or sl[y_col].nunique() < 2:
+                continue
+            y = sl[y_col].to_numpy(dtype=int)
+            row = {
+                "run": path.parent.name,
+                "arch": architecture_of(path.parent),
+                "members": len(members),
+                "n": len(sl),
+            }
+            for name, fn in METRICS.items():
+                draws = [fn(y, sl[m].to_numpy(dtype=float)) for m in members]
+                row[name] = float(np.std(draws, ddof=1))
+            rows.append(row)
+    if not rows:
+        raise ValueError(f"no multi-member run scored on {slice_mission}; the census is empty")
+    return pd.DataFrame(rows)
+
+
+def pooled_sd(census: pd.DataFrame, metric: str) -> tuple[float, int]:
+    """Variance-pooled sd and its degrees of freedom, sum (M-1) over runs."""
+    dof = int((census["members"] - 1).sum())
+    var = float(((census["members"] - 1) * census[metric] ** 2).sum() / dof)
+    return float(np.sqrt(var)), dof
+
+
+def report_census(census: pd.DataFrame, slice_mission: str) -> None:
+    """Per-run seed sds, then the sd pooled by architecture with its df."""
+    print(f"\n{'=' * 92}")
+    print(f"SEED CENSUS — every multi-member run on disk, {slice_mission} slice")
+    print("=" * 92)
+    header = f"{'run':<42}{'arch':<10}{'M':>3}{'n':>6}" + "".join(f"{k:>16}" for k in METRICS)
+    print(header)
+    print("-" * len(header))
+    for _, r in census.iterrows():
+        print(
+            f"{r['run']:<42}{r['arch']:<10}{r['members']:>3}{r['n']:>6}"
+            + "".join(f"{r[k]:>16.4f}" for k in METRICS)
+        )
+
+    print(f"\n{'-' * 92}\npooled seed sd, variance-pooled over the runs above")
+    print("-" * 92)
+    print(f"{'architecture':<16}{'runs':>6}{'df':>5}" + "".join(f"{k:>16}" for k in METRICS))
+    print("-" * 92)
+    for arch, group in [*census.groupby("arch"), ("ALL POOLED", census)]:
+        cells = []
+        for metric in METRICS:
+            sd, _ = pooled_sd(group, metric)
+            cells.append(f"{sd:>16.4f}")
+        sd_line = f"{arch:<16}{len(group):>6}{int((group['members'] - 1).sum()):>5}" + "".join(
+            cells
+        )
+        print(sd_line)
+
+
+def report_mde(census: pd.DataFrame, boots: dict[str, float]) -> None:
+    """The bar a challenger must clear, by architecture, at 3/5/10 members."""
+    print(f"\n{'=' * 92}")
+    print("MDE at 80% power — pooled census sd, measured bootstrap sd, two independent arms")
+    print("=" * 92)
+    header = f"{'architecture':<16}{'M':>4}" + "".join(f"{k:>16}" for k in METRICS)
+    print(header)
+    print("-" * len(header))
+    for arch, group in [*census.groupby("arch"), ("ALL POOLED", census)]:
+        for members in (3, PLANNED_MEMBERS, 10):
+            cells = []
+            for metric in METRICS:
+                sd, _ = pooled_sd(group, metric)
+                cells.append(f"{contrast_mde(sd, boots[metric], members):>16.4f}")
+            print(f"{arch:<16}{members:>4}" + "".join(cells))
+
+
+def contrast_mde(sd_seed: float, sd_boot: float, members: int) -> float:
+    """Smallest contrast detectable at 80% power with `members` per arm.
+
+    Two seed terms, not one: the quantity under test is a difference of two run
+    means, which is what `promotion.py::decision_floor` has read since 4.1b and
+    what P2.1's `hypot(boot, sd_seed / sqrt(M))` did not. Measured 2026-09-17,
+    the member-paired contrast sd is 0.0175 against 0.0130 predicted under
+    independence, so the arms' seed draws do not cancel and both terms stand.
+    """
+    return Z_80_POWER * float(np.hypot(sd_boot, sd_seed * np.sqrt(2.0 / members)))
+
+
+def stability(df: pd.DataFrame, label: str, n_boot: int, seed: int) -> dict[str, float]:
     y = df["label"].to_numpy(dtype=int)
     pa, pb = df["score_a"].to_numpy(float), df["score_b"].to_numpy(float)
     members = df[[f"{m}_a" for m in MEMBERS]].to_numpy(dtype=float)
@@ -122,21 +253,25 @@ def stability(df: pd.DataFrame, label: str, n_boot: int, seed: int) -> None:
     print("=" * 92)
     header = (
         f"{'metric':<16}{'arm C':>9}{'arm D':>9}{'D-C':>9}{'boot sd':>10}"
-        f"{'seed sd':>9}{'sd @5':>9}{'MDE @5':>9}"
+        f"{'seed sd':>9}{'MDE P2.1':>10}{'MDE 2-arm':>11}"
     )
     print(header)
     print("-" * len(header))
+    boots: dict[str, float] = {}
     for name, fn in METRICS.items():
         va, vb = fn(y, pa), fn(y, pb)
-        boot = paired_bootstrap(y, pa, pb, fn, n_boot, seed)
+        boot = boots[name] = paired_bootstrap(y, pa, pb, fn, n_boot, seed)
         sd_seed = seed_spread(y, members, fn)
-        # Averaging M members shrinks the seed component by sqrt(M); the
-        # sampling component does not move, because it is the same rows.
-        total5 = float(np.hypot(boot, sd_seed / np.sqrt(PLANNED_MEMBERS)))
+        # `MDE P2.1` carries one seed term, which is what the 2026-09-14 file
+        # printed; `MDE 2-arm` is the correction — a contrast has two. Both are
+        # shown so the published figure stays locatable beside the right one.
+        one_term = Z_80_POWER * float(np.hypot(boot, sd_seed / np.sqrt(PLANNED_MEMBERS)))
+        two_term = contrast_mde(sd_seed, boot, PLANNED_MEMBERS)
         print(
             f"{name:<16}{va:>9.4f}{vb:>9.4f}{vb - va:>9.4f}{boot:>10.4f}"
-            f"{sd_seed:>9.4f}{total5:>9.4f}{Z_80_POWER * total5:>9.4f}"
+            f"{sd_seed:>9.4f}{one_term:>10.4f}{two_term:>11.4f}"
         )
+    return boots
 
 
 def _degrade(p: np.ndarray, w: float, top_frac: float, seed: int) -> np.ndarray:
@@ -194,16 +329,23 @@ def main() -> None:
     parser.add_argument("--n-boot", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-reps", type=int, default=25, help="degradation realisations per cell")
+    parser.add_argument("--no-census", action="store_true", help="skip the multi-run seed census")
     args = parser.parse_args()
 
     df = load_arms(args.arm_a / "predictions.parquet", args.arm_b / "predictions.parquet")
     print(f"arm C = {args.arm_a.name}, arm D = {args.arm_b.name}, paired rows {len(df)}")
     print(f"bootstrap draws {args.n_boot}, seed {args.seed}, members per arm {len(MEMBERS)}")
-    print(f"'sd @5' and 'MDE @5' are at {PLANNED_MEMBERS} members per fold")
+    print(f"MDE columns are at {PLANNED_MEMBERS} members per fold; 'MDE 2-arm' is the correct one")
+
+    census = None if args.no_census else seed_census(mission_map())
+    if census is not None:
+        report_census(census, "TESS")
 
     tess = df[df["mission"] == "TESS"]
     dv = tess[tess["dv_usable"].astype(bool)]
-    stability(tess, "TESS — the gating slice", args.n_boot, args.seed)
+    boots = stability(tess, "TESS — the gating slice", args.n_boot, args.seed)
+    if census is not None:
+        report_mde(census, boots)
     stability(dv, "TESS and dv_usable — the Phase 1 contrast slice", args.n_boot, args.seed)
     stability(df, "all missions pooled", args.n_boot, args.seed)
 

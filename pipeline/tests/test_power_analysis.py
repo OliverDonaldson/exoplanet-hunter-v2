@@ -108,3 +108,48 @@ def test_unpaired_arms_raise_rather_than_report(tmp_path):
     pd.DataFrame({**cols, "tic_id": [3, 4]}).to_parquet(b)
     with pytest.raises(ValueError, match="not paired"):
         power.load_arms(a, b)
+
+
+def test_pooled_sd_recovers_a_known_variance():
+    """Variance-pooling equal-sized groups is the root mean of their variances."""
+    import pandas as pd
+
+    census = pd.DataFrame({"members": [3, 3], "ROC-AUC": [0.02, 0.04]})
+    sd, dof = power.pooled_sd(census, "ROC-AUC")
+    assert dof == 4
+    assert sd == pytest.approx(np.sqrt((0.02**2 + 0.04**2) / 2))
+
+
+def test_pooled_sd_weights_by_degrees_of_freedom():
+    """A run with more members carries more of the pooled estimate."""
+    import pandas as pd
+
+    heavy = pd.DataFrame({"members": [11, 3], "ROC-AUC": [0.01, 0.10]})
+    sd, dof = power.pooled_sd(heavy, "ROC-AUC")
+    assert dof == 12
+    assert sd < np.sqrt((0.01**2 + 0.10**2) / 2)
+
+
+def test_contrast_mde_carries_two_seed_terms():
+    """The published P2.1 figure used one; a difference of two means needs two."""
+    one_term = power.Z_80_POWER * np.hypot(0.0021, 0.0093 / np.sqrt(5))
+    two_term = power.contrast_mde(0.0093, 0.0021, 5)
+    assert two_term > one_term
+    assert two_term == pytest.approx(0.0175, abs=5e-4)
+
+
+def test_contrast_mde_falls_as_members_rise():
+    assert power.contrast_mde(0.01, 0.002, 10) < power.contrast_mde(0.01, 0.002, 5)
+
+
+def test_architecture_is_read_not_guessed(tmp_path):
+    """Two architectures in one run directory is unreadable, so it raises."""
+    fold = tmp_path / "fold_0"
+    fold.mkdir(parents=True)
+    with pytest.raises(ValueError, match="expected exactly one architecture"):
+        power.architecture_of(tmp_path)
+    (fold / "model_0_cnn_dualview.keras").touch()
+    assert power.architecture_of(tmp_path) == "cnn_dualview"
+    (fold / "model_0_cnn_branches.keras").touch()
+    with pytest.raises(ValueError, match="expected exactly one architecture"):
+        power.architecture_of(tmp_path)
