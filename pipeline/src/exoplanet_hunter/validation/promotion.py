@@ -21,7 +21,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
 
 REGISTRY_NAME = "registry.json"
 #: Written into the **candidate's** run directory, not into `models/`. The
@@ -31,12 +34,17 @@ REGISTRY_NAME = "registry.json"
 #: ones that were never promoted and so never appear in the registry at all.
 PROMOTION_LOG_NAME = "promotion_log.json"
 
-#: Fewest paired folds at which a signed-rank p-value is worth printing. With
-#: five pairs the two-sided Wilcoxon floor is p=0.0625, so it cannot reach 0.05
-#: however lopsided the result — reporting one there invites reading "not
-#: significant" as evidence of no effect. Below this the paired delta and the
-#: effect size are the honest summary.
-MIN_PAIRS_FOR_P_VALUE = 6
+#: Per-member metric keys a fold row carries, by the fold-level key they belong
+#: to. `blocked_contrast` needs the member axis; `paired_folds` needs the scalar.
+MEMBER_METRIC_KEYS = {
+    "test_roc_auc": "model_roc_auc",
+    "test_recall_at_1pct_fpr": "model_recall_at_1pct_fpr",
+    "gate_recall_at_1pct_fpr": "model_gate_recall_at_1pct_fpr",
+}
+#: Permutation draws for the within-block test. Arm labels are exchangeable
+#: within a fold under the null and nowhere else, because allocation was within
+#: folds — the restriction STAT 293 §4.3 puts on `aovp`'s `Error()` term.
+PERMUTATION_DRAWS = 5000
 
 #: The deployment population — every scored candidate is TESS.
 GATE_MISSION = "TESS"
@@ -129,12 +137,136 @@ def paired_folds(
         # Every fold moved by the same non-zero amount — infinitely consistent.
         effect = math.copysign(math.inf, mean)
 
-    p_value = None
-    if len(deltas) >= MIN_PAIRS_FOR_P_VALUE and np.any(deltas != 0):
-        from scipy.stats import wilcoxon
+    # No p-value here. A signed-rank test over five folds floors at p=0.0625 and
+    # can never reach 0.05, so this path was unreachable from 2026-08 to
+    # 2026-09-17; `blocked_contrast` is where the test lives now (#95).
+    return PairedFolds(deltas.tolist(), effect, None, exact)
 
-        p_value = float(wilcoxon(deltas).pvalue)
-    return PairedFolds(deltas.tolist(), effect, p_value, exact)
+
+@dataclass(frozen=True)
+class BlockedContrast:
+    """Candidate minus champion, read as the designed experiment it is.
+
+    Fold is a block: both runs held out the same rows, so fold difficulty is
+    removed rather than left in the error term. Member is nested in arm — the
+    arm was applied to models, not to folds — so the F denominator is the
+    member-within-arm mean square, not the residual. Testing against the
+    residual is the nested-design trap: its expectation carries the member
+    variance the numerator also carries, so it rejects far too often.
+
+    `p_value` is a within-block permutation test. Arm labels are exchangeable
+    within a fold under the null and nowhere else.
+    """
+
+    mean: float
+    se: float
+    f_stat: float
+    df_num: int
+    df_den: int
+    p_value: float
+    n_folds: int
+    n_members: int
+
+    @property
+    def ci95(self) -> tuple[float, float]:
+        from scipy.stats import t
+
+        half = float(t.ppf(0.975, self.df_den)) * self.se
+        return (self.mean - half, self.mean + half)
+
+    def __str__(self) -> str:
+        lo, hi = self.ci95
+        return (
+            f"blocked over {self.n_folds} folds x {self.n_members} members: "
+            f"{self.mean:+.4f} [{lo:+.4f}, {hi:+.4f}], "
+            f"F({self.df_num},{self.df_den})={self.f_stat:.2f}, p={self.p_value:.3f}"
+        )
+
+
+def _member_matrix(summary: dict[str, Any], key: str) -> np.ndarray | None:
+    """(folds x members) metric values, or None when the run recorded no members."""
+    import numpy as np
+
+    rows = [f.get(key) for f in summary.get("folds") or []]
+    if not rows or any(not isinstance(r, list) or not r for r in rows):
+        return None
+    if len({len(r) for r in rows}) != 1:
+        return None
+    return np.asarray(rows, dtype=float)
+
+
+def _arm_f_statistic(cand: np.ndarray, champ: np.ndarray) -> tuple[float, int, int]:
+    """F for the arm effect, blocked on fold, against member-within-arm."""
+    import numpy as np
+
+    stacked = np.stack([cand, champ])  # (arm, fold, member)
+    n_arms, n_folds, n_members = stacked.shape
+    grand = stacked.mean()
+    arm_means = stacked.mean(axis=(1, 2))
+
+    ss_arm = n_folds * n_members * float(((arm_means - grand) ** 2).sum())
+    member_means = stacked.mean(axis=1)  # (arm, member)
+    ss_member = n_folds * float(((member_means - arm_means[:, None]) ** 2).sum())
+
+    df_member = n_arms * (n_members - 1)
+    if df_member < 1 or ss_member <= 0:
+        return float("nan"), 1, max(df_member, 0)
+    return (ss_arm / 1) / (ss_member / df_member), 1, df_member
+
+
+def blocked_contrast(
+    candidate: dict[str, Any],
+    champion: dict[str, Any],
+    metric: str = "test_roc_auc",
+    *,
+    draws: int = PERMUTATION_DRAWS,
+    seed: int = 0,
+) -> BlockedContrast | None:
+    """The contrast as a randomised block design, or None when either run is single-member.
+
+    Measured 2026-09-17 on the Phase 1 arms, 5 folds x 3 members: ROC-AUC
+    -0.0032 [-0.0238, +0.0175], F(1,4) = 0.18, p = 0.72 — a reading the retired
+    signed-rank path could not produce at all. The member axis is pooled over
+    missions for AUC; only recall carries a gate-sliced per-member key.
+    """
+    import numpy as np
+
+    key = MEMBER_METRIC_KEYS.get(metric)
+    if key is None:
+        return None
+    cand, champ = _member_matrix(candidate, key), _member_matrix(champion, key)
+    if cand is None or champ is None or cand.shape != champ.shape or cand.shape[1] < 2:
+        return None
+
+    n_folds, n_members = cand.shape
+    deltas = cand - champ
+    mean = float(deltas.mean())
+    f_stat, df_num, df_den = _arm_f_statistic(cand, champ)
+    if not np.isfinite(f_stat):
+        return None
+    se = abs(mean) / math.sqrt(f_stat) if f_stat > 0 else float("inf")
+
+    rng = np.random.default_rng(seed)
+    stacked = np.stack([cand, champ])
+    hits = 1
+    for _ in range(draws):
+        shuffled = stacked.copy()
+        for fold in range(n_folds):
+            flat = rng.permutation(shuffled[:, fold, :].reshape(-1))
+            shuffled[:, fold, :] = flat.reshape(2, n_members)
+        drawn, _, _ = _arm_f_statistic(shuffled[0], shuffled[1])
+        if np.isfinite(drawn) and drawn >= f_stat:
+            hits += 1
+    return BlockedContrast(
+        mean=mean,
+        se=se,
+        f_stat=f_stat,
+        df_num=df_num,
+        df_den=df_den,
+        p_value=hits / (draws + 1),
+        n_folds=n_folds,
+        n_members=n_members,
+    )
 
 
 @dataclass(frozen=True)
@@ -623,6 +755,9 @@ def evaluate_promotion(
         f"ROC-AUC {cand_auc:.4f} vs champion {champ_auc:.4f}",
         f"Brier {cand_brier:.4f} vs champion {champ_brier:.4f}",
     ]
+    blocked = blocked_contrast(candidate, champion)
+    if blocked is not None:
+        reasons.append(str(blocked))
     diagnostics, alarms = _diagnostics(candidate, champion, mission_alarm)
     unresolved: list[str] = []
     reasons += diagnostics
@@ -735,8 +870,8 @@ def evaluate_promotion(
         reasons.append(str(paired))
         # The mean can clear the champion while the candidate loses most folds,
         # which is what winning on training noise looks like. Alarmed rather than
-        # blocking: at five folds the signed-rank test cannot reach p<0.05, so
-        # refusing on it would refuse every real improvement too.
+        # blocking: the blocked test above is the one with a denominator, and at
+        # three members it has four of them.
         if paired.wins * 2 <= len(paired.deltas):
             alarms.append(
                 f"the candidate won only {paired.wins}/{len(paired.deltas)} folds head to head "

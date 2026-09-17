@@ -760,13 +760,6 @@ def test_folds_from_a_different_split_are_not_paired():
     assert paired_folds(folds(0.9, 0.9, seed=1), folds(0.8, 0.8, seed=2)) is None
 
 
-def test_no_p_value_where_it_cannot_reach_significance():
-    """Five pairs floor the two-sided Wilcoxon at p=0.0625; printing it invites
-    reading "not significant" as evidence of no effect."""
-    assert paired_folds(folds(*[0.99] * 5), folds(*[0.80] * 5)).p_value is None
-    assert paired_folds(folds(*[0.99] * 6), folds(*[0.80] * 6)).p_value is not None
-
-
 def test_one_sided_mission_alarms_but_does_not_block():
     """Gating on TESS compares a mission both runs scored, so K2 appearing on
     one side only is worth saying and not worth blocking on."""
@@ -1566,3 +1559,68 @@ def test_the_former_flag_still_selects_the_champion_summary(tmp_path):
             capture_output=True,
         )
         assert result.returncode == 0, f"{flag} failed: {result.stderr.decode()[-400:]}"
+
+
+def _member_summary(per_fold: list[list[float]]) -> dict:
+    """A summary carrying the (fold x member) axis `blocked_contrast` reads."""
+    return {
+        "folds": [{"test_roc_auc": sum(row) / len(row), "model_roc_auc": row} for row in per_fold],
+        "summary": {},
+    }
+
+
+def test_blocked_contrast_denominator_is_member_within_arm():
+    """Members are nested in arm, so the F denominator is a(M-1), not the
+    residual. Testing an arm against row-level noise is the nested-design trap:
+    the denominator's expectation is missing the member term the numerator has.
+    """
+    from exoplanet_hunter.validation.promotion import blocked_contrast
+
+    cand = _member_summary([[0.90, 0.91, 0.92]] * 5)
+    champ = _member_summary([[0.88, 0.89, 0.90]] * 5)
+    result = blocked_contrast(cand, champ, draws=200)
+    assert result is not None
+    assert result.df_den == 2 * (3 - 1)
+    assert result.n_folds == 5 and result.n_members == 3
+    assert result.mean == pytest.approx(0.02)
+
+
+def test_blocked_contrast_blocks_out_fold_difficulty():
+    """A fold effect shared by both arms is a block, so it must not widen the
+    interval. Adding a large per-fold offset to both arms changes nothing.
+    """
+    from exoplanet_hunter.validation.promotion import blocked_contrast
+
+    base = [[0.90, 0.91, 0.92], [0.80, 0.81, 0.82], [0.70, 0.71, 0.72]]
+    flat = _member_summary([[0.90, 0.91, 0.92]] * 3)
+    champ_flat = _member_summary([[0.88, 0.89, 0.90]] * 3)
+    champ_tilt = _member_summary([[v - 0.02 for v in row] for row in base])
+    even = blocked_contrast(flat, champ_flat, draws=200)
+    tilted = blocked_contrast(_member_summary(base), champ_tilt, draws=200)
+    assert even is not None and tilted is not None
+    assert tilted.se == pytest.approx(even.se)
+    assert tilted.mean == pytest.approx(even.mean)
+
+
+def test_blocked_contrast_returns_none_for_a_single_member_run():
+    """The served champion has one member per fold, so the design does not
+    exist and the reading is withheld rather than fabricated.
+    """
+    from exoplanet_hunter.validation.promotion import blocked_contrast
+
+    cand = _member_summary([[0.90, 0.91, 0.92]] * 5)
+    single = _member_summary([[0.88]] * 5)
+    assert blocked_contrast(cand, single, draws=50) is None
+    assert blocked_contrast(cand, {"folds": [], "summary": {}}, draws=50) is None
+
+
+def test_paired_folds_no_longer_claims_a_p_value():
+    """Five folds floor the signed-rank test at p=0.0625, so the path that used
+    to compute one was unreachable. It is gone, not re-thresholded (#95).
+    """
+    cand = _member_summary([[0.90, 0.91, 0.92]] * 5)
+    champ = _member_summary([[0.88, 0.89, 0.90]] * 5)
+    result = paired_folds(cand, champ)
+    assert result is not None
+    assert result.p_value is None
+    assert "p=" not in str(result)
