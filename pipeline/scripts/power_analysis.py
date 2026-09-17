@@ -274,6 +274,67 @@ def stability(df: pd.DataFrame, label: str, n_boot: int, seed: int) -> dict[str,
     return boots
 
 
+def influence(y: np.ndarray, pa: np.ndarray, pb: np.ndarray, fn: Metric) -> np.ndarray:
+    """Each row's leave-one-out effect on the contrast metric(b) - metric(a).
+
+    The jackknife analogue of a Cook's distance: a row matters when dropping it
+    moves the contrast. recall @1% FPR is already known to be cut at nine to
+    eleven rows; this asks the same question of whatever metric gates.
+    """
+    full = fn(y, pb) - fn(y, pa)
+    keep = np.ones(len(y), dtype=bool)
+    out = np.empty(len(y))
+    for i in range(len(y)):
+        keep[i] = False
+        out[i] = (fn(y[keep], pb[keep]) - fn(y[keep], pa[keep])) - full
+        keep[i] = True
+    return out
+
+
+def rows_to_flip(y: np.ndarray, pa: np.ndarray, pb: np.ndarray, fn: Metric) -> int | None:
+    """Fewest most-influential rows whose removal reverses the contrast's sign.
+
+    None when no prefix of the ranking flips it. A contrast that survives every
+    prefix is one no small set of rows is carrying.
+    """
+    full = fn(y, pb) - fn(y, pa)
+    if full == 0 or not np.isfinite(full):
+        return None
+    order = np.argsort(influence(y, pa, pb, fn) * np.sign(full))
+    keep = np.ones(len(y), dtype=bool)
+    for dropped, idx in enumerate(order, start=1):
+        keep[idx] = False
+        if dropped > len(y) // 2:
+            return None
+        moved = fn(y[keep], pb[keep]) - fn(y[keep], pa[keep])
+        if np.sign(moved) != np.sign(full):
+            return dropped
+    return None
+
+
+def report_influence(df: pd.DataFrame, label: str, metrics: list[str]) -> None:
+    """How concentrated each contrast is: top-row share, and rows to flip it."""
+    y = df["label"].to_numpy(dtype=int)
+    pa, pb = df["score_a"].to_numpy(float), df["score_b"].to_numpy(float)
+    print(f"\n{'=' * 92}\nINFLUENCE on the contrast — {label} (n={len(y)})\n{'=' * 92}")
+    header = f"{'metric':<16}{'contrast':>11}{'|top 1|':>10}{'|top 5|':>10}{'|top 10|':>11}{'rows to flip':>14}"
+    print(header)
+    print("-" * len(header))
+    for name in metrics:
+        fn = METRICS[name]
+        full = fn(y, pb) - fn(y, pa)
+        infl = np.abs(influence(y, pa, pb, fn))
+        top = np.sort(infl)[::-1]
+        scale = abs(full) if full else float("nan")
+        flip = rows_to_flip(y, pa, pb, fn)
+        print(
+            f"{name:<16}{full:>11.4f}{top[0] / scale:>10.2f}{top[:5].sum() / scale:>10.2f}"
+            f"{top[:10].sum() / scale:>11.2f}{(flip if flip is not None else '>n/2'):>14}"
+        )
+    print("columns 3-5 are the top rows' summed leave-one-out effect as a multiple of the contrast")
+    print("rows-to-flip scales with the contrast: a near-zero one flips easily and says little")
+
+
 def _degrade(p: np.ndarray, w: float, top_frac: float, seed: int) -> np.ndarray:
     """Rank-space Gaussian jitter, optionally confined to the top `top_frac`.
 
@@ -330,6 +391,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-reps", type=int, default=25, help="degradation realisations per cell")
     parser.add_argument("--no-census", action="store_true", help="skip the multi-run seed census")
+    parser.add_argument("--no-influence", action="store_true", help="skip the influence diagnostic")
     args = parser.parse_args()
 
     df = load_arms(args.arm_a / "predictions.parquet", args.arm_b / "predictions.parquet")
@@ -348,6 +410,11 @@ def main() -> None:
         report_mde(census, boots)
     stability(dv, "TESS and dv_usable — the Phase 1 contrast slice", args.n_boot, args.seed)
     stability(df, "all missions pooled", args.n_boot, args.seed)
+
+    if not args.no_influence:
+        report_influence(
+            tess, "TESS — the gating slice", ["ROC-AUC", "pAUC FPR<=0.1", "recall @1% FPR"]
+        )
 
     print(f"\n{'=' * 92}\nPower on the TESS slice\n{'=' * 92}")
     power(tess, args.n_boot // 4, args.seed, 1.0, [0.02, 0.05, 0.1, 0.2], args.n_reps)
