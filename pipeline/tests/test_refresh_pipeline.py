@@ -4,9 +4,9 @@ The flow runs unattended from launchd, so the webhook message is the entire
 report. Anything the verdict fails to distinguish there is indistinguishable
 for good — nobody is reading the Prefect logs on a Saturday morning.
 
-**No test here runs the real gate.** `promotion_gate` builds its command with
-`--promote` hard-wired, so `subprocess.run` is replaced in every test below and
-the registry is never a participant.
+**No test here runs the real gate.** `subprocess.run` is replaced in every test
+below, so the registry is never a participant — which since 2026-09-15 is also
+true of the flow itself: the weekly loop gates and reports but never promotes.
 """
 
 from __future__ import annotations
@@ -177,8 +177,10 @@ def test_stale_log_is_not_read_as_this_run_s_verdict(gate, tmp_path):
 
 
 def test_only_promote_reads_as_a_promotion(gate):
-    """`promoted` is what decides whether the message claims a new model is
-    served, and UNRESOLVED must not reach it."""
+    """`promoted` is the gate's own "this one wins", and UNRESOLVED must not
+    reach it. It no longer writes the registry — it decides whether the weekly
+    message carries the candidate's reasons — but the three-way distinction it
+    protects is the same one."""
     assert gate("PROMOTE")[0].promoted is True
     assert gate("REJECT")[0].promoted is False
     assert gate("UNRESOLVED")[0].promoted is False
@@ -201,10 +203,12 @@ def test_crash_says_in_words_it_not_a_quality_rejection(gate):
         gate("REJECT", exit_code=3, write=False)
 
 
-def test_decision_failed_to_apply_is_not_reported_as_decision(gate):
-    """The gate decided PROMOTE and then died updating the registry. Reporting
-    PROMOTE would claim a model is served that is not."""
-    with pytest.raises(RuntimeError, match="failed to apply"):
+def test_a_gate_disagreeing_with_itself_is_refused(gate):
+    """The gate wrote PROMOTE and exited on REJECT's code. Nothing is applied
+    from here since 2026-09-15, so this no longer risks a half-written registry
+    — but a gate that contradicts itself has a verdict worth nothing, and
+    reporting it would launder that into a week's result."""
+    with pytest.raises(RuntimeError, match="verdict and the exit code disagree"):
         gate("PROMOTE", exit_code=1)
 
 
@@ -330,11 +334,31 @@ def test_exit_zero_with_no_summary_is_a_failure(lane):
 # --------------------------------------------------------------------------
 
 
-def test_the_flow_still_promotes_autonomously(gate):
-    """The loop deciding for itself is the point of the project. If this ever
-    fails because --promote was removed, the weekly run has become a report."""
+def test_the_weekly_loop_never_promotes(gate):
+    """Inverted 2026-09-15. This asserted the opposite for most of the project's
+    life — "the loop deciding for itself is the point" — and PLAN.md §5 had
+    already re-scoped the refresh to calibration and drift detection without the
+    code following. Since P2.1 the risk was concrete: the loop would have
+    promoted on recall @1% FPR, the metric the project has abandoned."""
     _, recorded = gate("PROMOTE")
-    assert "--promote" in recorded["cmd"]
+    assert "--promote" not in recorded["cmd"]
+
+
+def test_the_gate_still_runs_and_still_decides(gate):
+    """A calibrator that stops measuring is not a calibrator. The verdict, its
+    reasons and its log all survive; only the registry write is gone."""
+    decision, recorded = gate("PROMOTE", reasons=["margin 0.031 clears the floor"])
+    assert decision.verdict.value == "PROMOTE"
+    assert decision.reasons == ["margin 0.031 clears the floor"]
+    assert "--verdict-out" in recorded["cmd"]
+
+
+def test_a_cleared_bar_is_not_reported_as_promoted(gate):
+    """The other half of the change. Dropping the flag without this would have
+    the one message anybody sees announce PROMOTED over an untouched registry."""
+    headline = flow._gate_headline("PROMOTE")
+    assert "PROMOTED" not in headline
+    assert "nothing was promoted" in headline
 
 
 def test_the_flow_gates_strictly(gate):

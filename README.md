@@ -44,7 +44,8 @@ at https://exoplanet-hunter-api.fly.dev. Maintained by Oliver Donaldson.
 pipeline/       the science: ingest, preprocess, features, models, training, eval, validation
 api/            FastAPI serving; the wire contract is app/schemas.py
 frontend/       the vetting console (design-console/, one static file)
-orchestration/  the weekly Prefect refresh: gates, train if warranted, promotion gate, publish
+orchestration/  the weekly Prefect refresh: gates, train if warranted, gate, publish
+                (it reports a verdict every week and promotes nothing — see PLAN.md §6)
 docker/         the API image (Fly) and the on-demand training image
 infra/          R2 layout and secrets policy
 data/           DVC-tracked artefacts; nothing here is committed
