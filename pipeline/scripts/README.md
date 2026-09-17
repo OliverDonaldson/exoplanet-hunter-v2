@@ -25,6 +25,15 @@ Three scripts use argparse instead (`validate_data.py`, `promotion_gate.py`,
 | `ingest_exofop.py` | build the candidate catalogue from ExoFOP TOI + CTOI exports |
 | `build_dataset.py` | the full build: catalogue → download → preprocess → `views.npz` |
 | `shard_views.py` | `views.npz` → TFRecord shards for training |
+| `fetch_dv.py` | TESS DV report XML for every target the pipeline knows about |
+| `build_dv_table.py` | the fetched DV archive → one parquet row per target; builds `dv_usable` |
+| `fetch_ffi.py` | FFI light curves for candidates with no 2-minute SPOC product |
+| `fetch_momentum_dumps.py` | reaction-wheel desaturation times, per sector |
+| `fetch_ruwe.py` | Gaia DR3 RUWE for the pipeline's TESS targets |
+| `build_viewset.py` | the branch-model view set for every target in a catalogue |
+| `shard_viewset.py` | a built view set → TFRecord shards for the branch trainer |
+| `build_synthetic_negatives.py` | stage 8's synthetic-negative view set — arm N |
+| `build_fold_assignment.py` | one outer-CV partition, shared by both trainers |
 
 `build_dataset.py` is the **only** preprocessing path. With a warm FITS cache
 its download stage is all cache hits.
@@ -35,6 +44,7 @@ its download stage is all cache hits.
 |---|---|
 | `validate_data.py` | the five validation gates (schemas, views, shrink, leakage) |
 | `promotion_gate.py` | does a fresh CV run replace the champion? exit 0 = promote |
+| `check_showcase_ready.py` | is this repository fit to put in front of a stranger? (`make ready`) |
 
 Both run in CI against synthetic fixtures and in the DAG against real
 artefacts — the same code either way.
@@ -51,6 +61,22 @@ artefacts — the same code either way.
 | `uncertainty_eval.py` | does MC-Dropout `prob_std` predict errors? (verdict: no — use distance to threshold) |
 | `export_predictions.py` | backfill per-example CV predictions for an already-trained run |
 | `recalibrate_run.py` | refit an existing run's calibration bundles in place, no retraining |
+| `evaluate.py` | score a run onto a shard set, compare two prediction sets, or summarise one |
+| `control_arm.py` | offline control arm for a CV run directory — stage 7i |
+| `control_lane.py` | re-score the served model on the current population, so a delta means the model |
+| `candidate_bias.py` | observation bias on the candidate population, where the original finding lives |
+| `power_analysis.py` | what effect is detectable at this n, which metric gates, and what carries a contrast |
+| `export_training_history.py` | a run's per-epoch history out of MLflow into `models/history/` |
+
+## Training
+
+| script | what it does |
+|---|---|
+| `train_branches.py` | cross-validate the per-diagnostic branch model over the view-set shards |
+
+The dual-view trainer has no script: it is `python -m exoplanet_hunter.training.train`,
+a Hydra entry point in the library. `train_branches.py` is a script because it
+predates that and takes argparse flags the Hydra config has no key for.
 
 ## Figures
 
