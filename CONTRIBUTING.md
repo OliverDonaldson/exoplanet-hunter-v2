@@ -56,6 +56,13 @@ Two conventions worth keeping:
 - **Experimental arms are written outside `models/cv/`.** The weekly gate
   selects candidates from that directory, and an arm left inside it can be
   picked up as one.
+- **One test file per unit, and the unit is not always a module.** 47 test
+  files cover 65 library modules and 33 scripts. `test_<module>.py` is the
+  common case; the rest are grouped suites (`test_datasets.py`,
+  `test_eval.py`, `test_validation.py`) covering a package, and
+  `test_<script>.py` for a script. No stem appears twice, which is the part
+  that matters — two files testing one unit is how a behaviour ends up
+  asserted twice and changed once.
 
 ## The promotion rule
 
