@@ -445,6 +445,11 @@ class RunRecord(BaseModel):
     aucErr: float | None = None
     recall: float | None = None
     brier: float | None = None
+    #: Which population `auc`, `recall` and `brier` describe. "TESS" is the
+    #: gating slice; "pooled" means the run's predictions could not be sliced
+    #: and the figures are over every mission. A row served one and labelled
+    #: the other is what this field exists to make impossible.
+    slice: str
     status: str
     verdict: str | None = None
     reason: str | None = None

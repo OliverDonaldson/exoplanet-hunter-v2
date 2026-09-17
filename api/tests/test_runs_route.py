@@ -9,7 +9,10 @@ Optional and why "no log" has to render rather than raise.
 import json
 from pathlib import Path
 
+import pandas as pd
+import pytest
 from app.main import app
+from app.routes import runs as runs_route
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -180,3 +183,43 @@ def test_limit_still_slices_the_cached_list(tmp_path, monkeypatch):
     runs_module._cache = None
     assert len(client.get("/runs?limit=3").json()["runs"]) == 3
     assert len(client.get("/runs?limit=1").json()["runs"]) == 1
+
+
+def test_a_run_without_predictions_is_labelled_pooled(tmp_path, monkeypatch):
+    """#96: the Brier was pooled while the AUC beside it was TESS, and the
+    console rendered both under a "TESS AUC" heading. A row now names the
+    population all three of its metrics came from.
+    """
+    _run_dir(tmp_path, "abc", auc=0.95)
+    _registry(tmp_path, "abc")
+    row = _rows(tmp_path, monkeypatch)["abc"]
+    assert row["slice"] == "pooled"
+    assert row["auc"] == pytest.approx(0.95)
+    assert row["aucErr"] == pytest.approx(0.005)
+    assert row["recall"] is None
+
+
+def test_a_tess_row_carries_the_tess_brier_not_the_pooled_one(tmp_path, monkeypatch):
+    """On the served run the two differ by 0.04, so mixing them was not rounding."""
+    run_dir = _run_dir(tmp_path, "abc", auc=0.95)
+    (run_dir / "cv_summary.json").write_text(
+        json.dumps({"summary": {"test_roc_auc": {"mean": 0.95}, "test_brier": {"mean": 0.079}}})
+    )
+    pd.DataFrame(
+        {
+            "tic_id": [1, 2, 3, 4],
+            "y_true": [0, 1, 0, 1],
+            "prob_calibrated": [0.1, 0.9, 0.2, 0.8],
+        }
+    ).to_parquet(run_dir / "predictions.parquet")
+    _registry(tmp_path, "abc")
+    monkeypatch.setattr(
+        runs_route,
+        "_mission_lookup",
+        lambda _: pd.DataFrame({"tic_id": [1, 2, 3, 4], "mission": ["TESS"] * 4}),
+    )
+    row = _rows(tmp_path, monkeypatch)["abc"]
+    assert row["slice"] == "TESS"
+    # mean((p - y)^2) over the four rows, not the 0.079 in the summary
+    assert row["brier"] == pytest.approx(0.025)
+    assert row["aucErr"] is None

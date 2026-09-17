@@ -398,6 +398,10 @@ async function hydrate() {
     RUNS.push(...runs.value.runs.map(r => ({
       runId: r.short_id, date: r.date, auc: r.auc, aucErr: r.aucErr,
       recall: r.recall ?? null, brier: r.brier, status: r.status,
+      // Which population the three metrics describe. A row the service could
+      // not cut to TESS carries pooled figures, and the table says so rather
+      // than rendering them under a TESS heading (#96).
+      slice: r.slice ?? null,
       verdict: r.verdict, reason: r.reason,
     })));
     if (!RUNS.length) notes.push('The service reports no runs.');

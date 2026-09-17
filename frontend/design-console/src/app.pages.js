@@ -1034,7 +1034,7 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
         <div data-fit-table="runs" style="overflow-x:auto;padding:0 1.5rem 1.5rem">
           <table style="width:100%;border-collapse:collapse;min-width:820px">
             <thead><tr>
-              ${['Run','Date','TESS AUC','Recall @1% FPR','Brier','Verdict','Reason'].map(h =>
+              ${['Run','Date','AUC','Recall @1% FPR','Brier','Slice','Verdict','Reason'].map(h =>
                 `<th style="padding:0.5rem 0.75rem;text-align:left;font-family:'Ailerons';font-size:0.6rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8A8FA8;border-bottom:1px solid rgba(255,255,255,0.08);white-space:nowrap">${h}</th>`).join('')}
             </tr></thead>
             <tbody>
@@ -1045,6 +1045,7 @@ ${SERVED.noiseFloor.measured && has(SERVED.noiseFloor.auc)
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.auc) ? v.auc.toFixed(4) : '—'} ${has(v.aucErr) ? `<span style="color:#8A8FA8">±${v.aucErr.toFixed(4)}</span>` : ''}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.recall) ? v.recall.toFixed(4) : '—'}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:#F0EEE8;font-variant-numeric:tabular-nums">${has(v.brier) ? v.brier.toFixed(4) : '—'}</span></td>
+                  <td style="padding:0.85rem 0.75rem;vertical-align:top"><span style="font-family:'JetBrains Mono';font-size:0.7rem;color:${v.slice === 'TESS' ? '#8A8FA8' : '#F5A623'};font-variant-numeric:tabular-nums">${v.slice || '—'}</span></td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top">${v.verdict ? `<span class="tag-chip ${VERDICT_CHIP[v.verdict] || 'tag-unresolved'}">${esc(v.verdict)}</span>` : `<span style="color:#8A8FA8;font-family:'JetBrains Mono';font-size:0.65rem">—</span>`}</td>
                   <td style="padding:0.85rem 0.75rem;vertical-align:top;max-width:30rem"><span style="font-family:'Inter';font-size:0.75rem;line-height:1.5;color:rgba(240,238,232,0.55)">${esc(v.reason || 'No promotion log is written yet, so no reason is on record.')}</span></td>
                 </tr>`).join('')}
