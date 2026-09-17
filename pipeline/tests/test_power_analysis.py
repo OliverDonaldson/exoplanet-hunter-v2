@@ -108,3 +108,86 @@ def test_unpaired_arms_raise_rather_than_report(tmp_path):
     pd.DataFrame({**cols, "tic_id": [3, 4]}).to_parquet(b)
     with pytest.raises(ValueError, match="not paired"):
         power.load_arms(a, b)
+
+
+def test_pooled_sd_recovers_a_known_variance():
+    """Variance-pooling equal-sized groups is the root mean of their variances."""
+    import pandas as pd
+
+    census = pd.DataFrame({"members": [3, 3], "ROC-AUC": [0.02, 0.04]})
+    sd, dof = power.pooled_sd(census, "ROC-AUC")
+    assert dof == 4
+    assert sd == pytest.approx(np.sqrt((0.02**2 + 0.04**2) / 2))
+
+
+def test_pooled_sd_weights_by_degrees_of_freedom():
+    """A run with more members carries more of the pooled estimate."""
+    import pandas as pd
+
+    heavy = pd.DataFrame({"members": [11, 3], "ROC-AUC": [0.01, 0.10]})
+    sd, dof = power.pooled_sd(heavy, "ROC-AUC")
+    assert dof == 12
+    assert sd < np.sqrt((0.01**2 + 0.10**2) / 2)
+
+
+def test_contrast_mde_carries_two_seed_terms():
+    """The published P2.1 figure used one; a difference of two means needs two."""
+    one_term = power.Z_80_POWER * np.hypot(0.0021, 0.0093 / np.sqrt(5))
+    two_term = power.contrast_mde(0.0093, 0.0021, 5)
+    assert two_term > one_term
+    assert two_term == pytest.approx(0.0175, abs=5e-4)
+
+
+def test_contrast_mde_falls_as_members_rise():
+    assert power.contrast_mde(0.01, 0.002, 10) < power.contrast_mde(0.01, 0.002, 5)
+
+
+def test_architecture_is_read_not_guessed(tmp_path):
+    """Two architectures in one run directory is unreadable, so it raises."""
+    fold = tmp_path / "fold_0"
+    fold.mkdir(parents=True)
+    with pytest.raises(ValueError, match="expected exactly one architecture"):
+        power.architecture_of(tmp_path)
+    (fold / "model_0_cnn_dualview.keras").touch()
+    assert power.architecture_of(tmp_path) == "cnn_dualview"
+    (fold / "model_0_cnn_branches.keras").touch()
+    with pytest.raises(ValueError, match="expected exactly one architecture"):
+        power.architecture_of(tmp_path)
+
+
+def _separable(n=200, gap=0.3):
+    rng = np.random.default_rng(0)
+    y = np.repeat([0, 1], n // 2)
+    return y, np.clip(rng.normal(0.5 + gap * y, 0.1), 0, 1)
+
+
+def test_influence_sums_to_the_jackknife_of_the_contrast():
+    """Every row gets a leave-one-out effect, and dropping none changes nothing."""
+    y, pa = _separable()
+    infl = power.influence(y, pa, pa, power.METRICS["ROC-AUC"])
+    assert infl.shape == y.shape
+    assert np.allclose(infl, 0.0, atol=1e-12)
+
+
+def test_influence_finds_the_row_that_carries_a_contrast():
+    """One flipped score in an otherwise identical pair is the influential row."""
+    y, pa = _separable()
+    pb = pa.copy()
+    worst = int(np.argmax(np.where(y == 1, -pa, -np.inf)))
+    pb[worst] = 1.0
+    infl = power.influence(y, pa, pb, power.METRICS["ROC-AUC"])
+    assert int(np.argmax(np.abs(infl))) == worst
+
+
+def test_rows_to_flip_is_none_for_a_contrast_of_zero():
+    y, pa = _separable()
+    assert power.rows_to_flip(y, pa, pa, power.METRICS["ROC-AUC"]) is None
+
+
+def test_rows_to_flip_is_one_when_one_row_carries_it():
+    """A contrast a single row created is a contrast a single row destroys."""
+    y, pa = _separable()
+    pb = pa.copy()
+    worst = int(np.argmax(np.where(y == 1, -pa, -np.inf)))
+    pb[worst] = 1.0
+    assert power.rows_to_flip(y, pa, pb, power.METRICS["ROC-AUC"]) == 1

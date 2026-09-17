@@ -760,13 +760,6 @@ def test_folds_from_a_different_split_are_not_paired():
     assert paired_folds(folds(0.9, 0.9, seed=1), folds(0.8, 0.8, seed=2)) is None
 
 
-def test_no_p_value_where_it_cannot_reach_significance():
-    """Five pairs floor the two-sided Wilcoxon at p=0.0625; printing it invites
-    reading "not significant" as evidence of no effect."""
-    assert paired_folds(folds(*[0.99] * 5), folds(*[0.80] * 5)).p_value is None
-    assert paired_folds(folds(*[0.99] * 6), folds(*[0.80] * 6)).p_value is not None
-
-
 def test_one_sided_mission_alarms_but_does_not_block():
     """Gating on TESS compares a mission both runs scored, so K2 appearing on
     one side only is worth saying and not worth blocking on."""
@@ -931,16 +924,48 @@ def test_the_floor_is_two_se_of_the_difference():
     what the gate is doing.
 
     No champion is passed here, so the champion's term is the named pooled
-    prior — asserted through the constant rather than its value, so the two
-    cannot drift apart.
+    prior over ITS OWN member count — asserted through the constants rather
+    than their values, so the two cannot drift apart. Until 2026-09-17 the
+    prior was divided by the candidate's `n_models` instead, which understated
+    the floor ~1.9x at five members; the divisor is pinned here so it cannot
+    come back (#94).
     """
-    from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD, POOLED_SEED_SD
-
-    floor = decision_floor(measured())
-    assert floor.auc == pytest.approx(2 * math.sqrt(0.0060**2 / 3 + POOLED_SEED_SD**2 / 3))
-    assert floor.recall == pytest.approx(
-        2 * math.sqrt(0.0292**2 / 3 + POOLED_RECALL_SEED_SD**2 / 3)
+    from exoplanet_hunter.validation.promotion import (
+        CHAMPION_MEMBERS_WHEN_UNMEASURED,
+        POOLED_RECALL_SEED_SD,
+        POOLED_SEED_SD,
     )
+
+    n_inc = CHAMPION_MEMBERS_WHEN_UNMEASURED
+    floor = decision_floor(measured())
+    assert floor.auc == pytest.approx(2 * math.sqrt(0.0060**2 / 3 + POOLED_SEED_SD**2 / n_inc))
+    assert floor.recall == pytest.approx(
+        2 * math.sqrt(0.0292**2 / 3 + POOLED_RECALL_SEED_SD**2 / n_inc)
+    )
+    assert f"n_inc={n_inc}" in floor.source
+
+
+def test_champion_term_ignores_the_candidate_s_member_count():
+    """A candidate that trains more members learns its own mean better. It does
+    not learn the champion's, so the borrowed prior must not be divided by the
+    candidate's count — the defect #94 fixed.
+    """
+    three = decision_floor(measured())
+    five = decision_floor(
+        measured()
+        | {
+            "summary": {
+                "variance": {
+                    "n_models_per_fold": 5,
+                    "seed_sd": 0.0060,
+                    "pooled_gate_recall_seed_sd": 0.0292,
+                }
+            }
+        }
+    )
+    assert five.auc is not None and three.auc is not None
+    assert five.auc < three.auc  # the candidate term shrinks
+    assert five.auc > three.auc * 0.80  # but the champion term does not
 
 
 def test_no_variance_block_reports_no_floor():
@@ -1534,3 +1559,68 @@ def test_the_former_flag_still_selects_the_champion_summary(tmp_path):
             capture_output=True,
         )
         assert result.returncode == 0, f"{flag} failed: {result.stderr.decode()[-400:]}"
+
+
+def _member_summary(per_fold: list[list[float]]) -> dict:
+    """A summary carrying the (fold x member) axis `blocked_contrast` reads."""
+    return {
+        "folds": [{"test_roc_auc": sum(row) / len(row), "model_roc_auc": row} for row in per_fold],
+        "summary": {},
+    }
+
+
+def test_blocked_contrast_denominator_is_member_within_arm():
+    """Members are nested in arm, so the F denominator is a(M-1), not the
+    residual. Testing an arm against row-level noise is the nested-design trap:
+    the denominator's expectation is missing the member term the numerator has.
+    """
+    from exoplanet_hunter.validation.promotion import blocked_contrast
+
+    cand = _member_summary([[0.90, 0.91, 0.92]] * 5)
+    champ = _member_summary([[0.88, 0.89, 0.90]] * 5)
+    result = blocked_contrast(cand, champ, draws=200)
+    assert result is not None
+    assert result.df_den == 2 * (3 - 1)
+    assert result.n_folds == 5 and result.n_members == 3
+    assert result.mean == pytest.approx(0.02)
+
+
+def test_blocked_contrast_blocks_out_fold_difficulty():
+    """A fold effect shared by both arms is a block, so it must not widen the
+    interval. Adding a large per-fold offset to both arms changes nothing.
+    """
+    from exoplanet_hunter.validation.promotion import blocked_contrast
+
+    base = [[0.90, 0.91, 0.92], [0.80, 0.81, 0.82], [0.70, 0.71, 0.72]]
+    flat = _member_summary([[0.90, 0.91, 0.92]] * 3)
+    champ_flat = _member_summary([[0.88, 0.89, 0.90]] * 3)
+    champ_tilt = _member_summary([[v - 0.02 for v in row] for row in base])
+    even = blocked_contrast(flat, champ_flat, draws=200)
+    tilted = blocked_contrast(_member_summary(base), champ_tilt, draws=200)
+    assert even is not None and tilted is not None
+    assert tilted.se == pytest.approx(even.se)
+    assert tilted.mean == pytest.approx(even.mean)
+
+
+def test_blocked_contrast_returns_none_for_a_single_member_run():
+    """The served champion has one member per fold, so the design does not
+    exist and the reading is withheld rather than fabricated.
+    """
+    from exoplanet_hunter.validation.promotion import blocked_contrast
+
+    cand = _member_summary([[0.90, 0.91, 0.92]] * 5)
+    single = _member_summary([[0.88]] * 5)
+    assert blocked_contrast(cand, single, draws=50) is None
+    assert blocked_contrast(cand, {"folds": [], "summary": {}}, draws=50) is None
+
+
+def test_paired_folds_no_longer_claims_a_p_value():
+    """Five folds floor the signed-rank test at p=0.0625, so the path that used
+    to compute one was unreachable. It is gone, not re-thresholded (#95).
+    """
+    cand = _member_summary([[0.90, 0.91, 0.92]] * 5)
+    champ = _member_summary([[0.88, 0.89, 0.90]] * 5)
+    result = paired_folds(cand, champ)
+    assert result is not None
+    assert result.p_value is None
+    assert "p=" not in str(result)
