@@ -945,7 +945,7 @@ def test_the_floor_is_two_se_of_the_difference():
     assert f"n_inc={n_inc}" in floor.source
 
 
-def test_the_champion_term_does_not_shrink_with_the_candidate_s_members():
+def test_champion_term_ignores_the_candidate_s_member_count():
     """A candidate that trains more members learns its own mean better. It does
     not learn the champion's, so the borrowed prior must not be divided by the
     candidate's count — the defect #94 fixed.
