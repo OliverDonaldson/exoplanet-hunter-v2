@@ -82,8 +82,15 @@ every gate decision this project has made read a floor understated by ~**1.9x**
 at five members. `n_inc` is now `CHAMPION_MEMBERS_WHEN_UNMEASURED = 1`, named in
 `floor_source`, and pinned by a test.
 
-`POOLED_SEED_SD` moves **0.0081 -> 0.0062**: 0.0081 was a cross-architecture
-pool, which 4.1b line 338 had explicitly rejected.
+`POOLED_SEED_SD` moves **0.0081 -> 0.0062**. The provenance is worth tracing,
+because it shows the error was structural rather than a slip:
+[stage 4](stage-04-branch-runs.md) measured `seed_sd 0.0081` on the **branch**
+model over three members; [stage 6](stage-06-recall-floor.md) adopted
+`2 x 0.0081 / sqrt(3) = 0.0094` as the AUC threshold from that; and the constant
+then became the *champion's* prior — for a champion that has always been
+dual-view. A branch number has stood in for a dual-view one since the constant
+was written, which is exactly what 4.1b line 338 refused when it rejected
+pooling across architectures.
 
 **Every recorded verdict re-checked. None changes.**
 
@@ -101,6 +108,17 @@ never toward PROMOTE. It did not move either.
 `MIN_PAIRS_FOR_P_VALUE = 6` against `n_splits: 5` in all three model configs.
 `paired_folds`' docstring states the blocking argument correctly; its p-value
 branch was unreachable from 2026-08 until now.
+
+**This supersedes a recorded adoption, and says so rather than quietly dropping
+it.** [audit-2026-08-07](audit-2026-08-07.md) adopted the paired Wilcoxon
+deliberately, with the right reasoning — at five folds it floors at p=0.0625, so
+a gate keyed on it would reject every real improvement — and
+[standing-audits](standing-audits.md) counts it among the six adoptions done.
+What is retired is the **p-value path**, not the pairing: `paired_folds` still
+reports the paired deltas, the win count and Cohen's *d*, and the blocking
+argument its docstring makes is the argument `blocked_contrast` acts on. The
+2026-08-07 reasoning was correct about the test and incomplete about the remedy
+— five folds is the wrong replication unit, not an insurmountable n.
 
 `blocked_contrast` reads the (fold x member) layout `cv_summary.json` already
 writes as `model_roc_auc`. **Fold is a block** — both runs held out the same
