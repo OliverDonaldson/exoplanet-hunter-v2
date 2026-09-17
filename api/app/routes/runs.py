@@ -133,24 +133,30 @@ def runs(limit: int = Query(12, ge=1, le=_MAX_LIMIT)) -> RunsResponse:
 
     lookup = _mission_lookup(models_dir)
 
-    def tess_slice(run_dir: Path) -> tuple[float | None, float | None]:
-        """TESS AUC and recall @ 1% FPR for one run — the columns are labelled
-        TESS because TESS gates, and `cv_summary.json` holds only pooled
-        figures. Nulls where no predictions or no TESS slice resolve."""
+    def tess_slice(run_dir: Path) -> tuple[float, float | None, float] | None:
+        """AUC, recall @ 1% FPR and Brier on TESS, or None if it cannot be cut.
+
+        All three together, because `cv_summary.json` holds only pooled figures
+        and mixing one pooled number into a TESS row is what #96 was: the Brier
+        column read 0.0791 pooled beside a 0.9100 TESS AUC.
+        """
         path = run_dir / "predictions.parquet"
         if lookup is None or not path.is_file():
-            return None, None
+            return None
         try:
             preds = pd.read_parquet(path, columns=["tic_id", "y_true", "prob_calibrated"])
         except (OSError, ValueError, KeyError):
-            return None, None
+            return None
         tess = preds.merge(lookup, on="tic_id", how="left")
         tess = tess[tess["mission"] == "TESS"]
         if tess.empty or tess["y_true"].min() == tess["y_true"].max():
-            return None, None
+            return None
         y = tess["y_true"].to_numpy(dtype=int)
         p = tess["prob_calibrated"].to_numpy(dtype=float)
-        return _roc_auc(y, p), _recall_at_fpr(y, p)
+        auc = _roc_auc(y, p)
+        if auc is None:
+            return None
+        return auc, _recall_at_fpr(y, p), float(((p - y) ** 2).mean())
 
     records: list[RunRecord] = []
     for run_dir in cv_root.iterdir():
@@ -164,8 +170,8 @@ def runs(limit: int = Query(12, ge=1, le=_MAX_LIMIT)) -> RunsResponse:
         auc, auc_err = _metric(summary, "test_roc_auc")
         if auc is None:
             continue
-        brier, _ = _metric(summary, "test_brier")
-        tess_auc, tess_recall = tess_slice(run_dir)
+        pooled_brier, _ = _metric(summary, "test_brier")
+        cut = tess_slice(run_dir)
         verdict, reason = _promotion(run_dir)
         # An eight-character truncation suits a hex digest, not a named dir.
         name = run_dir.name
@@ -178,10 +184,13 @@ def runs(limit: int = Query(12, ge=1, le=_MAX_LIMIT)) -> RunsResponse:
                 # is the DVC pull time in the container — identical across runs
                 # and equal to the last deploy. Only the registry date is real.
                 date=promoted_date if name == active else None,
-                auc=tess_auc if tess_auc is not None else auc,
-                aucErr=auc_err if tess_auc is None else None,
-                recall=tess_recall,
-                brier=brier,
+                # Every metric on a row comes from one population, and `slice`
+                # says which. Mixing them is the defect, not the fallback.
+                auc=cut[0] if cut else auc,
+                aucErr=None if cut else auc_err,
+                recall=cut[1] if cut else None,
+                brier=cut[2] if cut else pooled_brier,
+                slice="TESS" if cut else "pooled",
                 status="active" if name == active else "archived",
                 verdict=verdict,
                 reason=reason,
