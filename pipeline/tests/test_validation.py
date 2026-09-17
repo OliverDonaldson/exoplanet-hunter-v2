@@ -931,16 +931,48 @@ def test_the_floor_is_two_se_of_the_difference():
     what the gate is doing.
 
     No champion is passed here, so the champion's term is the named pooled
-    prior — asserted through the constant rather than its value, so the two
-    cannot drift apart.
+    prior over ITS OWN member count — asserted through the constants rather
+    than their values, so the two cannot drift apart. Until 2026-09-17 the
+    prior was divided by the candidate's `n_models` instead, which understated
+    the floor ~1.9x at five members; the divisor is pinned here so it cannot
+    come back (#94).
     """
-    from exoplanet_hunter.validation.promotion import POOLED_RECALL_SEED_SD, POOLED_SEED_SD
-
-    floor = decision_floor(measured())
-    assert floor.auc == pytest.approx(2 * math.sqrt(0.0060**2 / 3 + POOLED_SEED_SD**2 / 3))
-    assert floor.recall == pytest.approx(
-        2 * math.sqrt(0.0292**2 / 3 + POOLED_RECALL_SEED_SD**2 / 3)
+    from exoplanet_hunter.validation.promotion import (
+        CHAMPION_MEMBERS_WHEN_UNMEASURED,
+        POOLED_RECALL_SEED_SD,
+        POOLED_SEED_SD,
     )
+
+    n_inc = CHAMPION_MEMBERS_WHEN_UNMEASURED
+    floor = decision_floor(measured())
+    assert floor.auc == pytest.approx(2 * math.sqrt(0.0060**2 / 3 + POOLED_SEED_SD**2 / n_inc))
+    assert floor.recall == pytest.approx(
+        2 * math.sqrt(0.0292**2 / 3 + POOLED_RECALL_SEED_SD**2 / n_inc)
+    )
+    assert f"n_inc={n_inc}" in floor.source
+
+
+def test_the_champion_term_does_not_shrink_with_the_candidate_s_members():
+    """A candidate that trains more members learns its own mean better. It does
+    not learn the champion's, so the borrowed prior must not be divided by the
+    candidate's count — the defect #94 fixed.
+    """
+    three = decision_floor(measured())
+    five = decision_floor(
+        measured()
+        | {
+            "summary": {
+                "variance": {
+                    "n_models_per_fold": 5,
+                    "seed_sd": 0.0060,
+                    "pooled_gate_recall_seed_sd": 0.0292,
+                }
+            }
+        }
+    )
+    assert five.auc is not None and three.auc is not None
+    assert five.auc < three.auc  # the candidate term shrinks
+    assert five.auc > three.auc * 0.80  # but the champion term does not
 
 
 def test_no_variance_block_reports_no_floor():

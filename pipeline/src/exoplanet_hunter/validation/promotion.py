@@ -175,9 +175,14 @@ LEGACY_RECALL_TOLERANCE = 0.02
 #: term, and only until a champion is re-baselined carrying its own variance
 #: block — no champion summary on disk has one. Pre-registered in roadmap 4.1b.
 POOLED_RECALL_SEED_SD = 0.0353
-#: The same, for AUC. Both are priors standing in for a measurement, and every
-#: decision text that leans on one has to say so.
-POOLED_SEED_SD = 0.0081
+#: The same for AUC, pooled over the multi-member `cnn_dualview` runs: 0.0062 on
+#: 4 df, TESS slice (P2.1 note, 2026-09-17). `cnn_branches` is 0.0108 on 26 df
+#: and 4.1b rejected pooling the two, so a branch champion needs its own value.
+POOLED_SEED_SD = 0.0062
+#: Members assumed for a champion whose summary carries no variance block —
+#: `train.py` writes that block only past one member. Divided by the CANDIDATE's
+#: count until 2026-09-17, which understated the floor ~1.9x at five (#94).
+CHAMPION_MEMBERS_WHEN_UNMEASURED = 1
 
 
 def _variance(summary: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
@@ -221,11 +226,10 @@ def decision_floor(
         if champ_sd and champ_n:
             term += float(champ_sd) ** 2 / champ_n
         else:
-            # The champion measured nothing, so a prior stands in for it. Named
-            # in the source string rather than folded in silently: substituting
-            # an assumption for a measurement without saying so is this
-            # project's own recurring defect class.
-            term += pooled**2 / n_models
+            # A prior stands in, over ITS OWN member count — not the
+            # candidate's. Named in the source string, never folded in
+            # silently: that substitution is this project's own defect class.
+            term += pooled**2 / CHAMPION_MEMBERS_WHEN_UNMEASURED
             borrowed.append(key)
         return 2.0 * math.sqrt(term)
 
@@ -234,8 +238,9 @@ def decision_floor(
     source = f"2 x se(candidate - champion), n={n_models}"
     if borrowed:
         source += (
-            f"; champion variance unmeasured for {sorted(set(borrowed))} — "
-            f"pooled prior used (recall {POOLED_RECALL_SEED_SD}, auc {POOLED_SEED_SD})"
+            f"; champion variance unmeasured for {sorted(set(borrowed))} — pooled "
+            f"prior used (recall {POOLED_RECALL_SEED_SD}, auc {POOLED_SEED_SD}) over "
+            f"n_inc={CHAMPION_MEMBERS_WHEN_UNMEASURED}"
         )
     return DecisionFloor(auc=auc, recall=recall, source=source)
 
