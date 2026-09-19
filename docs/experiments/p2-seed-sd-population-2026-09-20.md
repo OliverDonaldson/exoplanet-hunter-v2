@@ -186,3 +186,25 @@ measurement can contradict it.
   0.00285 against the 0.00471 the corrected term supports — 1.65x too narrow.
   That is the specific trap this pre-registration exists to close, and it is not
   closed until item 2 of §4 lands.
+
+---
+
+## Result · 2026-09-20 · falsified on condition 3
+
+Appended under rule 5; nothing above is edited.
+
+The size study pre-registered in §5b ran the same day:
+[`p2-gate-size-2026-09-20.md`](p2-gate-size-2026-09-20.md). **Condition 3 fires.**
+
+At 5 v 5 — the allocation this correction exists for — non-strict false-PROMOTE
+under a true null moves **23.4% → 29.8%** when the corrected TESS seed sd is read,
+against a nominal of about 2.3%. The correction moves the gate's size *further* from
+nominal, because the fall-through region below the UNRESOLVED band is
+`(0, floor/1.5)` and widening the floor widens it.
+
+**Reported as falsified, not re-specified.** The change is not justified by the size
+argument made in §4. Whether it stands on the estimand-matching argument alone is a
+separate question needing its own terms.
+
+The §5b prediction of *"of order 40%"* measured **28.3%** — directionally right,
+numerically high by about 12 pp.
