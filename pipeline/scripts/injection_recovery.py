@@ -37,7 +37,9 @@ from exoplanet_hunter.eval.injection_recovery import (
     completeness_curve,
     count_transits,
     noise_ppm,
+    snr_at_half_max_lift,
     transit_snr,
+    within_host_lift,
 )
 from exoplanet_hunter.eval.observation_bias import BASELINE_DAYS, baseline_days
 from exoplanet_hunter.preprocess import clean_lightcurve, flatten_lightcurve
@@ -239,6 +241,74 @@ def report(
     )
 
 
+def blocked_report(results: pd.DataFrame, strata: bool = True) -> None:
+    """Print the within-host lift table and the clustered dose-response fit.
+
+    `report` corrects by the POOLED control mean; the design supports a
+    per-host correction, and the two differ because the null-injection floor
+    differs by host class. Cluster-robust inference is on 39 df, not ~840:
+    rows within a host are not independent draws.
+    """
+    import statsmodels.api as sm
+    import statsmodels.formula.api as smf
+
+    label = results.groupby("tic_id").host_label.first()
+    groups = [("all hosts", label.index)]
+    if strata:
+        groups += [
+            ("false-positive hosts", label[label == 0].index),
+            ("planet hosts", label[label == 1].index),
+        ]
+
+    for name, ids in groups:
+        d = results[results.tic_id.isin(ids)]
+        lifts = within_host_lift(
+            d.snr_target.to_numpy(), d.recovered.to_numpy(), d.tic_id.to_numpy()
+        )
+        print(f"\n  {name} — {d.tic_id.nunique()} blocks, lift over each host's own S/N=0 cell")
+        for x in lifts:
+            flag = "*" if x.p_value < 0.05 else " "
+            print(
+                f"    S/N {x.snr:5.0f}  {x.lift:+.3f}  se {x.se:.3f}  "
+                f"t({x.n_blocks - 1}) {x.t:6.2f}  p {x.p_value:8.2e}{flag}  "
+                f"[{x.ci95[0]:+.3f}, {x.ci95[1]:+.3f}]"
+            )
+        print(f"    S/N at half the maximum lift: {snr_at_half_max_lift(lifts):.1f}")
+
+    d = results[results.snr_target > 0].copy()
+    d["y"] = d.recovered.astype(int)
+    d["l10"] = np.log10(d.snr_target)
+    d["host"] = d.tic_id.astype(str)
+    d["planet"] = d.host_label.astype(int)
+    f = "y ~ l10 + C(period_days) + planet"
+    naive = smf.glm(f, data=d, family=sm.families.Binomial()).fit()
+    clust = smf.glm(f, data=d, family=sm.families.Binomial()).fit(
+        cov_type="cluster", cov_kwds={"groups": d.host}
+    )
+    gee = smf.gee(
+        f,
+        groups="host",
+        data=d,
+        family=sm.families.Binomial(),
+        cov_struct=sm.cov_struct.Exchangeable(),
+    ).fit()
+    n_hosts = d.tic_id.nunique()
+    print(f"\n  dose-response, beta on log10(S/N), {len(d)} rows in {n_hosts} blocks")
+    for tag, fit, df in (
+        ("independent rows (overstates)", naive, int(naive.df_resid)),
+        ("cluster-robust by host", clust, n_hosts - 1),
+        ("GEE, exchangeable", gee, n_hosts - 1),
+    ):
+        b, se = fit.params["l10"], fit.bse["l10"]
+        print(f"    {tag:32s} {b:+.3f}  se {se:.3f}  stat {b / se:6.1f}  df {df}")
+    inflation = clust.bse["l10"] / naive.bse["l10"]
+    print(
+        f"    SE inflation {inflation:.2f}x, so the effective n is about "
+        f"{len(d) / inflation**2:.0f} of {len(d)}; within-host correlation "
+        f"{gee.cov_struct.dep_params:.3f}"
+    )
+
+
 def plot_completeness(
     curve: pd.DataFrame, out: Path, run_id: str, threshold: float, baseline: float = 0.0
 ) -> None:
@@ -335,9 +405,20 @@ def main() -> None:
         help="score this CV run instead of the registry champion, so an arm can be "
         "read on the injection instrument without being promoted",
     )
+    parser.add_argument(
+        "--analyse",
+        action="store_true",
+        help="read --out and report the blocked analysis only; scores nothing",
+    )
     parser.add_argument("--n-mc", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
+
+    if args.analyse:
+        if not args.out.exists():
+            raise SystemExit(f"no results at {args.out} — run without --analyse first")
+        blocked_report(pd.read_parquet(args.out))
+        return
 
     hosts = select_hosts(
         args.labels,
