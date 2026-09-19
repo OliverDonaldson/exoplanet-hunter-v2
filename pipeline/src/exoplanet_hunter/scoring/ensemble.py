@@ -31,7 +31,7 @@ log = get_logger(__name__)
 @dataclass
 class FoldMember:
     fold: int
-    model: Any  # keras model (Any: keras import deferred to load time)
+    models: list[Any]  # keras models (Any: keras import deferred to load time)
     calibrator: Any  # TemperatureScaler (sklearn-shaped .predict)
     threshold: float
     aux_pipeline: Any | None
@@ -45,6 +45,10 @@ class EnsemblePrediction:
     prob_mean: float
     prob_std: float
     threshold: float
+    # Seed-to-seed spread within a fold, 0.0 on a single-member run. Kept out of
+    # `prob_std` because it is the quantity the promotion gate measures, and
+    # folding it into MC noise would hide it.
+    prob_std_member: float = 0.0
 
 
 class ScoringEnsemble:
@@ -84,21 +88,22 @@ class ScoringEnsemble:
 
         members: list[FoldMember] = []
         for fold_dir in fold_dirs:
-            ckpt = fold_dir / "cnn_dualview.keras"
-            if not ckpt.exists():
-                # `member_checkpoint_name` numbers the file past one member, so a
-                # multi-member or branch run has no bare checkpoint to serve.
+            # `member_checkpoint_name` keeps the bare name at one member per fold
+            # and numbers it past that, so both layouts are on disk in the wild.
+            bare = fold_dir / "cnn_dualview.keras"
+            ckpts = [bare] if bare.exists() else sorted(fold_dir.glob("model_*_cnn_dualview.keras"))
+            if not ckpts:
                 found = sorted(q.name for q in fold_dir.glob("*.keras"))
                 raise FileNotFoundError(
-                    f"no {ckpt.name} in {fold_dir} (found: {found or 'no .keras files'}); "
-                    "serving aggregates one model per fold, so a multi-member or branch "
-                    "run needs ensemble-aware loading before it can be scored"
+                    f"no cnn_dualview checkpoint in {fold_dir} "
+                    f"(found: {found or 'no .keras files'}); this loader serves the "
+                    "dual-view architecture, and a branch run needs its own"
                 )
             bundle = joblib.load(fold_dir / "cnn_calibrator.joblib")
             members.append(
                 FoldMember(
                     fold=int(fold_dir.name.split("_")[1]),
-                    model=tf.keras.models.load_model(str(ckpt), compile=False),
+                    models=[tf.keras.models.load_model(str(c), compile=False) for c in ckpts],
                     calibrator=bundle["calibrator"],
                     threshold=float(bundle["threshold"]),
                     aux_pipeline=bundle.get("aux_pipeline"),
@@ -106,7 +111,12 @@ class ScoringEnsemble:
                 )
             )
         run = run_id or cv_dir.name
-        log.info("[ensemble] loaded %d folds from run %s", len(members), run)
+        log.info(
+            "[ensemble] loaded %d folds x %d members from run %s",
+            len(members),
+            len(members[0].models) if members else 0,
+            run,
+        )
         return cls(members, run_id=run)
 
     def predict(
@@ -122,6 +132,7 @@ class ScoringEnsemble:
 
         raw_means: list[float] = []
         mc_vars: list[float] = []
+        member_vars: list[float] = []
         calibrated: list[float] = []
         for member in self.members:
             inputs: dict[str, np.ndarray] = {
@@ -137,10 +148,21 @@ class ScoringEnsemble:
             # Calibrated headline from the deterministic pass: calibrators are
             # fitted on deterministic scores, and feeding them MC means costs
             # ~0.08 ECE. MC sampling contributes only the uncertainty band.
-            det = float(np.asarray(member.model(inputs, training=False)).squeeze())
-            result = mc_dropout_predict(member.model, inputs, n_samples=n_mc)
+            dets = [float(np.asarray(m(inputs, training=False)).squeeze()) for m in member.models]
+            mcs = [
+                float(np.asarray(mc_dropout_predict(m, inputs, n_samples=n_mc).std).squeeze())
+                for m in member.models
+            ]
+            # `train.py` averages the members' RAW scores and fits one Platt on
+            # that average, so serving has to calibrate the same quantity.
+            n = len(dets)
+            det = float(np.mean(dets))
             raw_means.append(det)
-            mc_vars.append(float(np.asarray(result.std).squeeze()) ** 2)
+            # MC variance of a mean of n members, which is their mean variance
+            # over n. At n=1 this is the single-model term it replaces.
+            mc_vars.append(float(np.mean(np.square(mcs))) / n)
+            if n > 1:
+                member_vars.append(float(np.var(dets, ddof=1)))
             calibrated.append(float(member.calibrator.predict(np.array([det]))[0]))
 
         return EnsemblePrediction(
@@ -149,4 +171,5 @@ class ScoringEnsemble:
             prob_mean=float(np.mean(raw_means)),
             prob_std=float(np.sqrt(np.mean(mc_vars) + np.var(raw_means))),
             threshold=float(np.mean([m.threshold for m in self.members])),
+            prob_std_member=float(np.sqrt(np.mean(member_vars))) if member_vars else 0.0,
         )
