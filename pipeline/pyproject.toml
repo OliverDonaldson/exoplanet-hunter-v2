@@ -65,6 +65,13 @@ validation = [
 ]
 dev = [
     "dvc[s3]>=3.30",
+    # The injection instrument is a blocked design — 40 hosts, treatment nested
+    # in host — so its dose-response needs cluster-robust or population-averaged
+    # inference, not the independent-rows GLM. Kept in `dev`: the serving image
+    # installs ./pipeline without extras, and nothing on the scoring path uses it.
+    # `MixedLM` is Gaussian-only, so a binary outcome goes through `GEE` with an
+    # exchangeable working correlation, or `GLM(...).fit(cov_type="cluster")`.
+    "statsmodels>=0.14",
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.5",
