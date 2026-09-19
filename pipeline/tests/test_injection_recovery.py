@@ -8,7 +8,9 @@ from exoplanet_hunter.eval.injection_recovery import (
     count_transits,
     inject_box_transit,
     noise_ppm,
+    snr_at_half_max_lift,
     transit_snr,
+    within_host_lift,
 )
 
 
@@ -124,3 +126,49 @@ def test_depth_for_snr_inverts_transit_snr():
     assert len(edges) == len(levels) + 1
     assert np.all(np.diff(edges) > 0)
     assert (np.digitize(levels, edges) - 1).tolist() == [0, 1, 2, 3]
+
+
+# --------------------------------------------------- blocked within-host lift --
+
+
+def _grid(floors: dict[int, float], lifts: dict[float, float], reps: int = 10):
+    """One host per entry in `floors`, each with a control cell and one level."""
+    snr, rec, host = [], [], []
+    for h, floor in floors.items():
+        for level, lift in [(0.0, 0.0), *lifts.items()]:
+            hits = round((floor + lift) * reps)
+            snr += [level] * reps
+            rec += [True] * hits + [False] * (reps - hits)
+            host += [h] * reps
+    return np.array(snr), np.array(rec), np.array(host)
+
+
+def test_lift_is_measured_against_each_hosts_own_control():
+    """Two hosts with very different floors and the same lift must report that
+    lift, not the spread of their baselines."""
+    snr, rec, host = _grid({1: 0.1, 2: 0.7}, {10.0: 0.2})
+    (result,) = within_host_lift(snr, rec, host)
+    assert result.lift == pytest.approx(0.2, abs=1e-9)
+    assert result.n_blocks == 2
+
+
+def test_a_host_missing_its_control_cell_raises():
+    snr, rec, host = _grid({1: 0.1, 2: 0.5}, {10.0: 0.2})
+    keep = ~((host == 2) & (snr == 0.0))
+    with pytest.raises(ValueError, match="no control cell"):
+        within_host_lift(snr[keep], rec[keep], host[keep])
+
+
+def test_half_max_lift_interpolates_in_log_snr():
+    snr, rec, host = _grid({1: 0.0, 2: 0.0}, {10.0: 0.2, 100.0: 0.4})
+    lifts = within_host_lift(snr, rec, host)
+    # Half of the 0.4 maximum is 0.2, reached exactly at S/N 10.
+    assert snr_at_half_max_lift(lifts) == pytest.approx(10.0, rel=1e-9)
+
+
+def test_half_max_lift_refuses_when_nothing_brackets_it():
+    # Both levels already clear half the maximum, so the crossing is below the
+    # grid and interpolating would invent a point the design never probed.
+    snr, rec, host = _grid({1: 0.0, 2: 0.0}, {10.0: 0.4, 100.0: 0.5})
+    with pytest.raises(ValueError, match="bracketing"):
+        snr_at_half_max_lift(within_host_lift(snr, rec, host))
