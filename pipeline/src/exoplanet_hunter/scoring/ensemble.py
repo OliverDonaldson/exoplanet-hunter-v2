@@ -61,8 +61,6 @@ class ScoringEnsemble:
     @classmethod
     def from_registry(cls, models_dir: Path) -> ScoringEnsemble:
         """Load the promoted run's fold models + bundles. Raises FileNotFoundError."""
-        import tensorflow as tf
-
         registry_path = models_dir / "registry.json"
         if not registry_path.exists():
             raise FileNotFoundError(f"no model registry at {registry_path}")
@@ -72,24 +70,44 @@ class ScoringEnsemble:
             # The registry stores repo-relative paths; resolve against the
             # models dir's parent (the repo root) so serving works from any cwd.
             cv_dir = models_dir.parent / cv_dir
+        return cls.from_cv_dir(cv_dir, run_id=str(registry["run_id"]))
+
+    @classmethod
+    def from_cv_dir(cls, cv_dir: Path, run_id: str | None = None) -> ScoringEnsemble:
+        """Load fold models + bundles from any CV run dir — the path that reads an
+        off-registry arm without promoting it. Raises FileNotFoundError."""
+        import tensorflow as tf
+
+        fold_dirs = sorted(cv_dir.glob("fold_*"))
+        if not fold_dirs:
+            raise FileNotFoundError(f"no fold_* directories under {cv_dir}")
 
         members: list[FoldMember] = []
-        for fold_dir in sorted(cv_dir.glob("fold_*")):
+        for fold_dir in fold_dirs:
+            ckpt = fold_dir / "cnn_dualview.keras"
+            if not ckpt.exists():
+                # `member_checkpoint_name` numbers the file past one member, so a
+                # multi-member or branch run has no bare checkpoint to serve.
+                found = sorted(q.name for q in fold_dir.glob("*.keras"))
+                raise FileNotFoundError(
+                    f"no {ckpt.name} in {fold_dir} (found: {found or 'no .keras files'}); "
+                    "serving aggregates one model per fold, so a multi-member or branch "
+                    "run needs ensemble-aware loading before it can be scored"
+                )
             bundle = joblib.load(fold_dir / "cnn_calibrator.joblib")
             members.append(
                 FoldMember(
                     fold=int(fold_dir.name.split("_")[1]),
-                    model=tf.keras.models.load_model(
-                        str(fold_dir / "cnn_dualview.keras"), compile=False
-                    ),
+                    model=tf.keras.models.load_model(str(ckpt), compile=False),
                     calibrator=bundle["calibrator"],
                     threshold=float(bundle["threshold"]),
                     aux_pipeline=bundle.get("aux_pipeline"),
                     aux_dim=bundle.get("aux_dim"),
                 )
             )
-        log.info("[ensemble] loaded %d folds from run %s", len(members), registry["run_id"])
-        return cls(members, run_id=str(registry["run_id"]))
+        run = run_id or cv_dir.name
+        log.info("[ensemble] loaded %d folds from run %s", len(members), run)
+        return cls(members, run_id=run)
 
     def predict(
         self,

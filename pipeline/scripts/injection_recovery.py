@@ -328,6 +328,13 @@ def main() -> None:
         action="store_false",
         help="skip the depth-0 control arm that measures the host-only pass rate",
     )
+    parser.add_argument(
+        "--cv-dir",
+        type=Path,
+        default=None,
+        help="score this CV run instead of the registry champion, so an arm can be "
+        "read on the injection instrument without being promoted",
+    )
     parser.add_argument("--n-mc", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -345,7 +352,10 @@ def main() -> None:
         raise SystemExit("no eligible hosts — relax --max-host-depth-ppm or pass --allow-download")
 
     scorer = TargetScorer(
-        models_dir=Path("models"), data_raw=args.raw, candidates_path=args.catalogue
+        models_dir=Path("models"),
+        data_raw=args.raw,
+        candidates_path=args.catalogue,
+        cv_dir=args.cv_dir,
     )
     run_id = scorer.ensemble.run_id
     levels_with_controls = ([0.0] if args.controls else []) + list(args.snr_grid)

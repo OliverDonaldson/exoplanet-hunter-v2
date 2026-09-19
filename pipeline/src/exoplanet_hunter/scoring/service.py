@@ -167,12 +167,17 @@ class TargetScorer:
         *,
         candidates_path: Path | None = None,
         preprocess: PreprocessParams | None = None,
+        cv_dir: Path | None = None,
     ) -> None:
         self.models_dir = models_dir
         self.data_raw = data_raw
         self.candidates_path = candidates_path
         self.preprocess = preprocess or PreprocessParams()
-        self.ensemble = ScoringEnsemble.from_registry(models_dir)
+        self.ensemble = (
+            ScoringEnsemble.from_cv_dir(cv_dir)
+            if cv_dir is not None
+            else ScoringEnsemble.from_registry(models_dir)
+        )
         self.downloader = LightCurveDownloader(data_raw, author="SPOC", cadence=120)
         self._snr_series: Any | None = None
         self._ephemeris: pd.DataFrame | None = None
