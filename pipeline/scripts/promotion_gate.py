@@ -67,7 +67,7 @@ def main() -> None:
         default=None,
         help=(
             "override the shortlist-recall tolerance. Defaults to the candidate run's own "
-            "measured floor (2 x seed_sd / sqrt(n_models_per_fold)); a run with no variance "
+            "measured floor, 2 x sqrt(sd_cand^2/n_cand + sd_inc^2/n_inc); a run with no variance "
             "block falls back to the pre-stage-6 constant of 0.02"
         ),
     )

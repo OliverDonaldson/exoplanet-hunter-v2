@@ -56,8 +56,9 @@ Two conventions worth keeping:
 - **Experimental arms are written outside `models/cv/`.** The weekly gate
   selects candidates from that directory, and an arm left inside it can be
   picked up as one.
-- **One test file per unit, and the unit is not always a module.** 47 test
-  files cover 65 library modules and 33 scripts. `test_<module>.py` is the
+- **One test file per unit, and the unit is not always a module.** `pipeline/tests`
+  covers 65 library modules and 33 scripts; `api/tests` covers the service.
+  Counts drift, so the rule is the invariant, not a number. `test_<module>.py` is the
   common case; the rest are grouped suites (`test_datasets.py`,
   `test_eval.py`, `test_validation.py`) covering a package, and
   `test_<script>.py` for a script. No stem appears twice, which is the part
@@ -80,10 +81,12 @@ rejection. It has correctly rejected several retrains; that is it working.
 
 Two things follow from that and are easy to get wrong:
 
-- **A margin smaller than its noise floor is not a result.** Every run with more
-  than one member per fold measures its own floor by `2 x sd / sqrt(n)`. A floor
-  belongs to the architecture and the run it was measured on — a branch-model
-  floor read under dual-view numbers is a category error.
+- **A margin smaller than its noise floor is not a result.** The floor is the se
+  of the *difference*, `2 x sqrt(sd_cand^2/n_cand + sd_inc^2/n_inc)`, so it carries
+  the champion's noise as well as the candidate's; the candidate's own spread
+  alone understates it. A floor belongs to the architecture and the run it was
+  measured on — a branch-model floor read under dual-view numbers is a category
+  error.
 - **Pre-registration is binding.** How a result will be read is written down
   before the run finishes. A result landing outside those terms is recorded as
   falsified, never re-specified.

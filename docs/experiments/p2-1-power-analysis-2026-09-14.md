@@ -218,3 +218,48 @@ it can only fire on a regression beyond **+-0.036**. A veto with that trigger is
 close to inert on a metric whose range of interest is smaller than its threshold.
 pAUC stays reported; it should not be relied on as the relevance guard. Recorded
 as [#105](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/105).
+
+---
+
+## Note appended 2026-09-19 — the pAUC veto was never implemented
+
+§3 above records "**Decided: the gate reads ROC-AUC, with pAUC as a veto**", and
+`docs/decisions.md`, `PLAN.md` §5, this record's README and the console's own
+copy all carried it forward as adopted. Measured on `a9e346b`:
+
+- `grep -rniE "pauc|p_auc|partial.?auc" pipeline/src` returns **nothing**. pAUC
+  exists only at `pipeline/scripts/power_analysis.py:75`, which nothing in
+  `pipeline/src` imports.
+- `evaluate_promotion`'s `thresholds` dict has no pAUC key, and no test covers one.
+- Executed: a candidate with **ROC-AUC 0.9100 -> 0.9600, recall held, and pAUC
+  0.7541 -> 0.3000** returns **PROMOTE with no alarm**. Removing `pauc` from the
+  payload entirely returns the identical verdict.
+
+It is also not reported. `SliceMetrics` emits `n, n_positive, roc_auc, pr_auc,
+brier, ece, recall_at_{1,5,10}pct_fpr` — confirmed against the `per_mission`
+blocks of a summary on disk. So the position is three-part: **not implemented,
+not reported, claim withdrawn.**
+
+#105's D3 called the veto "close to inert" at a ±0.036 trigger. That
+understates it, and the ±0.036 itself is the 5-against-1 allocation of #114
+rather than a property of pAUC: at 5v5 the trigger is ±0.0216 and at 10v10
+±0.0153. The reason not to build it is that it is not worth building at the
+current allocation, not that it cannot work.
+
+**Consequence for this record's §3.** The relevance guard that section relies on
+does not exist. Nothing currently protects against a candidate that improves the
+bulk ordering at the follow-up region's expense, and §4's own finding — that no
+label-based metric detects a change confined to the top 5–20% — says nothing
+available can. Injection-recovery (#97) is the only instrument that sets its own
+n in that region.
+
+## Note appended 2026-09-19 — recall @1% FPR still rejects
+
+§3's "recall @1% FPR ... never decides a promotion again" is correct and the code
+implements it. Three documents restated it as "demoted from gating" and the
+console as "no longer gates", which is wrong: `promotion.py:856-858` returns
+**REJECT** when the margin falls below `-recall_tolerance` outside the UNRESOLVED
+band. Verified by execution — a candidate with ROC-AUC 0.9100 -> 0.9600 and
+recall 0.311 -> 0.050 returns REJECT, "shortlist recall degraded beyond tolerance
+(-0.0657)". Recall cannot promote; it can still veto. The docs are corrected, the
+code is not.
