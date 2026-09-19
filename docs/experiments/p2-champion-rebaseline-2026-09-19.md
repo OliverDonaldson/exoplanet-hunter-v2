@@ -107,3 +107,31 @@ comparison every past result was read against."* That cost is accepted
 deliberately — every comparison made against the borrowed-prior floor is
 superseded, and the 5-against-1 allocation is the reason. Dated row in
 `docs/decisions.md`, and the comment is corrected in the same change.
+
+---
+
+## Correction · 2026-09-20 · the seed sd this run measured is on the wrong population
+
+Appended under rule 5; nothing above is edited.
+
+This pre-registration expected the MDE to fall to ≈0.0125 once the champion
+carried its own variance block. It fell further, and **not for the reason
+expected**. The `seed_sd` this run wrote — 0.00225 — is the mean within-fold
+spread of per-member **all-mission** ROC-AUC (`train.py:551`), while the gate
+decides on the fold-pooled **TESS** slice. Measured on this run's own
+`predictions.parquet`, the TESS figure is **0.00372**, 1.65x larger.
+
+So §1's argument stands — the gate faces 5-against-1 and the published MDEs
+assume 5-against-5 — but the number this run supplies for the candidate side
+cannot be used as it is. Wiring this artefact in as champion unchanged would
+give an AUC floor of **0.00285** where the corrected term supports **0.00471**:
+too narrow, for a different wrong reason than the one this run was written to
+fix.
+
+The falsification condition — *champion `seed_sd` > 0.0093* — was read against
+the all-mission figure and was not met, and is not met on the TESS figure
+either. The run is not falsified. Its estimand is narrower than it appeared.
+
+Filed as [#123](https://github.com/OliverDonaldson/exoplanet-hunter-v2/issues/123);
+the fix is pre-registered in
+[`p2-seed-sd-population-2026-09-20.md`](p2-seed-sd-population-2026-09-20.md).
