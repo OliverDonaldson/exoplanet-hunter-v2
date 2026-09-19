@@ -1,7 +1,11 @@
 # Plan
 
 Where the project stands and what is left, in order. This is the only document
-a session updates to record state: one row in §1 per step, nothing else. The
+a session updates to record state: one row in §1 per step, nothing else. **This
+file is living and is edited in place**; the frozen record is
+[`experiments/`](experiments/README.md) and the Considered-and-deferred section
+of [`decisions.md`](decisions.md), where a correction is a dated note and never
+an edit. The
 record of what was measured is [`experiments/`](experiments/README.md), the
 weaknesses are [`known-limits.md`](known-limits.md), the decisions are
 [`decisions.md`](decisions.md), and [`roadmap.md`](roadmap.md) is the index that
@@ -200,7 +204,7 @@ nothing here trains a competitive model until item 6.
 
 | # | item | exit criterion | cost |
 |---|---|---|---:|
-| ~~P2.1~~ **DONE 2026-09-14, corrected 2026-09-17** | **Power analysis, written up as an experiment file.** | [p2-1-power-analysis-2026-09-14.md](experiments/p2-1-power-analysis-2026-09-14.md), with a dated note appended 2026-09-17. The gate reads **ROC-AUC**; the MDE at 5 members/fold is **0.0126 dual-view and 0.0201 branch**, not the 0.0131 first published, with pAUC FPR≤0.1 as a one-sided veto and recall @1% FPR demoted from gating. Two findings reorder what follows: seed sd exceeds sampling sd for every metric, and no metric detects a change confined to the follow-up region | done |
+| ~~P2.1~~ **DONE 2026-09-14, corrected 2026-09-17** | **Power analysis, written up as an experiment file.** | [p2-1-power-analysis-2026-09-14.md](experiments/p2-1-power-analysis-2026-09-14.md), with a dated note appended 2026-09-17. The gate reads **ROC-AUC**; the MDE at 5 members/fold is **0.0126 dual-view and 0.0201 branch**, not the 0.0131 first published, with recall @1% FPR demoted from *deciding* a promotion — it still rejects a regression beyond its floor. The pAUC veto recorded here **was never implemented** (#105, 2026-09-19) and the claim is withdrawn. The 0.0126 bar assumes five members on both sides; against today's single-member champion it is **0.0199** (#114). Two findings reorder what follows: seed sd exceeds sampling sd for every metric, and no metric detects a change confined to the follow-up region | done |
 | ~~P2.2~~ **DONE 2026-09-17, rescoped** | **The gate reads a blocked interval, not a paired bootstrap.** [p2-stage-1-instrument-2026-09-17.md](experiments/p2-stage-1-instrument-2026-09-17.md). A paired bootstrap measures the smaller variance component, so P2.2 as written was necessary and not sufficient. The gate now reports a blocked contrast — fold as block, member nested in arm — with a within-block permutation p-value, and `decision_floor`'s champion term is divided by the champion's member count rather than the candidate's. Recorded verdicts re-checked; none changes | done |
 | P2.3 | **Score the random forest.** `handcrafted.py::extract_features`, 14 features, the same folds and the same protocol. | [report.md](report.md) §4 row 1 carries a number instead of a dash | ≈2 h |
 | P2.4 | **Scale injection-recovery.** 40 hosts to a few hundred, with the null-injection floor reported beside every completeness figure. | A completeness curve with se < 0.02 per S/N bin, and the S/N = 0 floor printed on the same axes | ≈3 h + compute |
@@ -214,10 +218,17 @@ members is 0.1222, larger than the whole span of the record it was deciding.
 pAUC as the *gating* metric is **rejected on measurement**: ROC-AUC detects the
 same degradation at 1.9x pAUC's z, and on a degradation confined to the
 follow-up region — the case pAUC was chosen for — the two are within noise and
-both insignificant. The gate reads ROC-AUC with pAUC as a one-sided veto, so the
-relevance guard survives without the power penalty. The reasoning that "the
-point is not to gate on AUC" was right about the risk and wrong about the
-remedy; a veto addresses it and a weaker primary metric does not.
+both insignificant. The gate reads ROC-AUC alone. The veto was recorded as
+adopted and **never built**: measured 2026-09-19, pAUC appears nowhere in
+`pipeline/src`, and a candidate whose pAUC collapses 0.754 -> 0.300 promotes with
+no alarm. The claim is withdrawn rather than implemented — see #105 — which
+leaves the relevance guard unfilled, and injection-recovery (#97) is the only
+thing that can fill it.
+
+"Demoted" means recall @1% FPR never *decides* a promotion. It still **rejects**
+a regression beyond its measured floor (`promotion.py:856-858`), verified by
+execution. The three documents that read it as no longer gating at all were
+wrong, and the code is right.
 
 **And P2.4 is promoted in priority.** No metric detects a change confined to the
 top 5–20% of the ranking (best z = 1.36 against 1.96), so the region the console

@@ -126,8 +126,9 @@ its own.
 | `pooled_gate_recall_seed_sd` | Spread of those pooled draws — the run-level reseeding noise, directly. |
 | `n_models_per_fold` | Members trained per fold. |
 
-The decision rule is `2 x sd / sqrt(n_models_per_fold)`. **A margin smaller than
-that is not a result.** The rule has correctly rejected several of this
+The decision rule is `2 x sqrt(sd_cand^2/n_cand + sd_inc^2/n_inc)` — the se of the
+difference between two run means, not of either mean alone. **A margin smaller
+than that is not a result.** The rule has correctly rejected several of this
 project's own changes.
 
 ### 3.3 Run configuration

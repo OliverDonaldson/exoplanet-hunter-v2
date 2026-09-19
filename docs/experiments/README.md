@@ -8,7 +8,8 @@ The old-to-new stage numbering is at [`../roadmap.md`](../roadmap.md) §1c, and
 every old section number is a pointer there.
 
 Two conventions run through all of it. A margin is read against the noise floor
-measured in the same run, by the rule 2·sd/√n over members per fold, and a floor
+measured in the same run — by 2·√(sd_c²/n_c + sd_i²/n_i), the se of a difference,
+corrected 2026-09-17 from the 2·sd/√n this line carried before — and a floor
 belongs to the architecture it was measured on. A result landing outside the
 terms fixed before it ran is recorded as falsified, never re-specified. The
 outcome column below is each entry's own reading of itself, never a later

@@ -159,11 +159,13 @@ five route modules — are all serving by construction.
    run's own measured floor, or it does not become the champion. A margin
    inside the floor is UNRESOLVED, a stop-and-ask, not a rejection. The gate
    has correctly rejected several retrains; that is it working.
-4. **A margin smaller than its noise floor is not a result.** Every run with
-   more than one member per fold measures its own floor, by the rule
-   `2 x sd / sqrt(n_models_per_fold)`. A single-member run, including the
-   served champion, reports the floor from the calibration run that measured
-   it and says so. A floor belongs to the architecture it was measured on.
+4. **A margin smaller than its noise floor is not a result.** The quantity
+   under test is a difference of two run means, so the floor carries both runs'
+   noise: `2 x sqrt(sd_cand^2/n_cand + sd_inc^2/n_inc)`. A single-member run,
+   including the served champion, contributes its term over one member and
+   names the prior it borrowed. A floor belongs to the architecture it was
+   measured on. The se of *one* run's mean, `2 x sd / sqrt(n)`, is a different
+   quantity — it is what `/runs` reports per run, and it is not the gate's rule.
 5. **Pre-registration is binding.** A result landing outside the terms fixed
    before it was run is reported as falsified, never re-specified.
 6. **Verify by executing.** Documentation claiming something works is a
@@ -188,8 +190,10 @@ five route modules — are all serving by construction.
   arm on a new shard set.
 - **Control arm.** A run of the harness that scores real hosts with no injected
   transit; a model that passes such hosts is scoring the star, not the transit.
-- **Noise floor.** The seed-to-seed spread of a metric measured in the same
-  run, `2 x sd / sqrt(n_models_per_fold)`; a margin inside it is not a result.
+- **Noise floor.** The smallest margin a comparison can resolve, from the
+  seed-to-seed spread of both runs: `2 x sqrt(sd_cand^2/n_cand + sd_inc^2/n_inc)`. A
+  single run's own spread, `2 x sd / sqrt(n)`, is the narrower quantity `/runs`
+  reports; a margin inside the comparison floor is not a result.
 - **Recall @1% FPR.** The fraction of planets caught at the threshold where one
   percent of false positives pass: what "would this reach the shortlist" means.
 - **Pre-registration.** How a result will be read, written before the run

@@ -246,9 +246,11 @@ Every architecture below was judged by the same procedure, in this order:
    committed before the run produced numbers. The pre-registrations are files in
    [`experiments/`](experiments/README.md), each sitting immediately before the
    result it governs.
-2. **Measure the noise floor in the same run.** With $n$ members trained per
-   fold, the floor is $2\sigma/\sqrt{n}$ over members. A margin inside its floor
-   is not a result.
+2. **Measure the noise floor in the same run.** The quantity under test is a
+   difference of two run means, so the floor carries both runs' seed noise:
+   $2\sqrt{\sigma_c^2/n_c + \sigma_i^2/n_i}$ over members per fold. A margin
+   inside its floor is not a result. The narrower $2\sigma/\sqrt{n}$ is the
+   standard error of a *single* run's mean, which is a different quantity.
 3. **Run the promotion gate.** `promotion_gate.py` compares to the champion on
    out-of-fold TESS ROC-AUC, with Brier not degrading by more than 0.005 and ECE
    by more than 0.01, and recall @1% FPR not falling by more than the run's own

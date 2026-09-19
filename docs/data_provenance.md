@@ -144,7 +144,9 @@ qualifications all live in [experiments/](experiments/README.md), indexed by
 was not measured from an artefact in this repository.
 
 Two conventions carry through all of it. A margin is reported against the noise
-floor measured **in the same run**, by the rule `2 x sd / sqrt(n_models_per_fold)`.
+floor measured **in the same run**, by the rule
+`2 x sqrt(sd_cand^2/n_cand + sd_inc^2/n_inc)` — the se of a difference, carrying
+both runs' seed noise.
 And a number that landed outside the terms fixed before it was run is recorded
 as falsified rather than re-specified.
 
