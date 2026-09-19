@@ -412,8 +412,9 @@ VERDICT_BY_EXIT_CODE: dict[int, Verdict] = {
 ACKNOWLEDGED_ALARMS: tuple[str, ...] = (
     # The served model was baselined before K2 entered training, so it carries no
     # K2 slice and no candidate can give it one. The gate decides on TESS alone.
-    # Re-baselining the reference to clear this is a real option and is not taken,
-    # because it would move the comparison every past result was read against.
+    # Re-baselining the reference to clear this was refused here until 2026-09-19,
+    # when the 5-against-1 allocation was measured and the decision reversed; this
+    # alarm is expected to stop firing once that run is the reference.
     "only the candidate scored K2",
 )
 
