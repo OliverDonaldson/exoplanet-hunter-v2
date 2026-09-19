@@ -26,11 +26,14 @@ It is **falsified** by any one of:
    on** — if it needs artefacts the trainers or `summarise_scored` do not write,
    the fix is not deliverable as specified and is recorded so, not approximated.
 2. **Correcting the candidate's population moves a recorded verdict toward
-   PROMOTE.** Held at the current champion, this correction raises the candidate
-   term (0.00225 → 0.00372 on the re-baseline) and therefore only widens floors.
-   A widened floor can move PROMOTE toward UNRESOLVED and UNRESOLVED toward
-   REJECT, never the reverse. A verdict moving the other way means the diagnosis
-   is wrong.
+   PROMOTE.** The correction raises the candidate term (0.00225 → 0.00372 on the
+   re-baseline) and therefore only widens floors; a widened floor can move
+   PROMOTE toward UNRESOLVED and UNRESOLVED toward REJECT, never the reverse.
+   **Recorded as a consistency check, not a test.** Held at the current
+   champion, the floor moves only **+2.2%** (§2a), so no recorded verdict is
+   likely to turn on it. It is run because a verdict moving the *other* way
+   would falsify the diagnosis outright, not because it is expected to be
+   informative.
 3. **The gate's measured size moves further from nominal after the correction
    than before.** If matching the error term to the estimand does not improve
    the gate's size, the argument in §4 is wrong and the change is not justified
@@ -70,6 +73,27 @@ is confirmed a TESS figure: the two `cnn_dualview` multi-member runs it pools
 give TESS within-fold sds of 0.00494 (`510b565b9f7f…`) and 0.00625
 (`fc4f3515ee63…`), against all-mission 0.00302 and 0.00343. **The mismatch is
 entirely on the candidate side.**
+
+## 2a. How much the floor actually moves, and when
+
+Measured after §2 was written, and it changes what this fix is *for*.
+
+| champion | candidate term | AUC floor |
+|---|---|---:|
+| current `ca906040` — no variance block, borrows 0.0062 over `n_i = 1` | as recorded 0.00225 | 0.01256 |
+| current `ca906040` | corrected 0.00372 | 0.01284 — **+2.2%** |
+| multi-member M=5, own variance block | as recorded 0.00225 | 0.00285 |
+| multi-member M=5, own variance block | corrected 0.00372 | 0.00471 — **+65.4%** |
+
+The variance budget says why. With the champion borrowing a prior over one member,
+`0.0062²/1 = 3.84e-05` against the candidate's `0.00225²/5 = 1.01e-06` — **38x**.
+The borrowed term dominates, so the candidate's population error is almost
+invisible in the floor **today**.
+
+It stops being invisible the moment the champion carries its own variance block,
+because the borrowed term vanishes and the candidate term becomes half the
+budget. **So this is a blocker on adopting #114's re-baseline, not a correction
+to the past record**, and the terms below are written for that.
 
 ## 3. The choice this fixes, and the rule that fixes it
 
