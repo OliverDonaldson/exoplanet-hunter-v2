@@ -28,10 +28,11 @@ class ConstantModel:
         return tf.fill((n, 1), tf.constant(self.p, dtype=tf.float32))
 
 
-def member(fold: int, p: float, threshold: float, temperature: float) -> FoldMember:
+def member(fold: int, p: float | list[float], threshold: float, temperature: float) -> FoldMember:
+    ps = [p] if isinstance(p, float) else p
     return FoldMember(
         fold=fold,
-        model=ConstantModel(p),
+        models=[ConstantModel(x) for x in ps],
         calibrator=TemperatureScaler(T=temperature),
         threshold=threshold,
         aux_pipeline=None,
@@ -60,6 +61,52 @@ def test_ensemble_calibration_applied():
     pred = ensemble.predict(np.zeros(4, np.float32), np.zeros(4, np.float32), None, n_mc=3)
     assert 0.5 < pred.per_fold[0] < 0.9
     assert pred.prob_mean == pytest.approx(0.9, abs=1e-6)  # raw mean unchanged
+
+
+def test_members_within_a_fold_are_averaged_before_calibration():
+    """`train.py` averages the members' RAW scores and fits one Platt on that
+    average, so serving has to calibrate the same quantity — not the mean of
+    per-member calibrated scores, which is a different number."""
+    ensemble = ScoringEnsemble([member(0, [0.8, 0.6], 0.5, 1.0)], run_id="t")
+    pred = ensemble.predict(np.zeros(16, np.float32), np.zeros(8, np.float32), None, n_mc=5)
+
+    assert pred.prob_mean == pytest.approx(0.7, abs=1e-6)
+    # T=1 is the identity, so the calibrated fold score is the averaged raw one.
+    assert pred.per_fold == pytest.approx([0.7], abs=1e-6)
+
+
+def test_member_spread_is_reported_apart_from_mc_noise():
+    """The within-fold spread is the seed variance the promotion gate measures.
+    Folding it into `prob_std` would hide it behind MC noise."""
+    ensemble = ScoringEnsemble([member(0, [0.8, 0.6], 0.5, 1.0)], run_id="t")
+    pred = ensemble.predict(np.zeros(16, np.float32), np.zeros(8, np.float32), None, n_mc=5)
+
+    assert pred.prob_std_member == pytest.approx(np.std([0.8, 0.6], ddof=1), abs=1e-6)
+    # One fold of constant models: no across-fold and no MC variance.
+    assert pred.prob_std == pytest.approx(0.0, abs=1e-6)
+
+
+def test_a_single_member_run_reports_no_member_spread():
+    ensemble = ScoringEnsemble([member(0, 0.8, 0.5, 1.0)], run_id="t")
+    pred = ensemble.predict(np.zeros(16, np.float32), np.zeros(8, np.float32), None, n_mc=5)
+    assert pred.prob_std_member == 0.0
+
+
+def test_a_fold_without_a_dualview_checkpoint_raises(tmp_path):
+    """A branch run carries `model_*_cnn_branches.keras`. Loading its first file
+    as a dual-view model would score the wrong architecture silently."""
+    fold = tmp_path / "fold_0"
+    fold.mkdir()
+    (fold / "model_0_cnn_branches.keras").touch()
+    (fold / "cnn_calibrator.joblib").touch()
+
+    with pytest.raises(FileNotFoundError, match="cnn_branches"):
+        ScoringEnsemble.from_cv_dir(tmp_path)
+
+
+def test_a_cv_dir_with_no_folds_raises(tmp_path):
+    with pytest.raises(FileNotFoundError, match="no fold_"):
+        ScoringEnsemble.from_cv_dir(tmp_path)
 
 
 def test_ensemble_requires_aux_when_bundled():
