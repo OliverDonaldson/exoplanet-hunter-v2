@@ -100,3 +100,9 @@ models/stage9/
 models/phase1a/
 models/phase1/
 models/stage9/
+
+# Reference runs, same argument. `models/reference/champion-m5-k2-2026-09-19/` is
+# 75 MB and was placed here by the P2 re-baseline for exactly the reason above;
+# the directory was never ignored, so `make ready`'s clean-tree check has been
+# failing on it. The record points at the path, so the artefact stays put.
+models/reference/
