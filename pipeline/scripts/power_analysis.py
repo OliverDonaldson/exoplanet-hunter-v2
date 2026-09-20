@@ -9,8 +9,9 @@ their rows, so the contrast is what a promotion gate actually reads:
      ranking, relative to its own noise;
   3. power, localised — the same, with the degradation confined to the top of
      the ranking, which is the case pAUC over FPR in [0, 0.1] exists for;
-  4. size (--size) — the verdict rates `evaluate_promotion` returns under a
-     true null, which is the half of #115 that power alone cannot answer.
+  4. size (--size) and the operating characteristic (--operating-curve) — the
+     verdict rates `evaluate_promotion` returns under a true null and against a
+     displaced margin, which is the half of #115 that power alone cannot answer.
 
     python pipeline/scripts/power_analysis.py                # the first three
     python pipeline/scripts/power_analysis.py --size         # #115 only
@@ -394,8 +395,13 @@ def power(
         print(f"{name:<16}" + "".join(f"{c:>10.2f}" for c in cells))
 
 
-def _null_arm(template: dict, rng: np.random.Generator, members: int, seed_sd: float) -> dict:
-    """One run of the null procedure: every gated metric a mean over `members` draws."""
+def _null_arm(
+    template: dict, rng: np.random.Generator, members: int, seed_sd: float, bump: float = 0.0
+) -> dict:
+    """One run of the null procedure: every gated metric a mean over `members` draws.
+
+    `bump` displaces the gate slice's ROC-AUC, turning the null into a true margin.
+    """
     import copy
 
     arm = copy.deepcopy(template)
@@ -403,6 +409,7 @@ def _null_arm(template: dict, rng: np.random.Generator, members: int, seed_sd: f
         arm["per_mission"]["TESS"][key] = float(
             mu + rng.normal(0.0, NULL_SD[key] / np.sqrt(members))
         )
+    arm["per_mission"]["TESS"]["roc_auc"] += bump
     for fold in arm["folds"]:
         fold["test_roc_auc"] = float(NULL_FOLD[0] + rng.normal(0.0, NULL_FOLD[1]))
     arm["summary"]["test_roc_auc"]["mean"] = float(
@@ -472,6 +479,79 @@ def gate_size(draws: int, seed: int) -> None:
                 print(f"{label:<32}{name:<14}{floor:>9.5f}{rates}")
 
 
+def _band(lo: float, hi: float):
+    """An `unresolved_against` with the band `[floor*lo, floor*hi]`."""
+
+    def rule(margin: float, floor: float | None) -> bool:
+        if floor is None or floor <= 0.0:
+            return False
+        return floor * lo <= abs(margin) <= floor * hi
+
+    return rule
+
+
+def operating_curve(draws: int, seed: int, members: int = PLANNED_MEMBERS) -> None:
+    """Verdict rates against the TRUE margin, for the shipped band and a candidate one.
+
+    Size alone cannot tell a correctly sized gate from one that never promotes, so
+    #128's proposal is read here against displaced margins as well as the null. Each
+    UNRESOLVED is attributed to the criterion that raised it, which is the half of
+    the picture the rates hide.
+    """
+    import json
+    from collections import Counter
+
+    from exoplanet_hunter.validation import promotion as gate
+
+    gate.blocked_contrast = lambda *a, **k: None  # type: ignore[assignment]
+    shipped = gate.unresolved_against
+    template = json.loads(REFERENCE_RUN.read_text())
+    sd = NULL_SD["roc_auc"]
+    se = sd * np.sqrt(2.0 / members)
+    print(f"\n{'=' * 92}\nOperating characteristic — {draws:,} draws, {members} v {members}")
+    print(f"margin se {se:.5f}, floor {2 * se:.5f}, MDE {Z_80_POWER * se:.5f}\n{'=' * 92}")
+    header = (
+        f"{'band':<26}{'true margin':<20}{'PROMOTE':>9}{'UNRES':>8}{'REJECT':>8}   UNRES raised by"
+    )
+    print(header)
+    for name, rule in (
+        ("[floor/1.5, floor*1.5]", shipped),
+        ("(0, floor]  — #128", _band(0.0, 1.0)),
+    ):
+        gate.unresolved_against = rule  # type: ignore[assignment]
+        for label, d in (
+            ("0 — the null", 0.0),
+            ("1.0 se", 1.0),
+            ("1.33 se — band edge", 1.3333),
+            ("2.0 se — the floor", 2.0),
+            (f"{Z_80_POWER} se — the MDE", Z_80_POWER),
+            ("5.0 se", 5.0),
+        ):
+            rng = np.random.default_rng(seed)
+            counts: Counter = Counter()
+            why: Counter = Counter()
+            for _ in range(draws):
+                decision = gate.evaluate_promotion(
+                    _null_arm(template, rng, members, sd, bump=d * se),
+                    _null_arm(template, rng, members, sd),
+                )
+                counts[decision.verdict] += 1
+                if decision.verdict is gate.Verdict.UNRESOLVED:
+                    why[
+                        "recall" if any("recall margin" in r for r in decision.reasons) else "auc"
+                    ] += 1
+            total = sum(why.values()) or 1
+            print(
+                f"{name:<26}{label:<20}"
+                f"{counts[gate.Verdict.PROMOTE] / draws:>8.1%}"
+                f"{counts[gate.Verdict.UNRESOLVED] / draws:>8.1%}"
+                f"{counts[gate.Verdict.REJECT] / draws:>8.1%}"
+                f"   recall {why['recall'] / total:.0%} / auc {why['auc'] / total:.0%}"
+            )
+        print()
+    gate.unresolved_against = shipped  # type: ignore[assignment]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arm-a", type=Path, default=ROOT / "models/phase1/arm-c-control")
@@ -483,10 +563,15 @@ def main() -> None:
     parser.add_argument("--no-influence", action="store_true", help="skip the influence diagnostic")
     parser.add_argument("--size", action="store_true", help="#115: gate size under a true null")
     parser.add_argument("--size-draws", type=int, default=10_000)
+    parser.add_argument("--operating-curve", action="store_true", help="#128: rates vs true margin")
     args = parser.parse_args()
 
     if args.size:
         gate_size(args.size_draws, args.seed)
+        return
+
+    if args.operating_curve:
+        operating_curve(args.size_draws, args.seed)
         return
 
     df = load_arms(args.arm_a / "predictions.parquet", args.arm_b / "predictions.parquet")
