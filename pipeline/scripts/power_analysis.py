@@ -1,6 +1,6 @@
 """P2.1 — what effect is detectable at this n, and which metric should gate.
 
-Three measurements over the Phase 1 arms, which differ in one thing and share
+Four measurements over the Phase 1 arms, which differ in one thing and share
 their rows, so the contrast is what a promotion gate actually reads:
 
   1. stability — each candidate metric's paired-bootstrap sd and its
@@ -8,10 +8,12 @@ their rows, so the contrast is what a promotion gate actually reads:
   2. power, uniform — which metric detects a graded degradation of the whole
      ranking, relative to its own noise;
   3. power, localised — the same, with the degradation confined to the top of
-     the ranking, which is the case pAUC over FPR in [0, 0.1] exists for.
+     the ranking, which is the case pAUC over FPR in [0, 0.1] exists for;
+  4. size (--size) — the verdict rates `evaluate_promotion` returns under a
+     true null, which is the half of #115 that power alone cannot answer.
 
-    python pipeline/scripts/power_analysis.py                # all three
-    python pipeline/scripts/power_analysis.py --n-boot 2000  # the recorded run
+    python pipeline/scripts/power_analysis.py                # the first three
+    python pipeline/scripts/power_analysis.py --size         # #115 only
 
 Read-only: opens the two predictions files and nothing else. Tracked rather
 than run from a scratch directory, because change-log.md records an earlier
@@ -44,6 +46,15 @@ MISSION_TABLE = ROOT / "data/tables/labels/labels.parquet"
 ARCHITECTURES = ("cnn_dualview", "cnn_branches")
 #: Where multi-member runs live. `models/stage9/` holds single-member arms.
 CENSUS_ROOTS = (ROOT / "models/cv", ROOT / "models/phase1")
+#: Per-member spread on the re-baseline's TESS slice, measured 2026-09-20. The
+#: recall figure reproduces that run's own `pooled_gate_recall_seed_sd`, which is
+#: how we know this protocol matches the trainer's.
+NULL_MU = {"roc_auc": 0.9074, "brier": 0.1248, "ece": 0.0582, "recall_at_1pct_fpr": 0.2311}
+NULL_SD = {"roc_auc": 0.00372, "brier": 0.00426, "ece": 0.01148, "recall_at_1pct_fpr": 0.03028}
+#: Fold-level spread, from the same run's `variance.fold_sd`.
+NULL_FOLD = (0.9656, 0.00292)
+#: The run the null draws and the summary schema both come from.
+REFERENCE_RUN = ROOT / "models/reference/champion-m5-k2-2026-09-19/cv_summary.json"
 
 Metric = Callable[[np.ndarray, np.ndarray], float]
 
@@ -383,6 +394,84 @@ def power(
         print(f"{name:<16}" + "".join(f"{c:>10.2f}" for c in cells))
 
 
+def _null_arm(template: dict, rng: np.random.Generator, members: int, seed_sd: float) -> dict:
+    """One run of the null procedure: every gated metric a mean over `members` draws."""
+    import copy
+
+    arm = copy.deepcopy(template)
+    for key, mu in NULL_MU.items():
+        arm["per_mission"]["TESS"][key] = float(
+            mu + rng.normal(0.0, NULL_SD[key] / np.sqrt(members))
+        )
+    for fold in arm["folds"]:
+        fold["test_roc_auc"] = float(NULL_FOLD[0] + rng.normal(0.0, NULL_FOLD[1]))
+    arm["summary"]["test_roc_auc"]["mean"] = float(
+        np.mean([f["test_roc_auc"] for f in arm["folds"]])
+    )
+    if members > 1:
+        arm["summary"]["variance"] |= {
+            "n_models_per_fold": members,
+            "seed_sd": seed_sd,
+            "pooled_gate_recall_seed_sd": NULL_SD["recall_at_1pct_fpr"],
+        }
+    else:
+        # What a single-member champion carries: `summarise_scored` writes
+        # `n_models_per_fold` from the member-column count, which is 0, and
+        # `decision_floor` then borrows `POOLED_SEED_SD` over n_inc = 1.
+        arm["summary"]["variance"] = {"n_models_per_fold": 0}
+    return arm
+
+
+def gate_size(draws: int, seed: int) -> None:
+    """Verdict rates under mu_candidate = mu_champion — the gate's size, #115.
+
+    `evaluate_promotion` is a deterministic function of two summary dicts, so no
+    model is retrained. `blocked_contrast` is stubbed out: it runs 5,000
+    permutations per call and its result only reaches `reasons`, so it cannot
+    change a verdict, but it is 99.6% of the runtime.
+    """
+    import json
+    from collections import Counter
+
+    from exoplanet_hunter.validation import promotion as gate
+
+    gate.blocked_contrast = lambda *a, **k: None  # type: ignore[assignment]
+    template = json.loads(REFERENCE_RUN.read_text())
+    print(f"\n{'=' * 92}\nGate size under a true null — {draws:,} draws\n{'=' * 92}")
+    print("Drawn at the measured TESS per-member sds; both arms the same procedure.")
+    header = (
+        f"{'allocation':<32}{'seed sd read':<14}{'floor':>9}{'REJECT':>9}{'UNRES':>8}{'PROMOTE':>9}"
+    )
+    for strict in (False, True):
+        print(f"\n--- strict={strict} " + "-" * (len(header) - 15))
+        print(header)
+        for label, n_c, n_i in (
+            ("5 v 1 — champion borrows", 5, 1),
+            ("5 v 5 — both measured", 5, 5),
+        ):
+            for name, sd in (("as recorded", 0.00225), ("TESS-slice", 0.00372)):
+                rng = np.random.default_rng(seed)
+                counts: Counter = Counter()
+                floor = float("nan")
+                for _ in range(draws):
+                    decision = gate.evaluate_promotion(
+                        _null_arm(template, rng, n_c, sd),
+                        _null_arm(template, rng, n_i, sd),
+                        strict=strict,
+                    )
+                    counts[decision.verdict] += 1
+                    floor = decision.thresholds["auc_floor"]
+                rates = "".join(
+                    f"{counts[v] / draws:>{w}.1%}"
+                    for v, w in zip(
+                        (gate.Verdict.REJECT, gate.Verdict.UNRESOLVED, gate.Verdict.PROMOTE),
+                        (9, 8, 9),
+                        strict=True,
+                    )
+                )
+                print(f"{label:<32}{name:<14}{floor:>9.5f}{rates}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arm-a", type=Path, default=ROOT / "models/phase1/arm-c-control")
@@ -392,7 +481,13 @@ def main() -> None:
     parser.add_argument("--n-reps", type=int, default=25, help="degradation realisations per cell")
     parser.add_argument("--no-census", action="store_true", help="skip the multi-run seed census")
     parser.add_argument("--no-influence", action="store_true", help="skip the influence diagnostic")
+    parser.add_argument("--size", action="store_true", help="#115: gate size under a true null")
+    parser.add_argument("--size-draws", type=int, default=10_000)
     args = parser.parse_args()
+
+    if args.size:
+        gate_size(args.size_draws, args.seed)
+        return
 
     df = load_arms(args.arm_a / "predictions.parquet", args.arm_b / "predictions.parquet")
     print(f"arm C = {args.arm_a.name}, arm D = {args.arm_b.name}, paired rows {len(df)}")
