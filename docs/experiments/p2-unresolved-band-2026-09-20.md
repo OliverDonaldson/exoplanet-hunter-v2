@@ -140,3 +140,32 @@ its margin exceeded its own floor. Falsification condition 3 applies.
   not provide one.
 - **Nothing about `strict`**, which takes false-PROMOTE to 1.1% by a different
   mechanism and is not touched here.
+
+---
+
+## Result · 2026-09-20 · falsified on condition 2
+
+Appended under rule 5; nothing above is edited.
+
+[`p2-unresolved-band-result-2026-09-20.md`](p2-unresolved-band-result-2026-09-20.md).
+The change in §3 was implemented, measured and **reverted**; `promotion.py` is
+untouched.
+
+Condition 2 asked that measured power at one MDE not stay below 70%. Measured
+**1.6%**. At a true margin of 5 se it is 2.1%. The band is monotone and useless.
+
+The cause is §4's scope, which was right that recall is touched and wrong about how
+much: **98–100% of UNRESOLVED verdicts under the new band are raised by the recall
+guard**, not by the AUC guard the change was about. `unresolved_against` serves two
+different questions — *"is this improvement real?"* for AUC, *"is this regression a
+veto?"* for recall — and the hole beneath the band is wrong for the first and right
+for the second.
+
+Condition 1 did not fire: size fell to 0.1%, better than the 1.6% predicted. **A
+size-only study would have passed this change.**
+
+§2's analytic non-monotonicity **was confirmed on the whole gate**: 28.9% at the
+null, 34.8% at 1 se, 28.5% at 2 se.
+
+**Reported as falsified, not re-specified.** Splitting the two questions is a
+different change and needs its own terms.
