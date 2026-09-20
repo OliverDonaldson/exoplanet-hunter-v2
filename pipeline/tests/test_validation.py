@@ -1111,6 +1111,33 @@ def test_a_margin_inside_the_band_reads_unresolved_not_promote():
     assert any("too close to call" in r for r in decision.reasons)
 
 
+def test_the_recall_guard_does_not_object_to_a_recall_improvement():
+    """Recall can veto, not promote, so a gain is never an objection.
+
+    `unresolved_against` reads `abs(margin)`, so before #131 a recall gain of about
+    one floor blocked while half of one and two of them passed — non-monotone in the
+    metric. Each case below carries the same large, unambiguous AUC improvement.
+    """
+    from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
+
+    champion = _summary(0.910, 0.121, 0.044, 0.307)
+    floor = evaluate_promotion(_summary(0.940, 0.113, 0.033, 0.307), champion).thresholds[
+        "recall_tolerance"
+    ]
+
+    for step in (0.0, 0.5, 1.0, 1.4, 2.0):
+        candidate = _summary(0.940, 0.113, 0.033, 0.307 + step * floor)
+        decision = evaluate_promotion(candidate, champion)
+        assert decision.verdict is Verdict.PROMOTE, f"recall +{step}x floor was blocked"
+        assert not any("recall margin" in r for r in decision.reasons)
+
+    # The rejecting side is untouched: inside the band unresolved, beyond it rejects.
+    inside = evaluate_promotion(_summary(0.940, 0.113, 0.033, 0.307 - 1.4 * floor), champion)
+    assert inside.verdict is Verdict.UNRESOLVED
+    beyond = evaluate_promotion(_summary(0.940, 0.113, 0.033, 0.307 - 2.0 * floor), champion)
+    assert beyond.verdict is Verdict.REJECT
+
+
 def test_a_margin_well_clear_of_the_band_still_promotes():
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
 

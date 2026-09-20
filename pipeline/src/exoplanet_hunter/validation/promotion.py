@@ -857,7 +857,11 @@ def evaluate_promotion(
         if margin < -recall_tolerance and not unresolved_against(margin, recall_tolerance):
             reasons.append(f"shortlist recall degraded beyond tolerance (-{recall_tolerance:.4f})")
             return PromotionDecision(Verdict.REJECT, reasons, alarms, thresholds)
-        if unresolved_against(margin, recall_tolerance):
+        # Regressions only. Recall cannot promote, only veto, so an improvement is
+        # never an objection — and `unresolved_against` reads `abs(margin)`, which
+        # blocked a recall gain of about one floor while half of one and two passed
+        # (#131, p2-recall-one-sided-2026-09-21.md).
+        if margin < 0 and unresolved_against(margin, recall_tolerance):
             # Not a rejection and not a promotion: the margin and the floor it is
             # read against are the same size, and the floor is three draws wide.
             unresolved.append(
