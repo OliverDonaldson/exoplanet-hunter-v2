@@ -15,10 +15,12 @@ their rows, so the contrast is what a promotion gate actually reads:
 
     python pipeline/scripts/power_analysis.py                # the first three
     python pipeline/scripts/power_analysis.py --size         # #115 only
+    python pipeline/scripts/power_analysis.py --operating-curve --seed 7 --size-draws 6000
+    python pipeline/scripts/power_analysis.py --recheck      # every recorded verdict, #131
 
-Read-only: opens the two predictions files and nothing else. Tracked rather
-than run from a scratch directory, because change-log.md records an earlier
-reproduction script that was not, and its authorship could not be verified.
+Read-only: writes nothing. Tracked rather than run from a scratch directory,
+because change-log.md records an earlier reproduction script that was not, and
+its authorship could not be verified.
 Result: docs/experiments/p2-1-power-analysis-2026-09-14.md.
 """
 
@@ -537,19 +539,83 @@ def operating_curve(draws: int, seed: int, members: int = PLANNED_MEMBERS) -> No
                 )
                 counts[decision.verdict] += 1
                 if decision.verdict is gate.Verdict.UNRESOLVED:
-                    why[
-                        "recall" if any("recall margin" in r for r in decision.reasons) else "auc"
-                    ] += 1
+                    why[_objection(decision.reasons)] += 1
             total = sum(why.values()) or 1
             print(
                 f"{name:<26}{label:<20}"
                 f"{counts[gate.Verdict.PROMOTE] / draws:>8.1%}"
                 f"{counts[gate.Verdict.UNRESOLVED] / draws:>8.1%}"
                 f"{counts[gate.Verdict.REJECT] / draws:>8.1%}"
-                f"   recall {why['recall'] / total:.0%} / auc {why['auc'] / total:.0%}"
+                f"   recall improved {why['improved'] / total:.1%}"
+                f" / regressed {why['regressed'] / total:.1%} / auc {why['auc'] / total:.1%}"
             )
         print()
     gate.unresolved_against = shipped  # type: ignore[assignment]
+
+
+def _objection(reasons: list[str]) -> str:
+    """Which criterion raised an UNRESOLVED and, for recall, which way it moved (#131).
+
+    Recall is read first, so a draw both criteria objected to is counted once, as
+    recall — the attribution the 2026-09-20 result was read under.
+    """
+    for reason in reasons:
+        if "recall margin" in reason:
+            sign = reason.split("recall margin ", 1)[1][:1]
+            if sign not in ("+", "-"):
+                raise ValueError(f"recall objection carries no signed margin: {reason!r}")
+            return "improved" if sign == "+" else "regressed"
+    return "auc"
+
+
+def recheck() -> None:
+    """Every verdict the gate has recorded, re-decided by the code as it stands.
+
+    Each `promotion_log.json` is re-run against the champion summary it names, with
+    the tolerances it records. Writes nothing: `promotion_gate.py` would overwrite
+    the very log being re-checked.
+    """
+    import json
+    import re
+
+    from exoplanet_hunter.validation import PROMOTION_LOG_NAME, evaluate_promotion
+
+    signed = re.compile(r"^recall @1% FPR \S+ vs champion \S+ \(([+-]\d+\.\d+),")
+    logs = sorted((ROOT / "models").rglob(PROMOTION_LOG_NAME))
+    if not logs:
+        raise FileNotFoundError(f"no {PROMOTION_LOG_NAME} under {ROOT / 'models'}")
+    print(f"\n{'=' * 92}\nEvery recorded verdict, re-decided — {len(logs)} logs\n{'=' * 92}")
+    print(f"{'run':<28}{'recorded':<12}{'recall margin':>14}  {'direction':<13}{'now':<12}")
+    for path in logs:
+        recorded = json.loads(path.read_text())
+        applied = recorded["thresholds"]
+        decision = evaluate_promotion(
+            json.loads((path.parent / "cv_summary.json").read_text()),
+            json.loads((ROOT / recorded["champion_summary"]).read_text()),
+            brier_tolerance=applied["brier_tolerance"],
+            ece_tolerance=applied["ece_tolerance"],
+            recall_tolerance=None
+            if applied["recall_tolerance_measured"]
+            else applied["recall_tolerance"],
+            mission_alarm=applied["mission_alarm"],
+            strict=applied["strict"],
+        )
+        margin = next((m[1] for r in decision.reasons if (m := signed.match(r))), None)
+        direction = (
+            "not reached"
+            if margin is None
+            else "improved"
+            if float(margin) > 0
+            else "regressed"
+            if float(margin) < 0
+            else "level"
+        )
+        now = decision.verdict.value
+        print(
+            f"{path.parent.relative_to(ROOT / 'models').as_posix():<28}{recorded['verdict']:<12}"
+            f"{margin or '—':>14}  {direction:<13}{now:<12}"
+            + ("CHANGED" if now != recorded["verdict"] else "")
+        )
 
 
 def main() -> None:
@@ -564,7 +630,12 @@ def main() -> None:
     parser.add_argument("--size", action="store_true", help="#115: gate size under a true null")
     parser.add_argument("--size-draws", type=int, default=10_000)
     parser.add_argument("--operating-curve", action="store_true", help="#128: rates vs true margin")
+    parser.add_argument("--recheck", action="store_true", help="#131: recorded verdicts re-decided")
     args = parser.parse_args()
+
+    if args.recheck:
+        recheck()
+        return
 
     if args.size:
         gate_size(args.size_draws, args.seed)

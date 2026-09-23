@@ -191,3 +191,37 @@ def test_rows_to_flip_is_one_when_one_row_carries_it():
     worst = int(np.argmax(np.where(y == 1, -pa, -np.inf)))
     pb[worst] = 1.0
     assert power.rows_to_flip(y, pa, pb, power.METRICS["ROC-AUC"]) == 1
+
+
+def _gate_summary(auc: float, recall: float) -> dict:
+    """The smallest summary `evaluate_promotion` gates on the TESS slice."""
+    tess = {"n": 2000, "n_positive": 1000, "roc_auc": auc, "pr_auc": auc, "brier": 0.12}
+    tess |= {"ece": 0.04, "recall_at_1pct_fpr": recall, "recall_at_5pct_fpr": recall}
+    variance = {"n_models_per_fold": 3, "seed_sd": 0.003, "pooled_gate_recall_seed_sd": 0.03}
+    return {
+        "summary": {
+            "test_roc_auc": {"mean": auc, "std": 0.002},
+            "test_brier": {"mean": 0.12, "std": 0.002},
+            "test_ece": {"mean": 0.04, "std": 0.002},
+            "variance": variance,
+        },
+        "per_mission": {"TESS": tess},
+    }
+
+
+def test_objection_reads_the_sign_the_gate_writes():
+    """#131's result is read off this attribution, so it is pinned against the
+    gate's own reason text rather than a copy of its format."""
+    from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
+
+    decision = evaluate_promotion(_gate_summary(0.917, 0.257), _gate_summary(0.910, 0.307))
+    assert decision.verdict is Verdict.UNRESOLVED
+    assert power._objection(decision.reasons) == "regressed"
+    flipped = [r.replace("recall margin -", "recall margin +") for r in decision.reasons]
+    assert power._objection(flipped) == "improved"
+    assert power._objection(["gate AUC margin +0.0040 is within 1.5x of its floor"]) == "auc"
+
+
+def test_objection_raises_on_an_unsigned_recall_margin():
+    with pytest.raises(ValueError, match="no signed margin"):
+        power._objection(["shortlist recall margin 0.0383 is within 1.5x of its floor"])
