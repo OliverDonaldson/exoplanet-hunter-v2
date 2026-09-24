@@ -426,7 +426,7 @@ def unacknowledged_alarms(alarms: list[str]) -> list[str]:
 
 #: A margin between `floor / 1.5` and `floor * 1.5` is not resolvable against a
 #: floor estimated from three draws, whose own sampling spread is ~40% of its
-#: value (stage 6, caveat 2).
+#: value (stage 6, caveat 2). Recall only: AUC promotes past its floor (#128).
 UNRESOLVED_BAND = 1.5
 
 
@@ -888,10 +888,14 @@ def evaluate_promotion(
                 "spread — repeat the run before reading this as an improvement"
             )
 
-    if unresolved_against(cand_auc - champ_auc, floor.auc):
+    # Promote only past the floor: rule 7, and what every MDE assumes. The band this
+    # replaced, now recall's alone, let a margin under floor/1.5 fall through to
+    # PROMOTE (#128, p2-auc-floor-rule-2026-09-24.md). Margins <= 0 rejected above.
+    margin = cand_auc - champ_auc
+    if floor.auc is not None and margin <= floor.auc:
         unresolved.append(
-            f"gate AUC margin {cand_auc - champ_auc:+.4f} is within {UNRESOLVED_BAND}x of its "
-            f"{floor.auc:.4f} floor — too close to call from three draws"
+            f"gate AUC margin {margin:+.4f} does not clear its {floor.auc:.4f} floor "
+            "— not a result (rule 7)"
         )
 
     if unresolved:
