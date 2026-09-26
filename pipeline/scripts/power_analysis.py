@@ -17,6 +17,7 @@ their rows, so the contrast is what a promotion gate actually reads:
     python pipeline/scripts/power_analysis.py --size         # #115 only
     python pipeline/scripts/power_analysis.py --operating-curve --seed 7 --size-draws 6000
     python pipeline/scripts/power_analysis.py --recheck      # every recorded verdict, #131
+    python pipeline/scripts/power_analysis.py --options --seed 7 --size-draws 6000   # #128
 
 Read-only: writes nothing. Tracked rather than run from a scratch directory,
 because change-log.md records an earlier reproduction script that was not, and
@@ -568,17 +569,19 @@ def _objection(reasons: list[str]) -> str:
     return "auc"
 
 
-def recheck() -> None:
+def recheck(against: list[Path]) -> None:
     """Every verdict the gate has recorded, re-decided by the code as it stands.
 
     Each `promotion_log.json` is re-run against the champion summary it names, with
     the tolerances it records. Writes nothing: `promotion_gate.py` would overwrite
-    the very log being re-checked.
+    the very log being re-checked. `against` adds every run summary on disk decided
+    against each named champion, which is where #128's rule shows on real runs.
     """
     import json
     import re
 
     from exoplanet_hunter.validation import PROMOTION_LOG_NAME, evaluate_promotion
+    from exoplanet_hunter.validation import promotion as gate
 
     signed = re.compile(r"^recall @1% FPR \S+ vs champion \S+ \(([+-]\d+\.\d+),")
     logs = sorted((ROOT / "models").rglob(PROMOTION_LOG_NAME))
@@ -617,6 +620,114 @@ def recheck() -> None:
             + ("CHANGED" if now != recorded["verdict"] else "")
         )
 
+    runs = sorted((ROOT / "models").rglob("cv_summary.json"))
+    for champion_path in against:
+        champion = json.loads(champion_path.read_text())
+        print(f"\nEvery run on disk against {champion_path.resolve().relative_to(ROOT)}")
+        print("A margin <= 0 rejects before the AUC rule is reached, so only positive ones print")
+        print(f"{'run':<52}{'AUC margin':>11}{'floor':>9}{'x floor':>9}  verdict")
+        for path in runs:
+            if path.resolve() == champion_path.resolve():
+                continue
+            candidate = json.loads(path.read_text())
+            # The margin the gate read: its slice when both carry one, else pooled.
+            cs, hs = gate._gate_slice(candidate), gate._gate_slice(champion)
+            margin = (
+                cs["roc_auc"] - hs["roc_auc"]
+                if cs is not None and hs is not None
+                else gate._mean(candidate, "test_roc_auc") - gate._mean(champion, "test_roc_auc")
+            )
+            if margin <= 0:
+                continue
+            decision = evaluate_promotion(candidate, champion)
+            floor = decision.thresholds["auc_floor"]
+            ratio = f"{margin / floor:.3f}" if floor else "no floor"
+            print(
+                f"{path.parent.relative_to(ROOT / 'models').as_posix():<52}{margin:>+11.5f}"
+                f"{floor or float('nan'):>9.5f}{ratio:>9}  {decision.verdict.value}"
+            )
+
+
+def gate_options(draws: int, seed: int) -> None:
+    """#128's options, re-costed on the whole gate: size and power, read together.
+
+    Each option replaces the AUC call's `unresolved_against` only; recall keeps its
+    shipped, one-sided rule (#131), because the hole under the band is wrong for AUC
+    and right for recall (p2-unresolved-band-result-2026-09-20.md §4). Cells share a
+    seed and a bump only raises the AUC margin, so any fall in PROMOTE along a row is
+    the rule, not noise. `strict` is read at the null only: the bump moves the TESS
+    AUC and not the fold AUCs its paired-folds alarm reads.
+    """
+    import json
+    from collections import Counter
+
+    from exoplanet_hunter.validation import promotion as gate
+
+    gate.blocked_contrast = lambda *a, **k: None  # type: ignore[assignment]
+    shipped = gate.unresolved_against
+    template = json.loads(REFERENCE_RUN.read_text())
+    options = (
+        ("shipped", shipped),
+        ("(0, floor/1.5]", _band(0.0, 1 / 1.5)),
+        ("(0, floor]", _band(0.0, 1.0)),
+        ("(0, floor*1.5]", _band(0.0, 1.5)),
+    )
+    margins = (0.0, 1.0, 2.0, Z_80_POWER, 5.0, 10.0)
+    sd = NULL_SD["roc_auc"]
+    print(f"\n{'=' * 104}\n#128's options on the whole gate — {draws:,} draws, seed {seed}")
+    print("PROMOTE by true AUC margin in se of the true difference; U = UNRESOLVED, R = REJECT")
+    print("=" * 104)
+    print(
+        f"{'alloc':<9}{'floor read':<13}{'strict':<7}{'AUC rule':<30}{'P@0':>6}{'U@0':>6}"
+        + "".join(f"{f'P@{d:g}':>8}" for d in margins[1:])
+        + f"{'R@10':>6}  monotone"
+    )
+    for n_c, n_i, floors in ((5, 5, (("as recorded", 0.00225), ("TESS #123", sd))), (5, 1, None)):
+        se = sd * np.sqrt(1 / n_c + 1 / n_i)
+        for floor_label, sd_read in floors or (("as recorded", 0.00225),):
+            probe = np.random.default_rng(0)
+            floor = gate.decision_floor(
+                _null_arm(template, probe, n_c, sd_read), _null_arm(template, probe, n_i, sd_read)
+            )
+            if floor.recall is None or floor.recall == floor.auc:
+                raise ValueError(f"cannot tell the recall call from the AUC call: {floor}")
+            for strict in (False, True):
+                for name, option in options:
+
+                    def rule(margin, f, option=option, recall=floor.recall, auc=floor.auc):
+                        if f not in (recall, auc):
+                            raise ValueError(f"floor {f} is neither recall's nor AUC's")
+                        return (shipped if f == recall else option)(margin, f)
+
+                    gate.unresolved_against = rule  # type: ignore[assignment]
+                    rates = []
+                    for d in margins[:1] if strict else margins:
+                        rng = np.random.default_rng(seed)
+                        counts: Counter = Counter()
+                        for _ in range(draws):
+                            counts[
+                                gate.evaluate_promotion(
+                                    _null_arm(template, rng, n_c, sd_read, bump=d * se),
+                                    _null_arm(template, rng, n_i, sd_read),
+                                    strict=strict,
+                                ).verdict
+                            ] += 1
+                        rates.append({v: counts[v] / draws for v in gate.Verdict})
+                    promote = [r[gate.Verdict.PROMOTE] for r in rates]
+                    tail = (
+                        "".join(f"{p:>8.1%}" for p in promote[1:])
+                        + f"{rates[-1][gate.Verdict.REJECT]:>6.1%}"
+                        + f"  {'yes' if all(np.diff(promote) >= 0) else 'NO'}"
+                        if not strict
+                        else "   power not simulated — fold AUCs are not bumped"
+                    )
+                    print(
+                        f"{n_c} v {n_i:<5}{floor_label:<13}{strict!s:<7}{name:<30}"
+                        f"{promote[0]:>6.1%}{rates[0][gate.Verdict.UNRESOLVED]:>6.1%}" + tail
+                    )
+            print()
+    gate.unresolved_against = shipped  # type: ignore[assignment]
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -631,10 +742,18 @@ def main() -> None:
     parser.add_argument("--size-draws", type=int, default=10_000)
     parser.add_argument("--operating-curve", action="store_true", help="#128: rates vs true margin")
     parser.add_argument("--recheck", action="store_true", help="#131: recorded verdicts re-decided")
+    parser.add_argument(
+        "--against", type=Path, action="append", default=[], help="with --recheck: a champion"
+    )
+    parser.add_argument("--options", action="store_true", help="#128: its options, size and power")
     args = parser.parse_args()
 
+    if args.options:
+        gate_options(args.size_draws, args.seed)
+        return
+
     if args.recheck:
-        recheck()
+        recheck(args.against)
         return
 
     if args.size:
