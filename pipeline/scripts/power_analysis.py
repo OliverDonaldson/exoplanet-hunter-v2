@@ -18,6 +18,8 @@ their rows, so the contrast is what a promotion gate actually reads:
     python pipeline/scripts/power_analysis.py --operating-curve --seed 7 --size-draws 6000
     python pipeline/scripts/power_analysis.py --recheck      # every recorded verdict, #131
     python pipeline/scripts/power_analysis.py --options --seed 7 --size-draws 6000   # #128
+    python pipeline/scripts/power_analysis.py --estimators --seed 7 --size-draws 6000  # #123
+    python pipeline/scripts/power_analysis.py --recheck --corrected --against <champion>
 
 Read-only: writes nothing. Tracked rather than run from a scratch directory,
 because change-log.md records an earlier reproduction script that was not, and
@@ -30,6 +32,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -421,7 +424,10 @@ def _null_arm(
     if members > 1:
         arm["summary"]["variance"] |= {
             "n_models_per_fold": members,
+            # The gate reads `seed_sd` until #123 and `gate_roc_auc_seed_sd` after,
+            # so every mode here decides identically on either side of the change.
             "seed_sd": seed_sd,
+            "gate_roc_auc_seed_sd": seed_sd,
             "pooled_gate_recall_seed_sd": NULL_SD["recall_at_1pct_fpr"],
         }
     else:
@@ -569,19 +575,153 @@ def _objection(reasons: list[str]) -> str:
     return "auc"
 
 
-def recheck(against: list[Path]) -> None:
+def _c4(n: int) -> float:
+    """E[s] = c4(n) x sigma for n normal draws: 0.8862 at 3, 0.9400 at 5."""
+    from scipy.special import gammaln
+
+    return float(np.sqrt(2.0 / (n - 1)) * np.exp(gammaln(n / 2) - gammaln((n - 1) / 2)))
+
+
+class TessSeedSd(NamedTuple):
+    """#123's AUC term for one run, beside the estimator it was chosen over."""
+
+    fold_pooled: float  # sd of each member's AUC on the pooled TESS slice, M-1 df
+    within_fold: float  # within-fold TESS variances pooled over folds, F(M-1) df
+    df: int
+    corrected: float  # within_fold / c4(df + 1): the term the gate reads
+    members: int
+    source: Path
+
+
+def tess_seed_sd(summary: dict, run_dir: Path, missions: pd.DataFrame) -> TessSeedSd | None:
+    """#123's AUC term from a run's per-member scores; None when none are on disk.
+
+    Within-fold, because the fold-pooled sd has M-1 df — two at the refresh's three
+    members — and measures the same scale on TESS: 0.98 dual-view, 0.86 branch
+    (p2-seed-sd-within-fold-2026-09-27.md §2). The predictions are the run's own,
+    or the file a re-summarised run names as its source.
+    """
+    path = run_dir / "predictions.parquet"
+    source = (summary.get("provenance") or {}).get("source")
+    if not path.exists() and source:
+        path = ROOT / source
+    if not path.exists():
+        return None
+    frame = pd.read_parquet(path)
+    members = [c for c in frame.columns if c.startswith("member_score_")]
+    if len(members) < 2:
+        return None
+    if "mission" not in frame.columns:
+        frame = frame.merge(missions, on="tic_id", how="inner")
+    tess = frame[frame["mission"] == "TESS"]
+    y_col = "y_true" if "y_true" in tess.columns else "label"
+
+    def aucs(rows: pd.DataFrame) -> list[float]:
+        y = rows[y_col].to_numpy(dtype=int)
+        return [float(roc_auc_score(y, rows[m].to_numpy(dtype=float))) for m in members]
+
+    variances = [float(np.var(aucs(g), ddof=1)) for _, g in tess.groupby("fold")]
+    df = len(variances) * (len(members) - 1)
+    within = float(np.sqrt(np.mean(variances)))
+    fold_pooled = float(np.std(aucs(tess), ddof=1))
+    return TessSeedSd(fold_pooled, within, df, within / _c4(df + 1), len(members), path)
+
+
+def _with_tess_seed_sd(summary: dict, run_dir: Path, missions: pd.DataFrame) -> dict | None:
+    """The summary as #123 has the gate read it; None where the gate would refuse.
+
+    One member, or no variance block, has nothing to measure and is left alone:
+    that is #137's path, not this one.
+    """
+    import copy
+
+    from exoplanet_hunter.validation import promotion as gate
+
+    _, n = gate._variance(summary)
+    if n is None or n < 2:
+        return summary
+    measured = tess_seed_sd(summary, run_dir, missions)
+    if measured is None:
+        return None
+    out = copy.deepcopy(summary)
+    # Both keys: the gate reads `seed_sd` before the change and the new key after,
+    # so the same command decides identically on either side of it.
+    out["summary"]["variance"] |= {
+        "seed_sd": measured.corrected,
+        "gate_roc_auc_seed_sd": measured.corrected,
+    }
+    return out
+
+
+def recheck(against: list[Path], corrected: bool = False) -> None:
     """Every verdict the gate has recorded, re-decided by the code as it stands.
 
     Each `promotion_log.json` is re-run against the champion summary it names, with
     the tolerances it records. Writes nothing: `promotion_gate.py` would overwrite
     the very log being re-checked. `against` adds every run summary on disk decided
     against each named champion, which is where #128's rule shows on real runs.
+    `corrected` reads every summary with #123's TESS-slice term in place of the
+    all-mission `seed_sd`, and prints that term for each run first.
     """
     import json
     import re
 
     from exoplanet_hunter.validation import PROMOTION_LOG_NAME, evaluate_promotion
     from exoplanet_hunter.validation import promotion as gate
+
+    missions = mission_map() if corrected else None
+    runs = sorted((ROOT / "models").rglob("cv_summary.json"))
+
+    def load(path: Path) -> dict | None:
+        summary = json.loads(path.read_text())
+        return _with_tess_seed_sd(summary, path.parent, missions) if corrected else summary
+
+    if corrected:
+        print(
+            f"\n{'=' * 92}\n#123's term on every multi-member run — ROC-AUC, TESS slice\n{'=' * 92}"
+        )
+        print("seed_sd: all-mission, as recorded. fold-pooled: M-1 df. within-fold: F(M-1) df")
+        print(
+            f"{'run':<50}{'M':>3}{'seed_sd':>9}{'fold-pool':>10}{'within':>9}{'df':>4}"
+            f"{'c4-corr':>9}{'x rec':>7}"
+        )
+        pooled: dict[Path, tuple[str, TessSeedSd]] = {}
+        for path in runs:
+            summary = json.loads(path.read_text())
+            variance, n = gate._variance(summary)
+            if n is None or n < 2:
+                continue
+            measured = tess_seed_sd(summary, path.parent, missions)
+            if measured is not None and (path.parent / "fold_0").exists():
+                # Keyed on the predictions file, so a re-summarised run is not
+                # counted twice beside the run it was summarised from.
+                pooled[measured.source] = (architecture_of(path.parent), measured)
+            name = path.parent.relative_to(ROOT / "models").as_posix()
+            recorded = variance.get("seed_sd")
+            if measured is None:
+                print(
+                    f"{name:<50}{n:>3}{recorded or float('nan'):>9.5f}  no member scores — refused"
+                )
+                continue
+            ratio = f"{measured.corrected / recorded:>7.2f}" if recorded else f"{'—':>7}"
+            print(
+                f"{name:<50}{n:>3}{recorded or float('nan'):>9.5f}{measured.fold_pooled:>10.5f}"
+                f"{measured.within_fold:>9.5f}{measured.df:>4}{measured.corrected:>9.5f}{ratio}"
+            )
+        # Do the two estimators measure the same scale? Variance-pooled over runs.
+        print(
+            f"\n{'architecture':<16}{'runs':>5}{'fold-pooled':>13}{'df':>5}{'within':>9}{'df':>5}{'ratio':>7}"
+        )
+        for arch in sorted({a for a, _ in pooled.values()}):
+            group = [m for a, m in pooled.values() if a == arch]
+            dof_p = sum(m.members - 1 for m in group)
+            dof_w = sum(m.df for m in group)
+            sd_p = np.sqrt(sum((m.members - 1) * m.fold_pooled**2 for m in group) / dof_p)
+            sd_w = np.sqrt(sum(m.df * m.within_fold**2 for m in group) / dof_w)
+            print(
+                f"{arch:<16}{len(group):>5}{sd_p:>13.5f}{dof_p:>5}{sd_w:>9.5f}{dof_w:>5}"
+                f"{sd_p / sd_w:>7.2f}"
+            )
 
     signed = re.compile(r"^recall @1% FPR \S+ vs champion \S+ \(([+-]\d+\.\d+),")
     logs = sorted((ROOT / "models").rglob(PROMOTION_LOG_NAME))
@@ -592,9 +732,16 @@ def recheck(against: list[Path]) -> None:
     for path in logs:
         recorded = json.loads(path.read_text())
         applied = recorded["thresholds"]
+        candidate, champion = (
+            load(path.parent / "cv_summary.json"),
+            load(ROOT / recorded["champion_summary"]),
+        )
+        if candidate is None or champion is None:
+            print(f"{path.parent.relative_to(ROOT / 'models').as_posix():<28}refused")
+            continue
         decision = evaluate_promotion(
-            json.loads((path.parent / "cv_summary.json").read_text()),
-            json.loads((ROOT / recorded["champion_summary"]).read_text()),
+            candidate,
+            champion,
             brier_tolerance=applied["brier_tolerance"],
             ece_tolerance=applied["ece_tolerance"],
             recall_tolerance=None
@@ -620,16 +767,21 @@ def recheck(against: list[Path]) -> None:
             + ("CHANGED" if now != recorded["verdict"] else "")
         )
 
-    runs = sorted((ROOT / "models").rglob("cv_summary.json"))
     for champion_path in against:
-        champion = json.loads(champion_path.read_text())
+        champion = load(champion_path)
+        if champion is None:
+            raise ValueError(f"{champion_path}: the champion has no member scores to measure")
         print(f"\nEvery run on disk against {champion_path.resolve().relative_to(ROOT)}")
         print("A margin <= 0 rejects before the AUC rule is reached, so only positive ones print")
         print(f"{'run':<52}{'AUC margin':>11}{'floor':>9}{'x floor':>9}  verdict")
         for path in runs:
             if path.resolve() == champion_path.resolve():
                 continue
-            candidate = json.loads(path.read_text())
+            candidate = load(path)
+            if candidate is None:
+                name = path.parent.relative_to(ROOT / "models").as_posix()
+                print(f"{name:<52}{'no member scores — refused':>38}")
+                continue
             # The margin the gate read: its slice when both carry one, else pooled.
             cs, hs = gate._gate_slice(candidate), gate._gate_slice(champion)
             margin = (
@@ -729,6 +881,54 @@ def gate_options(draws: int, seed: int) -> None:
     gate.unresolved_against = shipped  # type: ignore[assignment]
 
 
+def estimators(draws: int, seed: int, folds: int = 5) -> None:
+    """#123's choice of estimator, read as what its df does to the gate's size and power.
+
+    Each arm's recorded AUC term is an unbiased (c4-corrected) estimate of the true
+    per-member sd on the estimator's df, drawn per arm — so the floor is as noisy as
+    that estimator would make it. `exact` is the floor built from the true sd. Rows
+    draw different numbers of variates, so they are not paired: Monte Carlo se near
+    2% is 0.2 pp, near 60% it is 0.6 pp.
+    """
+    import json
+    from collections import Counter
+
+    from exoplanet_hunter.validation import promotion as gate
+
+    gate.blocked_contrast = lambda *a, **k: None  # type: ignore[assignment]
+    template = json.loads(REFERENCE_RUN.read_text())
+    sd = NULL_SD["roc_auc"]
+
+    def arm(rng: np.random.Generator, members: int, bump: float, df: int | None) -> dict:
+        term = sd if df is None else sd * np.sqrt(rng.chisquare(df) / df) / _c4(df + 1)
+        return _null_arm(template, rng, members, term, bump=bump)
+
+    print(
+        f"\n{'=' * 92}\n#123's estimators — {draws:,} draws, seed {seed}, {folds} folds\n{'=' * 92}"
+    )
+    print(f"{'allocation':<12}{'estimator':<26}{'size':>8}{'power at MDE':>14}{'at 10 se':>10}")
+    for n_c, n_i in ((5, 5), (3, 3), (3, 5)):
+        se = sd * np.sqrt(1 / n_c + 1 / n_i)
+        for name, dfs in (
+            ("exact", (None, None)),
+            ("fold-pooled, M-1 df", (n_c - 1, n_i - 1)),
+            ("within-fold, F(M-1) df", (folds * (n_c - 1), folds * (n_i - 1))),
+        ):
+            rates = []
+            for d in (0.0, Z_80_POWER, 10.0):
+                rng = np.random.default_rng(seed)
+                counts: Counter = Counter()
+                for _ in range(draws):
+                    counts[
+                        gate.evaluate_promotion(
+                            arm(rng, n_c, d * se, dfs[0]), arm(rng, n_i, 0.0, dfs[1])
+                        ).verdict
+                    ] += 1
+                rates.append(counts[gate.Verdict.PROMOTE] / draws)
+            print(f"{n_c} v {n_i:<8}{name:<26}{rates[0]:>8.1%}{rates[1]:>14.1%}{rates[2]:>10.1%}")
+        print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arm-a", type=Path, default=ROOT / "models/phase1/arm-c-control")
@@ -745,15 +945,23 @@ def main() -> None:
     parser.add_argument(
         "--against", type=Path, action="append", default=[], help="with --recheck: a champion"
     )
+    parser.add_argument(
+        "--corrected", action="store_true", help="with --recheck: #123's TESS-slice AUC term"
+    )
     parser.add_argument("--options", action="store_true", help="#128: its options, size and power")
+    parser.add_argument("--estimators", action="store_true", help="#123: each estimator's df cost")
     args = parser.parse_args()
+
+    if args.estimators:
+        estimators(args.size_draws, args.seed)
+        return
 
     if args.options:
         gate_options(args.size_draws, args.seed)
         return
 
     if args.recheck:
-        recheck(args.against)
+        recheck(args.against, args.corrected)
         return
 
     if args.size:
