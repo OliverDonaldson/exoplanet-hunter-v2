@@ -1111,7 +1111,7 @@ def test_a_margin_inside_the_band_reads_unresolved_not_promote():
     assert any("too close to call" in r for r in decision.reasons)
 
 
-def test_the_recall_guard_does_not_object_to_a_recall_improvement():
+def test_the_recall_guard_does_not_object_to_an_improvement():
     """Recall can veto, not promote, so a gain is never an objection.
 
     `unresolved_against` reads `abs(margin)`, so before #131 a recall gain of about
@@ -1136,6 +1136,30 @@ def test_the_recall_guard_does_not_object_to_a_recall_improvement():
     assert inside.verdict is Verdict.UNRESOLVED
     beyond = evaluate_promotion(_summary(0.940, 0.113, 0.033, 0.307 - 2.0 * floor), champion)
     assert beyond.verdict is Verdict.REJECT
+
+
+def test_the_auc_guard_promotes_only_past_its_floor():
+    """#128: UNRESOLVED on (0, floor], PROMOTE beyond it. The band this replaced let
+    a margin under floor/1.5 fall through to PROMOTE and held one between floor and
+    1.5x floor. sd 1/32 over 2 members a side makes the floor exactly 0.0625, so the
+    edge is tested at the edge."""
+    from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
+
+    def run(auc):
+        return _summary(auc, 0.121, 0.044, 0.307, seed_sd=0.03125, n=2)
+
+    champion = run(0.5)
+    assert evaluate_promotion(run(0.5625), champion).thresholds["auc_floor"] == 0.0625
+    for margin, verdict in (
+        (0.01, Verdict.UNRESOLVED),
+        (0.04, Verdict.UNRESOLVED),  # under floor/1.5: promoted through the hole before
+        (0.0625, Verdict.UNRESOLVED),  # at the floor exactly
+        (0.07, Verdict.PROMOTE),  # between floor and 1.5x floor: held before
+        (0.1, Verdict.PROMOTE),
+    ):
+        decision = evaluate_promotion(run(0.5 + margin), champion)
+        assert decision.verdict is verdict, f"AUC margin {margin}"
+    assert any("does not clear its" in r for r in evaluate_promotion(run(0.54), champion).reasons)
 
 
 def test_a_margin_well_clear_of_the_band_still_promotes():
@@ -1205,12 +1229,18 @@ def test_champion_without_a_variance_block_borrows_a_named_prior():
 
 def test_noisier_candidate_no_longer_quietly_earns_a_wider_pass():
     """It still earns a wider band — correctly, its mean is less well known —
-    but the band lands it in UNRESOLVED rather than PROMOTE."""
+    but the band lands it in UNRESOLVED rather than PROMOTE.
+
+    Until #128 this passed on the AUC band, not the recall one: its AUC margin sat
+    at 1.43x its floor and its recall drop, at 0.55x, raised nothing."""
     from exoplanet_hunter.validation.promotion import Verdict, evaluate_promotion
 
     champion = _summary(0.910, 0.121, 0.044, 0.307)
-    noisy = _summary(0.917, 0.113, 0.033, 0.270, recall_sd=0.05)
-    assert evaluate_promotion(noisy, champion).verdict is Verdict.UNRESOLVED
+    noisy = _summary(0.917, 0.113, 0.033, 0.247, recall_sd=0.05, seed_sd=0.0005)
+    decision = evaluate_promotion(noisy, champion)
+    assert decision.verdict is Verdict.UNRESOLVED
+    assert any("shortlist recall margin" in r for r in decision.reasons)
+    assert not any("gate AUC margin" in r for r in decision.reasons)
 
 
 # ---------------------------------------------------------------------------
