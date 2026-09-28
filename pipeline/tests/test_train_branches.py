@@ -269,7 +269,10 @@ def test_recall_variance_keys_leave_the_gate_untouched(ensemble_run):
         "pooled_gate_recall_seed_sd",
         "pooled_gate_recall_n_draws",
         "pooled_gate_n",
+        "gate_roc_auc_seed_sd",
+        "gate_roc_auc_seed_df",
     } == set(variance)
+    assert variance["gate_roc_auc_seed_df"] == 2  # 2 folds x (2 - 1)
     assert evaluate_promotion(payload, payload) is not None
 
 

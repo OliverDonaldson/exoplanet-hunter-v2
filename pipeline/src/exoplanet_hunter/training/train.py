@@ -54,6 +54,7 @@ from exoplanet_hunter.datasets import (
 )
 from exoplanet_hunter.eval.comparison import (
     MISSION_COLUMN,
+    gate_auc_seed_sd,
     per_mission_summary,
     pooled_member_draws,
 )
@@ -654,7 +655,8 @@ def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
         "n_models_per_fold": int(fold_rows[0].get("n_models_per_fold", 1)) if fold_rows else 1,
         "n_folds": len(fold_rows),
         # None rather than 0.0 when there is one member per fold: "nobody
-        # measured this" must not read as "the noise is zero".
+        # measured this" must not read as "the noise is zero". All missions,
+        # within fold; the gate reads `gate_roc_auc_seed_sd` instead (#123).
         "seed_sd": float(np.mean(within)) if within else None,
         "fold_sd": float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else None,
     }
@@ -666,6 +668,7 @@ def _aggregate_cv(fold_rows: list[dict], cv_root: Path) -> None:
     payload: dict[str, Any] = {"folds": fold_rows, "summary": summary}
     predictions = _labelled_predictions(cv_root)
     summary["variance"].update(pooled_member_draws(predictions))
+    summary["variance"].update(gate_auc_seed_sd(predictions))
     payload["per_mission"] = per_mission_summary(predictions)
 
     cv_root.mkdir(parents=True, exist_ok=True)

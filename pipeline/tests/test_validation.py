@@ -910,6 +910,7 @@ def measured(seed_sd: float = 0.0060, recall_sd: float = 0.0292, n_models: int =
             "test_brier": {"mean": 0.10},
             "variance": {
                 "seed_sd": seed_sd,
+                "gate_roc_auc_seed_sd": seed_sd,
                 "pooled_gate_recall_seed_sd": recall_sd,
                 "n_models_per_fold": n_models,
             },
@@ -958,6 +959,7 @@ def test_champion_term_ignores_the_candidate_s_member_count():
                 "variance": {
                     "n_models_per_fold": 5,
                     "seed_sd": 0.0060,
+                    "gate_roc_auc_seed_sd": 0.0060,
                     "pooled_gate_recall_seed_sd": 0.0292,
                 }
             }
@@ -972,6 +974,39 @@ def test_no_variance_block_reports_no_floor():
     floor = decision_floor(summary(0.90, 0.10))
     assert floor.auc is None and floor.recall is None
     assert "no variance block" in floor.source
+
+
+def test_seed_sd_alone_is_no_longer_read():
+    """#123: the AUC floor reads the TESS-slice term. `seed_sd` is all missions, 1.8x
+    narrower on the re-baseline, and no longer moves the floor at all."""
+    split = measured(seed_sd=0.0060)
+    split["summary"]["variance"]["gate_roc_auc_seed_sd"] = 0.0120
+    assert decision_floor(split).auc == decision_floor(measured(seed_sd=0.0120)).auc
+    split["summary"]["variance"]["seed_sd"] = 0.5
+    assert decision_floor(split).auc == decision_floor(measured(seed_sd=0.0120)).auc
+
+
+def test_a_stale_multi_member_summary_is_refused():
+    """Written before #123 it carries only `seed_sd`, and reading that instead is the
+    defect. Either side raises, naming the summary and how to re-summarise it."""
+    stale = measured()
+    del stale["summary"]["variance"]["gate_roc_auc_seed_sd"]
+    with pytest.raises(ValueError, match="records 3 members per fold and no gate_roc_auc"):
+        decision_floor(stale)
+    with pytest.raises(ValueError, match=r"models/x/cv_summary\.json .*/evaluate\.py summarise"):
+        decision_floor(measured(), stale, names=("candidate", "models/x/cv_summary.json"))
+    stale["summary"]["variance"]["gate_roc_auc_seed_sd"] = None
+    with pytest.raises(ValueError, match="NEW path"):
+        evaluate_promotion(stale, gated(0.91, 0.10))
+
+
+def test_one_member_is_not_refused_for_want_of_it():
+    """One member has no spread and so no term: that is #137's path, and #123 leaves
+    it where it was. As champion it still borrows the pooled prior."""
+    single = measured(n_models=1)
+    single["summary"]["variance"] |= {"seed_sd": None, "gate_roc_auc_seed_sd": None}
+    assert decision_floor(single).auc is None
+    assert decision_floor(measured(), single).auc == decision_floor(measured()).auc
 
 
 def test_recall_drop_inside_the_measured_floor_no_longer_rejects():
@@ -1078,6 +1113,7 @@ def _summary(auc, brier, ece, recall, *, seed_sd=0.003, recall_sd=0.03, n=3, n_r
             "variance": {
                 "n_models_per_fold": n,
                 "seed_sd": seed_sd,
+                "gate_roc_auc_seed_sd": seed_sd,
                 "pooled_gate_recall_seed_sd": recall_sd,
             },
         },

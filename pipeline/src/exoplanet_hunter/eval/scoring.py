@@ -30,7 +30,7 @@ from exoplanet_hunter.datasets.tfrecords import (
     load_index,
     make_parse_fn,
 )
-from exoplanet_hunter.eval.comparison import SliceMetrics, pooled_member_draws
+from exoplanet_hunter.eval.comparison import SliceMetrics, gate_auc_seed_sd, pooled_member_draws
 from exoplanet_hunter.utils.logging import get_logger
 from exoplanet_hunter.validation.promotion import AGGREGATE_SLICE, GATE_MISSION
 
@@ -307,7 +307,11 @@ def summarise_scored(
     # not there are draws: a block that appears only on success makes a missing
     # key and a null the same to a person and different to a program.
     draws = pooled_member_draws(held_out)
-    variance = {"n_models_per_fold": draws["pooled_gate_recall_n_draws"], **draws}
+    variance = {
+        "n_models_per_fold": draws["pooled_gate_recall_n_draws"],
+        **draws,
+        **gate_auc_seed_sd(held_out),
+    }
 
     return {
         # No `folds` block: this run's folds are a different split from any

@@ -101,6 +101,9 @@ def main() -> None:
     candidate = json.loads(args.cv_summary.read_text())
     registry = load_registry(args.models_dir)
     champion = load_champion_summary(args.models_dir, args.champion_summary)
+    champion_summary = args.champion_summary
+    if champion_summary is None and registry is not None:
+        champion_summary = registry.get("cv_summary")
 
     decision = evaluate_promotion(
         candidate,
@@ -109,6 +112,7 @@ def main() -> None:
         ece_tolerance=args.ece_tolerance,
         recall_tolerance=args.recall_tolerance,
         strict=args.strict,
+        names=(str(args.cv_summary), str(champion_summary)),
     )
     log.info("[promotion] %s", decision)
 
@@ -121,9 +125,6 @@ def main() -> None:
     # tempdir, so the verdict was computed weekly and deleted weekly. The run
     # directory is the one location that outlives the process, travels with the
     # run under DVC, and exists for runs the registry will never name.
-    champion_summary = args.champion_summary
-    if champion_summary is None and registry is not None:
-        champion_summary = registry.get("cv_summary")
     log_path = args.cv_summary.parent / PROMOTION_LOG_NAME
     write_promotion_log(
         log_path,

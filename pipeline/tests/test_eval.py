@@ -18,6 +18,7 @@ from exoplanet_hunter.eval.comparison import (
     band_labels,
     compare_prediction_sets,
     gap_table,
+    gate_auc_seed_sd,
     mission_coverage,
     paired_frame,
     recall_at_fpr,
@@ -336,3 +337,56 @@ def test_rows_without_ephemeris_drop_not_bin_at_zero():
     table = gap_table(paired, "span_band", medians=["span"])
     assert table["n"].sum() == 100
     assert table.iloc[0]["median_span"] == pytest.approx(3.01, abs=0.01)
+
+
+# ------------------------------------------------- the gate's AUC seed sd, #123 --
+
+
+def members_frame() -> pd.DataFrame:
+    """Two folds of four TESS rows and one Kepler row, three members each.
+
+    Per-member AUCs are 1, 3/4, 1/2 in fold 0 and 1, 1, 3/4 in fold 1, so the
+    within-fold variances are 1/16 and 1/48. The Kepler rows would move every AUC
+    they joined, so they pin the slice.
+    """
+    rows = {
+        "fold": [0] * 5 + [1] * 5,
+        "label": [1, 1, 0, 0, 1, 1, 0, 1, 0, 0],
+        "mission": ["TESS"] * 4 + ["Kepler"] + ["TESS"] * 4 + ["Kepler"],
+        "member_score_0": [0.9, 0.8, 0.2, 0.1, 0.0, 0.6, 0.5, 0.7, 0.4, 0.99],
+        "member_score_1": [0.9, 0.3, 0.4, 0.1, 0.0, 0.6, 0.5, 0.7, 0.4, 0.99],
+        "member_score_2": [0.9, 0.3, 0.4, 0.35, 0.0, 0.6, 0.65, 0.7, 0.4, 0.99],
+    }
+    return pd.DataFrame(rows)
+
+
+def test_gate_auc_seed_sd_matches_a_hand_computed_case():
+    """Variances pooled, not sds: sqrt(mean(1/16, 1/48)) on 2 x (3-1) df, over
+    c4(5) = 3/4 sqrt(pi/2) written in closed form rather than by the lgamma it uses."""
+    out = gate_auc_seed_sd(members_frame())
+    assert out["gate_roc_auc_seed_df"] == 4
+    expected = np.sqrt((1 / 16 + 1 / 48) / 2) / (0.75 * np.sqrt(np.pi / 2))
+    assert out["gate_roc_auc_seed_sd"] == pytest.approx(expected, rel=1e-12)
+
+
+def test_gate_auc_seed_sd_is_null_below_two_members():
+    single = members_frame().drop(columns=["member_score_1", "member_score_2"])
+    assert gate_auc_seed_sd(single) == {"gate_roc_auc_seed_sd": None, "gate_roc_auc_seed_df": 0}
+    kepler = members_frame().assign(mission="Kepler")
+    assert gate_auc_seed_sd(kepler)["gate_roc_auc_seed_sd"] is None
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda f: f.drop(columns=["fold"]), "no fold column"),
+        (lambda f: f.assign(member_score_1=f["member_score_1"].where(f.index != 2)), "finite"),
+        (lambda f: f.assign(fold=f["fold"].where(f.index != 2)), "carry no fold"),
+        (lambda f: f.assign(label=np.where(f["fold"] == 1, 1, f["label"])), "single-class"),
+    ],
+)
+def test_gate_auc_seed_sd_raises_on_a_degenerate_frame(mutate, message):
+    """Each of these returns a plausible sd if let through, over a population that
+    is not the one named, so each raises instead."""
+    with pytest.raises(ValueError, match=message):
+        gate_auc_seed_sd(mutate(members_frame()))

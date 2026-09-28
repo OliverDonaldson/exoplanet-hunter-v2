@@ -197,7 +197,8 @@ def _gate_summary(auc: float, recall: float) -> dict:
     """The smallest summary `evaluate_promotion` gates on the TESS slice."""
     tess = {"n": 2000, "n_positive": 1000, "roc_auc": auc, "pr_auc": auc, "brier": 0.12}
     tess |= {"ece": 0.04, "recall_at_1pct_fpr": recall, "recall_at_5pct_fpr": recall}
-    variance = {"n_models_per_fold": 3, "seed_sd": 0.003, "pooled_gate_recall_seed_sd": 0.03}
+    variance = {"n_models_per_fold": 3, "seed_sd": 0.003, "gate_roc_auc_seed_sd": 0.003}
+    variance["pooled_gate_recall_seed_sd"] = 0.03
     return {
         "summary": {
             "test_roc_auc": {"mean": auc, "std": 0.002},
@@ -225,3 +226,21 @@ def test_objection_reads_the_sign_the_gate_writes():
 def test_objection_raises_on_an_unsigned_recall_margin():
     with pytest.raises(ValueError, match="no signed margin"):
         power._objection(["shortlist recall margin 0.0383 is within 1.5x of its floor"])
+
+
+def test_the_study_term_is_the_library_term(tmp_path):
+    """#123's condition 1 on a synthetic run. `tess_seed_sd` raises when the library
+    term, which the trainers write, differs from its own by over 1e-12 relative."""
+    import pandas as pd
+
+    rng = np.random.default_rng(3)
+    label = np.tile([1, 0], 100)
+    frame = pd.DataFrame(
+        {"tic_id": np.arange(200), "fold": np.arange(200) // 2 % 5, "y_true": label}
+    ).assign(mission=np.where(np.arange(200) < 150, "TESS", "Kepler"))
+    for member in range(3):
+        frame[f"member_score_{member}"] = label + rng.normal(0, 1.0, 200)
+    frame.to_parquet(tmp_path / "predictions.parquet")
+    measured = power.tess_seed_sd({}, tmp_path, pd.DataFrame())
+    assert measured is not None and measured.df == 10
+    assert measured.library == pytest.approx(measured.corrected, rel=1e-12)

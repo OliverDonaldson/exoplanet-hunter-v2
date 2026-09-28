@@ -30,6 +30,7 @@ Result: docs/experiments/p2-1-power-analysis-2026-09-14.md.
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
@@ -591,6 +592,7 @@ class TessSeedSd(NamedTuple):
     corrected: float  # within_fold / c4(df + 1): the term the gate reads
     members: int
     source: Path
+    library: float  # the same term from eval/comparison.py, which the trainers write
 
 
 def tess_seed_sd(summary: dict, run_dir: Path, missions: pd.DataFrame) -> TessSeedSd | None:
@@ -624,7 +626,14 @@ def tess_seed_sd(summary: dict, run_dir: Path, missions: pd.DataFrame) -> TessSe
     df = len(variances) * (len(members) - 1)
     within = float(np.sqrt(np.mean(variances)))
     fold_pooled = float(np.std(aucs(tess), ddof=1))
-    return TessSeedSd(fold_pooled, within, df, within / _c4(df + 1), len(members), path)
+    corrected = within / _c4(df + 1)
+    # #123's condition 1, checked on every run this measures.
+    from exoplanet_hunter.eval.comparison import gate_auc_seed_sd
+
+    library = gate_auc_seed_sd(frame.assign(label=frame[y_col]))["gate_roc_auc_seed_sd"]
+    if abs(library - corrected) > 1e-12 * corrected:
+        raise ValueError(f"{path}: the library term {library!r} is not the study's {corrected!r}")
+    return TessSeedSd(fold_pooled, within, df, corrected, len(members), path, library)
 
 
 def _with_tess_seed_sd(summary: dict, run_dir: Path, missions: pd.DataFrame) -> dict | None:
@@ -686,6 +695,7 @@ def recheck(against: list[Path], corrected: bool = False) -> None:
             f"{'c4-corr':>9}{'x rec':>7}"
         )
         pooled: dict[Path, tuple[str, TessSeedSd]] = {}
+        gaps: list[float] = []
         for path in runs:
             summary = json.loads(path.read_text())
             variance, n = gate._variance(summary)
@@ -703,6 +713,7 @@ def recheck(against: list[Path], corrected: bool = False) -> None:
                     f"{name:<50}{n:>3}{recorded or float('nan'):>9.5f}  no member scores — refused"
                 )
                 continue
+            gaps.append(abs(measured.library - measured.corrected) / measured.corrected)
             ratio = f"{measured.corrected / recorded:>7.2f}" if recorded else f"{'—':>7}"
             print(
                 f"{name:<50}{n:>3}{recorded or float('nan'):>9.5f}{measured.fold_pooled:>10.5f}"
@@ -722,6 +733,12 @@ def recheck(against: list[Path], corrected: bool = False) -> None:
                 f"{arch:<16}{len(group):>5}{sd_p:>13.5f}{dof_p:>5}{sd_w:>9.5f}{dof_w:>5}"
                 f"{sd_p / sd_w:>7.2f}"
             )
+        # To stderr: stdout is #123's before/after fidelity test and must not move.
+        print(
+            f"#123 condition 1: the library term matches on {len(gaps)} runs, largest "
+            f"relative difference {max(gaps):.1e} against a 1e-12 limit",
+            file=sys.stderr,
+        )
 
     signed = re.compile(r"^recall @1% FPR \S+ vs champion \S+ \(([+-]\d+\.\d+),")
     logs = sorted((ROOT / "models").rglob(PROMOTION_LOG_NAME))
@@ -749,6 +766,10 @@ def recheck(against: list[Path], corrected: bool = False) -> None:
             else applied["recall_tolerance"],
             mission_alarm=applied["mission_alarm"],
             strict=applied["strict"],
+            names=(
+                (path.parent / "cv_summary.json").relative_to(ROOT).as_posix(),
+                str(recorded["champion_summary"]),
+            ),
         )
         margin = next((m[1] for r in decision.reasons if (m := signed.match(r))), None)
         direction = (
@@ -791,7 +812,11 @@ def recheck(against: list[Path], corrected: bool = False) -> None:
             )
             if margin <= 0:
                 continue
-            decision = evaluate_promotion(candidate, champion)
+            decision = evaluate_promotion(
+                candidate,
+                champion,
+                names=(path.relative_to(ROOT).as_posix(), champion_path.as_posix()),
+            )
             floor = decision.thresholds["auc_floor"]
             ratio = f"{margin / floor:.3f}" if floor else "no floor"
             print(

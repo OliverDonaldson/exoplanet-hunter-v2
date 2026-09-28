@@ -15,13 +15,14 @@ scores ranking at every threshold, a follow-up shortlist lives at exactly one.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_auc_score, roc_curve
 
 from exoplanet_hunter.eval.metrics import ClassificationMetrics, classification_metrics
 from exoplanet_hunter.training.calibration import expected_calibration_error
@@ -388,6 +389,63 @@ def pooled_member_draws(predictions: pd.DataFrame) -> dict[str, Any]:
         "pooled_gate_recall_seed_sd": float(np.std(draws, ddof=1)) if len(draws) > 1 else None,
         "pooled_gate_recall_n_draws": len(draws),
         "pooled_gate_n": len(labels),
+    }
+
+
+def _c4(n: int) -> float:
+    """E[s] = c4(n) x sigma over n normal draws. `math.lgamma` because a scipy
+    import here breaks the mypy baseline."""
+    return math.sqrt(2.0 / (n - 1)) * math.exp(math.lgamma(n / 2) - math.lgamma((n - 1) / 2))
+
+
+def gate_auc_seed_sd(predictions: pd.DataFrame) -> dict[str, Any]:
+    """The seed sd the gate's AUC floor reads: each member's ROC-AUC on one fold's
+    gate-mission rows, variances pooled over folds on F(M-1) df, c4-corrected.
+
+    `seed_sd` is this spread over all missions, 1.8x narrower on the re-baseline
+    than the TESS spread the margin carries (#123). Within fold rather than
+    fold-pooled on M-1 df: p2-seed-sd-within-fold-2026-09-27.md §2b.
+    """
+    columns = sorted(
+        (c for c in predictions.columns if c.startswith(MEMBER_SCORE_PREFIX)),
+        key=lambda c: int(c.removeprefix(MEMBER_SCORE_PREFIX)),
+    )
+    if len(columns) < 2:
+        return {"gate_roc_auc_seed_sd": None, "gate_roc_auc_seed_df": 0}
+    if "fold" not in predictions.columns:
+        raise ValueError(
+            f"{len(columns)} member columns and no fold column, so there is no within-fold "
+            "spread to measure; the pooled spread is a different statistic"
+        )
+    gate = (
+        predictions[predictions[MISSION_COLUMN] == GATE_MISSION]
+        if MISSION_COLUMN in predictions.columns
+        else predictions.iloc[:0]
+    )
+    if gate.empty:
+        # Measured nothing, which is a null and not a failure, as for recall above.
+        return {"gate_roc_auc_seed_sd": None, "gate_roc_auc_seed_df": 0}
+    if not np.all(np.isfinite(gate[columns].to_numpy(dtype=float))):
+        raise ValueError(
+            f"a member score is not finite on the {GATE_MISSION} rows; the folds did not "
+            "all train the same number of members"
+        )
+    if gate["fold"].isna().any():
+        raise ValueError(f"{int(gate['fold'].isna().sum())} {GATE_MISSION} rows carry no fold")
+    variances = []
+    for fold, rows in gate.groupby("fold"):
+        labels = rows["label"].to_numpy(dtype=int)
+        if len(np.unique(labels)) < 2:
+            raise ValueError(
+                f"fold {fold}'s {GATE_MISSION} slice is single-class over {len(labels)} rows, "
+                "so no member has an AUC there"
+            )
+        aucs = [float(roc_auc_score(labels, rows[c].to_numpy(dtype=float))) for c in columns]
+        variances.append(float(np.var(aucs, ddof=1)))
+    df = len(variances) * (len(columns) - 1)
+    return {
+        "gate_roc_auc_seed_sd": math.sqrt(float(np.mean(variances))) / _c4(df + 1),
+        "gate_roc_auc_seed_df": df,
     }
 
 
