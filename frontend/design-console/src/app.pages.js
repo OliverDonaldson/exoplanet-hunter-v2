@@ -1725,30 +1725,34 @@ function aboutSections() {
 
   return [
     ['What this is', `
-      <p>This vets transiting-planet candidates. It does not search for them.</p>
+      <p>This vets transiting-planet candidates. It does not search for them yet.</p>
       <p>The input is a signal somebody has already flagged, carrying a published
       ephemeris: a TESS Object of Interest, a Kepler Object of Interest, a K2
       candidate. The output is a calibrated probability that the signal is a
       planet rather than an eclipsing binary, a blend, or an instrumental
-      artefact. Ranking a shortlist for follow-up is the job. Finding new signals
-      in raw photometry is a different job, and it is deliberately out of scope
-      rather than unfinished.</p>
+      artefact. Ranking a shortlist for follow-up is the job today. Finding new
+      signals in raw photometry is where the project is headed: the search code
+      exists, and it waits until the ranker it would feed is accurate enough to
+      trust.</p>
       <p><b>Why that job is worth doing.</b> Confirming a planet costs telescope
       time, and there are far more candidates than nights. The held-out catalogue
       this console lists is 12,472 rows, of which 5,104 are genuinely unresolved:
       flagged by a detection pipeline, never adjudicated. A ranking that puts real
       planets near the top of a short list is worth more than one that is right on
       average, because nobody observes the average.</p>
-      <p>It is a portfolio piece built on the machine-learning workflow taught in
-      DATA 301 at Victoria University of Wellington: formalise, collect,
-      preprocess, select, train, evaluate, report. The
+      <p>It is a portfolio piece that grew out of a Data Science degree at
+      Victoria University of Wellington. The network and its data pipeline come
+      from DATA 305, the cross-validated evaluation from DATA 303, the paired and
+      blocked designs behind its injection tests from STAT 292 and STAT 293, and
+      the way it is written up from DATA 301. The
       <a href="${REPORT_URL}" target="_blank" rel="noopener">report</a> is the
       deliverable that carries the evidence for everything on this page.</p>`],
 
     ['The data', `
       <p>Labels come from archive dispositions, one row per host star, with
       duplicates removed before splitting so no star can appear in two folds.
-      <b>5,812 labelled rows</b>: TESS 2,782, Kepler 2,500, K2 530. Confirmed and
+      <b>5,826 labelled rows</b> at the 13 September 2026 refresh: TESS 2,796,
+      Kepler 2,500, K2 530. Confirmed and
       known planets are positive; false positives and refuted signals are
       negative. Anything still dispositioned "candidate" is held out entirely,
       never trained on and never evaluated on, because its label is the thing
@@ -1761,10 +1765,10 @@ function aboutSections() {
       contaminated with undiscovered planets, and every recall figure on this page
       would be optimistic by an unknown amount.</p>
       <p><b>The Kepler count is a cap, not a population.</b> Exactly 1,250 / 1,250
-      is the signature of a configured balanced subsample. Roughly 2,748 eligible
-      confirmed planets and 3,813 eligible false positives exist under the same
-      criteria, so the served model trained on about 45% less Kepler data than was
-      available to it. The subsample is unbiased with respect to anything
+      is the signature of a configured balanced subsample. 1,945 eligible
+      confirmed planets and 3,719 eligible false positives exist under the same
+      criteria, so the served model sees 44% of the Kepler rows available to it.
+      The subsample is unbiased with respect to anything
       astrophysical and stable across refreshes, but it costs statistical power in
       a project that has none to spare.</p>
       <p><b>The served run saw no K2 rows at all.</b> They were added to the
@@ -1780,30 +1784,38 @@ function aboutSections() {
       flattens the dip it exists to preserve. It is then phase-folded at the
       published ephemeris, or at a box-least-squares period where none is
       published.</p>
-      <p>That fold becomes two views. The <b>global view</b> is 2,001 bins across
-      the whole phase and carries orbital shape and any secondary eclipse. The
-      <b>local view</b> is 201 bins across ±3 transit durations and carries the
-      transit's own profile at a resolution the global view cannot afford. Nine
-      auxiliary scalars ride alongside: stellar temperature, radius, log g,
-      magnitude, depth, duration, log period, pink S/N and centroid S/N. All of
-      them are built by the one function that training and serving both call, so
-      the two cannot drift apart.</p>
+      <p>That fold becomes two views, on the design of Shallue and Vanderburg: a
+      <b>global view</b> of 2,001 bins meant to span the whole orbit, where a
+      secondary eclipse would show, and a <b>local view</b> of 201 bins meant to
+      span ±3 transit durations and carry the transit's shape. <b>The served
+      model's views do not do that.</b> An audit on 14 September 2026 found the
+      fold window is written in phase but applied in days, so the served global
+      view spans ±0.5 day around the transit, a tenth of a 10-day orbit with no
+      secondary eclipse in it, and the local view spans ±3/P transit durations,
+      inside the transit itself for periods beyond six days. The fix changes every
+      model input, so it lands with the next retrain rather than under the served
+      model.</p>
+      <p>Nine auxiliary scalars ride alongside: stellar temperature, radius, log g,
+      magnitude, depth, duration, log period, catalogue S/N and centroid S/N. One
+      function builds them for training and for scoring, but the live service
+      currently passes no depth when it scores; measured, that moves TESS ROC-AUC
+      by 0.002, and it is being fixed.</p>
       <p>The model is a dual-view 1-D CNN after Shallue and Vanderburg, trained
-      with 5-fold cross-validation grouped by host star, Platt-calibrated per fold
-      on that fold's own held-out logits. Each fold trains until validation
+      with 5-fold cross-validation on one row per host star, so no star is in two
+      folds, and Platt-calibrated per fold on that fold's own validation logits. Each fold trains until validation
       ROC-AUC has not improved for 25 epochs, then restores the weights from its
       best epoch; the Model page shows those curves and marks the epoch that
       shipped. Uncertainty is Monte-Carlo dropout at inference.</p>
       <p><b>Nothing ships without clearing a gate.</b> A candidate run is scored
       on the same folds as the champion and has to beat it on the decision metric
-      — ROC-AUC since 14 September 2026 — by more than that metric's own noise,
+      (ROC-AUC since 14 September 2026) by more than that metric's own noise,
       without degrading calibration or shortlist recall. The weekly refresh runs
       that gate every week and never applies it: it is there to watch for drift
       and to keep the champion's calibration measured on current data, and
       promoting anything is a decision a person makes with the evidence in front
       of them. ${run} is what answers this
       console${SERVED.promotedAt ? `, promoted ${esc(SERVED.promotedAt)}` : ''}.
-      The gate has returned no to every candidate since.</p>`],
+      It has promoted nothing since.</p>`],
 
     ['What it scores', `
       <p>Every figure here is out of fold: each candidate is scored by the one
@@ -1843,10 +1855,13 @@ function aboutSections() {
               <td>${kepler ? pmSd(kepler.brier, kepler.brierErr) : '—'}</td></tr>
         </tbody>
       </table></div>
-      <p><b>The gap between those two columns is the honest headline.</b> Kepler
-      is four years of continuous staring at one field; TESS is 27 days per sector
-      on most of the sky. The same model reads one far better than the other, and
-      TESS is the harder one, so TESS is what the gate is allowed to look at.</p>
+      <p><b>The gap between those two columns is the honest headline.</b> Part of
+      it is the data: Kepler stared at one field for four years, while TESS gets
+      27 days per sector on most of the sky. Part of it is the labels: Kepler's
+      labelled classes sit at the Robovetter's confident extremes, and a tree model
+      given no light-curve views at all shows the same gap. TESS is the harder
+      case and the one new discoveries come from, so TESS is what the gate is
+      allowed to look at.</p>
       <p>On the most recent bulk pass, 3,919 of 4,685 attempted candidates scored;
       744 had no light curve at MAST and 22 failed preprocessing. Of those scored,
       <b>82.85% score at or above 0.5</b> and 1.28% at or above 0.9. That
@@ -1891,7 +1906,7 @@ function aboutSections() {
       ablated, and ensembled across ten recorded model-selection rows.</p>
       <p><b>It lost.</b> Across three runs it scored 0.238, 0.126 and 0.145 TESS
       shortlist recall against the champion's 0.307, on a decision floor of 0.034:
-      rejections at up to 4.8 times the floor, not close calls. A capacity arm
+      rejections at up to 4.8 times the floor, two of them by wide margins. A capacity arm
       closed the "it is simply too small" explanation. A resolution hypothesis was
       falsified in the wrong direction. A difference-image branch, the strongest
       single discriminant for a nearby eclipsing binary, delivered nothing
@@ -1908,10 +1923,15 @@ function aboutSections() {
       the dual-view model was not. It was banked rather than shipped: an ensemble
       of two architectures doubles inference cost on a scale-to-zero deployment,
       and the gate compares single models to the champion.</p>
-      <p>The compute spent on that line bought no improvement to the served model.
-      It bought a documented reason to believe the served model is not being
-      beaten by an obvious alternative, and a demonstration that this project's
-      gate cannot be talked past.</p>`],
+      <p>The compute spent on that line bought no improvement to the served model,
+      and it did not buy a reason to trust it either. On 28 September 2026 an
+      exploratory check ran the obvious alternative that had never been run:
+      gradient-boosted trees on the same folds. Given only the served model's nine
+      scalars, with none of its light-curve views, they match it on TESS ROC-AUC
+      (0.904 against 0.910). Given thirteen standard vetting diagnostics, they beat
+      it (0.933). Every challenger had been compared with a champion that had never
+      been compared with anything simple. A pre-registered version of that
+      baseline is next.</p>`],
 
     ['Known limits', `
       <p><b>How long a star was watched correlates with its label.</b> On TESS the
@@ -1923,12 +1943,13 @@ function aboutSections() {
       on each candidate row so it can be seen rather than taken on trust.</p>
       <p><b>The model sees the star, not only the transit.</b> Stellar parameters
       are inputs, so some of the separation is host-level rather than
-      signal-level.</p>
-      <p><b>There is no classical baseline.</b> A random-forest configuration
-      exists in the repository with a documented rationale, but no scored
-      cross-validated result for it does. The CNN's advantage over classical
-      machine learning is assumed here, not measured, and it is reported as absent
-      rather than quietly omitted.</p>
+      signal-level. With no transit injected at all, 26% of injection tests still
+      clear the model's threshold: 12% on false-positive hosts and 47% on planet
+      hosts.</p>
+      <p><b>The classical baseline has only been run informally.</b> The check in
+      section 06 is the first scored result for one, and it is not in the served
+      model's favour. Until it is repeated under the project's own
+      pre-registration it is a finding to act on, not a verdict.</p>
       <p><b>The decision metric is a statistic on eight to ten rows.</b> Recall at
       1% FPR is cut at the tenth-highest negative score, which gives it a sampling
       standard deviation of 0.0437. Any architecture difference below roughly 0.09
@@ -1987,7 +2008,8 @@ function About() {
           <h1 style="font-family:'Anurati';font-size:clamp(2rem, 4vw, 3.5rem);font-weight:700;letter-spacing:-0.03em;color:#F0EEE8;line-height:1.0;margin-bottom:1.25rem">EXOPLANET HUNTER.</h1>
           <p style="font-family:'Inter';font-size:0.9rem;line-height:1.7;color:#8A8FA8;max-width:64ch;margin:0">
             A calibrated deep-learning pipeline for vetting transit candidates in NASA
-            TESS, Kepler and K2 photometry.
+            TESS and Kepler photometry. Vetting comes first; discovery is where it
+            is headed.
           </p>
         </div>
       </div>
