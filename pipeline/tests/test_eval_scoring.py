@@ -127,6 +127,7 @@ def ensembled(n_tess: int = 60, n_members: int = 3) -> pd.DataFrame:
             "tic_id": np.arange(n_tess),
             "label": label,
             "score": score,
+            "fold": np.arange(n_tess) // 2 % 5,
             "mission": "TESS",
             "protocol": Protocol.OUT_OF_FOLD,
         }
@@ -144,6 +145,8 @@ def test_summary_from_member_scores_carries_the_floor():
     assert variance["n_models_per_fold"] == 3
     assert variance["pooled_gate_recall_n_draws"] == 3
     assert variance["pooled_gate_recall_seed_sd"] > 0.0
+    assert variance["gate_roc_auc_seed_df"] == 10  # #123's term, 5 folds x (3 - 1)
+    assert variance["gate_roc_auc_seed_sd"] > 0.0
 
 
 def test_reported_floor_can_size_a_gate_tolerance():

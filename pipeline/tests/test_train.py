@@ -80,7 +80,8 @@ def write_predictions(cv_root: Path, n_members: int, n_folds: int, *, mission: b
     The two classes overlap. Perfectly separated scores put recall at 1.0 for
     every member, and a floor of exactly zero cannot be told apart from one that
     was never measured — which is the failure these fixtures exist to catch.
-    Each member is jittered independently so the pooled draws differ.
+    Each member is jittered independently so the pooled draws differ. Folds take
+    rows in label pairs so each holds both classes, as a stratified split does.
     """
     rng = np.random.default_rng(0)
     n = len(MISSIONS)
@@ -90,7 +91,7 @@ def write_predictions(cv_root: Path, n_members: int, n_folds: int, *, mission: b
         {
             "row": np.arange(n),
             "tic_id": np.arange(n) + 1,
-            "fold": np.arange(n) % n_folds,
+            "fold": np.arange(n) // 2 % n_folds,
             "y_true": label,
             "prob_raw": score,
             "prob_calibrated": score,
@@ -215,6 +216,15 @@ def test_summary_carries_a_floor_the_gate_can_size_from(aggregate):
     assert variance["pooled_gate_recall_n_draws"] == 3
     assert len(variance["pooled_gate_recall"]) == 3
     assert variance["pooled_gate_n"] == MISSIONS.count("TESS")
+
+
+def test_the_gate_auc_term_is_written_beside_seed_sd(aggregate):
+    """#123: the term the AUC floor reads, on 2 folds x (3 - 1) df of TESS rows."""
+    variance = aggregate([[0.90, 0.92, 0.94], [0.80, 0.82, 0.84]])["summary"]["variance"]
+    assert variance["gate_roc_auc_seed_df"] == 4
+    assert variance["gate_roc_auc_seed_sd"] > 0.0
+    single = aggregate([[0.91], [0.89]])["summary"]["variance"]
+    assert single["gate_roc_auc_seed_sd"] is None and single["gate_roc_auc_seed_df"] == 0
 
 
 def test_one_member_reports_no_recall_floor_not_a_zero_one(aggregate):

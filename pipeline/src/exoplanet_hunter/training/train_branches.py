@@ -38,6 +38,7 @@ from exoplanet_hunter.datasets.viewset_pipeline import (
 from exoplanet_hunter.datasets.viewset_tfrecords import list_shards, load_index, load_metadata
 from exoplanet_hunter.eval.comparison import (
     MISSION_COLUMN,
+    gate_auc_seed_sd,
     per_mission_summary,
     pooled_member_draws,
     recall_at_fpr,
@@ -148,6 +149,7 @@ def _variance_decomposition(rows: list[dict]) -> dict[str, float | None]:
     Reported for every entry in `VARIANCE_COMPONENTS`, so recall @1% FPR — the
     criterion that has done all the rejecting — carries an error bar. Purely
     additive: the gate reads named keys and the AUC pair keeps its unprefixed names.
+    That `seed_sd` is all missions, within fold; the gate reads `gate_roc_auc_seed_sd`.
     """
     decomposition: dict[str, float | None] = {}
     for key, prefix in VARIANCE_COMPONENTS:
@@ -670,6 +672,7 @@ def run_cv(
     summary["variance"] = {
         **_variance_decomposition(rows),
         **pooled_member_draws(all_predictions),
+        **gate_auc_seed_sd(all_predictions),
     }
 
     per_mission = per_mission_summary(all_predictions)

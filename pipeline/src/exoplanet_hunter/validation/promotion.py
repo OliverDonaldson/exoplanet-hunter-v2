@@ -315,6 +315,10 @@ POOLED_SEED_SD = 0.0062
 #: `train.py` writes that block only past one member. Divided by the CANDIDATE's
 #: count until 2026-09-17, which understated the floor ~1.9x at five (#94).
 CHAMPION_MEMBERS_WHEN_UNMEASURED = 1
+#: The AUC floor's seed term: per-member TESS ROC-AUC, within fold (#123). The
+#: `seed_sd` beside it is all missions, kept for the record and never read here.
+GATE_AUC_SEED_SD = "gate_roc_auc_seed_sd"
+UNNAMED = ("the candidate summary", "the champion summary")
 
 
 def _variance(summary: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
@@ -323,8 +327,25 @@ def _variance(summary: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
     return variance, int(n_models) if n_models and n_models >= 1 else None
 
 
+def _require_gate_auc_term(summary: dict[str, Any], name: str) -> None:
+    """Refuse a multi-member summary written before #123: reading its `seed_sd`
+    instead is the defect. One member has no spread to read, which is #137."""
+    variance, n_models = _variance(summary)
+    if n_models is not None and n_models > 1 and variance.get(GATE_AUC_SEED_SD) is None:
+        raise ValueError(
+            f"{name} records {n_models} members per fold and no {GATE_AUC_SEED_SD}, the "
+            f"{GATE_MISSION}-slice seed sd the AUC floor has read since #123. Re-summarise "
+            "its predictions to a NEW path, never over the original: python pipeline/"
+            "scripts/evaluate.py summarise --predictions <run>/predictions.parquet "
+            "--protocol oof --out <new dir>/cv_summary.json"
+        )
+
+
 def decision_floor(
-    summary: dict[str, Any], champion: dict[str, Any] | None = None
+    summary: dict[str, Any],
+    champion: dict[str, Any] | None = None,
+    *,
+    names: tuple[str, str] = UNNAMED,
 ) -> DecisionFloor:
     """Resolvable margins, by stage 6's rule applied to what is being compared.
 
@@ -342,6 +363,8 @@ def decision_floor(
     `Verdict.UNRESOLVED`, which catches a margin comparable to its own floor.
     Pre-registered in `docs/experiments/refresh-gate-calibration-4-1.md`.
     """
+    _require_gate_auc_term(summary, names[0])
+    _require_gate_auc_term(champion or {}, names[1])
     variance, n_models = _variance(summary)
     if n_models is None:
         return DecisionFloor(None, None, "no variance block — run with --n-models-per-fold")
@@ -365,7 +388,7 @@ def decision_floor(
             borrowed.append(key)
         return 2.0 * math.sqrt(term)
 
-    auc = floor("seed_sd", POOLED_SEED_SD)
+    auc = floor(GATE_AUC_SEED_SD, POOLED_SEED_SD)
     recall = floor("pooled_gate_recall_seed_sd", POOLED_RECALL_SEED_SD)
     source = f"2 x se(candidate - champion), n={n_models}"
     if borrowed:
@@ -680,6 +703,7 @@ def evaluate_promotion(
     mission_alarm: float = 0.02,
     allow_unmatched_populations: bool = False,
     strict: bool = False,
+    names: tuple[str, str] = UNNAMED,
 ) -> PromotionDecision:
     """Compare a candidate cv_summary against the champion's.
 
@@ -722,7 +746,7 @@ def evaluate_promotion(
         )
         header = "gated on pooled CV means — a summary here predates the per_mission block"
 
-    floor = decision_floor(candidate, champion)
+    floor = decision_floor(candidate, champion, names=names)
     if recall_tolerance is None:
         recall_tolerance = floor.recall if floor.recall is not None else LEGACY_RECALL_TOLERANCE
 
