@@ -70,7 +70,7 @@ const heroNotes = () => topScored(HERO_NOTE_POSITIONS.length).map((c, i) => ({
 }));
 
 const PIPELINE = [
-  { step:'01', title:'Catalog Refresh',  desc:'Automated ingestion from NASA ExoFOP, MAST, and the Kepler archive. Refreshed weekly, behind seven validation gates.' },
+  { step:'01', title:'Catalog Snapshot', desc:'Ingested from NASA ExoFOP, MAST, and the Kepler archive, behind seven validation gates. A frozen snapshot: the weekly refresh was retired in October 2026.' },
   { step:'02', title:'Validation Gates', desc:'Multi-stage quality filters: centroid shift, secondary eclipse, odd-even depth, ghost diagnostic.' },
   { step:'03', title:'GPU Training',     desc:'On-demand 11-branch CNN training on phase-folded light curves. Platt scaling for calibration.' },
   { step:'04', title:'Live Scoring',     desc:'Calibrated probability with per-fold agreement and MC-dropout spread. A cold score fetches photometry from MAST: usually 30-60 s, sometimes three minutes.' },
