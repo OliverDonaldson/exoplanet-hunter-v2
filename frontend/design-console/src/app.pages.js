@@ -1777,8 +1777,9 @@ function aboutSections() {
       of numbers transferred from a mission it did.</p>`],
 
     ['How it works', `
-      <p>A weekly refresh pulls the dispositions and ephemerides, runs the
-      validation gates, and rebuilds whatever changed. A candidate's light curve
+      <p>The catalogue is a frozen snapshot. A weekly refresh pulled the
+      dispositions and ephemerides, ran the validation gates and rebuilt whatever
+      changed until it was retired in October 2026. A candidate's light curve
       is stitched across sectors or quarters and detrended with the in-transit
       points held out of the fit, because a filter fitted through the transit
       flattens the dip it exists to preserve. It is then phase-folded at the
@@ -1809,13 +1810,13 @@ function aboutSections() {
       <p><b>Nothing ships without clearing a gate.</b> A candidate run is scored
       on the same folds as the champion and has to beat it on the decision metric
       (ROC-AUC since 14 September 2026) by more than that metric's own noise,
-      without degrading calibration or shortlist recall. The weekly refresh runs
-      that gate every week and never applies it: it is there to watch for drift
-      and to keep the champion's calibration measured on current data, and
-      promoting anything is a decision a person makes with the evidence in front
-      of them. ${run} is what answers this
+      without degrading calibration or shortlist recall. The weekly refresh ran
+      that gate every week until it was retired in October 2026, and never applied
+      it: it was there to watch for drift and to keep the champion's calibration
+      measured on current data, and promoting anything is a decision a person makes
+      with the evidence in front of them. ${run} is what answers this
       console${SERVED.promotedAt ? `, promoted ${esc(SERVED.promotedAt)}` : ''}.
-      It has promoted nothing since.</p>`],
+      Nothing has been promoted since.</p>`],
 
     ['What it scores', `
       <p>Every figure here is out of fold: each candidate is scored by the one

@@ -35,7 +35,7 @@ The record of what was measured is `docs/experiments/` (frozen), the weaknesses
     run the path and check the artefact before writing "done".
 12. Tests: `make test` for the fast suites; anything touching `train*.py` runs
     one process per file. Experimental arms are written outside `models/cv/`.
-13. The weekly refresh runs from this working tree every Saturday at 09:00 and
-    executes whatever branch is checked out. Leave the tree on a branch whose
-    pipeline code is tested, and commit the DVC pointers it rewrites as a
-    separate `data:` commit.
+13. The weekly refresh is retired (October 2026): its launchd agent is disabled
+    and v2 is frozen as the live site while v3 is built. Do not re-enable it or
+    run `make refresh` unless Ollie asks; no branch needs to stay checked out
+    for it.
